@@ -1,26 +1,12 @@
-import { Slider as SliderPrimitive } from '@base-ui/react/slider';
+import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 
-import { cn } from '@/lib/utils';
+import { cn } from "@/lib/utils";
 
-function Slider({
-  className,
-  defaultValue,
-  value,
-  min = 0,
-  max = 100,
-  ...props
-}: SliderPrimitive.Root.Props) {
-  const _values = Array.isArray(value)
-    ? value
-    : Array.isArray(defaultValue)
-      ? defaultValue
-      : [min, max];
-
+function Slider({ className, value, min = 0, max = 100, ...props }: SliderPrimitive.Root.Props) {
   return (
     <SliderPrimitive.Root
-      className={cn('data-horizontal:w-full data-vertical:h-full', className)}
+      className={cn("data-horizontal:w-full data-vertical:h-full", className)}
       data-slot="slider"
-      defaultValue={defaultValue}
       value={value}
       min={min}
       max={max}
@@ -37,13 +23,10 @@ function Slider({
             className="bg-primary select-none data-horizontal:h-full data-vertical:w-full"
           />
         </SliderPrimitive.Track>
-        {Array.from({ length: _values.length }, (_, index) => (
-          <SliderPrimitive.Thumb
-            data-slot="slider-thumb"
-            key={index}
-            className="border-ring ring-ring/50 relative size-3 rounded-full border bg-white transition-[color,box-shadow] after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
-          />
-        ))}
+        <SliderPrimitive.Thumb
+          data-slot="slider-thumb"
+          className="border-ring ring-ring/50 relative size-3 rounded-full border bg-white transition-[color,box-shadow] after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
+        />
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>
   );

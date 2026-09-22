@@ -11,11 +11,6 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/.vinext/
-/out/
-
 # misc
 .DS_Store
 *.pem
@@ -31,9 +26,11 @@ yarn-error.log*
 
 # deployment and generated files
 .vercel
-next-env.d.ts
 /dist/
-/.wrangler/
 /outputs/
 /work/
 *.tsbuildinfo
+
+# Local source archives; extracted runtime assets are tracked in public/
+/EXMO_Segmentation_Atlas.html
+/[[]엑스모] 로고 디자인_f_260824.zip

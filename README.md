@@ -1,64 +1,94 @@
-# Human Atlas
+# EXMO Segmentation Atlas
 
-An interactive 3D anatomy explorer built with React, Three.js, and shadcn/ui. Take the BodyParts3D adult male reference apart into **2,234 individually selectable meshes**, explore **15 anatomical systems**, and search **3,432 named concepts**.
+EXMO case **1001921** as a responsive React / Three.js application. The supplied
+HTML's 27 meshes, class names and colors replace the fork's BodyParts3D viewer.
+The original HTML is kept intact.
 
-**[Explore the live demo](https://human-atlas-seven.vercel.app)**
+## Run
 
-## Explore
-
-- Orbit, zoom, and select structures directly on the body.
-- Toggle individual systems or use skeleton and organ presets.
-- Move from assembled anatomy to a spaced inventory of every visible piece.
-- Search anatomical names and source identifiers.
-- Isolate a selected structure and read its details.
-- Use compact controls and detail panels on mobile.
-
-## Run locally
-
-Requires Node.js 22.13 or newer. No API keys or accounts are needed.
+Requires Node.js 22.13 or newer.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open http://localhost:3016. To build the static site, run `npm run build`; the output is in `dist/`.
-
-## Validate
+Open http://127.0.0.1:3016. No API key or backend is required.
 
 ```sh
+npm test
 npm run check
-node scripts/validate-atlas.mjs
-node scripts/validate-interactions.mjs
 npm run build
+npm run preview
 ```
 
-Validation covers mesh buffers, names and concept membership, nonoverlapping exploded layouts at desktop and mobile aspect ratios, search and inspection contracts, and tap-versus-drag handling. Browser interaction checks have exercised selection, system controls, search, isolation, rotation, and 390×844, 320×568, and 844×390 layouts. Phone controls stay clear of the exploded inventory, and isolated structures fit the space above or beside the detail panel. Physical-device performance and real multitouch hardware have not been tested.
+The production preview uses http://127.0.0.1:3017. Static deployment files are
+written to `dist/`; the existing Vercel configuration supports this build.
+Development and preview servers bind to the local machine by default.
 
-## Anatomy data
+## Explore
 
-The current viewer uses **BodyParts3D 4.0**, an adult male reference anatomy, licensed **CC BY 4.0**. It does not represent every human structure or variation. Individual source meshes are distinct from named concepts, which may group multiple meshes. Descriptions distinguish general system context from individual organ explanations.
+- Search all 27 structures by display name, source ID, or group. Search also
+  resolves corrected names such as **Multifidus** → `mulifidus`.
+- In the assembled view, click model parts or library rows to add/remove classes
+  from a multiple selection. Selected classes remain visible across group filters,
+  so bones and muscles can be inspected together. Background click or Esc clears all.
+- Isolate the selected classes, hide individual classes, or adjust surrounding opacity.
+- Filter by Lower Body (24 classes), All (27), or one of seven anatomical groups.
+- Separate visible classes with the Explode anatomy button in 1.7 seconds;
+  Assemble anatomy reverses the transition. In the separated state, the front view
+  prevents overlap; drag or use arrow keys to pan the separated inventory.
+- In the exploded view, select one class and right-drag to rotate it about its own
+  center (or focus the canvas and use Shift + arrow keys). Deselecting, selecting
+  another class, Assemble, or Reset restores its orientation over 0.7 seconds.
+  Reduced-motion preferences make this return immediate.
+- Use Front, Back, Side, and 3/4 camera presets, automatic rotation, and Reset.
+- Drag to orbit, scroll/pinch to zoom, right-drag/two-finger drag to pan.
+  Focus the canvas for arrow-key navigation and +/− zoom.
+- Press **/** to search and **Esc** to clear selection. Sliders support keyboard
+  controls. The library switches to a dedicated panel on small screens.
 
-Geometry is simplified for browser performance while retaining every source mesh. The packaged model contains 2,288,268 triangles and downloads approximately 33 MB of compressed geometry. Full credits, source links, and adaptation details are in [ATTRIBUTION.md](public/ATTRIBUTION.md).
+The optional browser WebMCP tools `find_anatomy` and
+`inspect_anatomical_structure` use the same catalogue and selection behavior.
 
-This is an educational explorer, not a diagnostic or surgical tool.
+## Source data
 
-## How it works
+`public/models/exmo-1001921.glb` is a **7,660,116-byte**, byte-for-byte extraction
+of the supplied HTML model: **212,316 vertices / 424,456 triangles**. It requires
+no external textures or model services.
 
-Geometry is merged into batches. Per-structure GPU textures control translation, visibility, and selection, while component geometry supports accurate picking. Exploded layouts pack only the visible pieces. Rendering updates when the scene changes; orbit controls remain responsive without thousands of separate draw calls.
+To regenerate it, place the original `EXMO_Segmentation_Atlas.html` at the
+repository root and run `npm run extract:model`. Extraction reads the embedded
+base64 payload without executing the HTML. The packaged GLB is sufficient for
+normal development and builds.
 
-The optional WebMCP tools expose anatomy search and inspection in compatible browsers. The visible interface works without them.
+The renderer preserves each node's transform, centers and uniformly scales the
+scene, computes the missing normals, and applies EXMO physical materials with
+rim lighting. It disposes graphics resources when reloaded or unmounted.
 
-## Rebuilding geometry
+The previous BodyParts3D assets and conversion pipeline are available in Git
+history. They are no longer copied into this application's build.
 
-The repository includes browser-ready geometry. Rebuilding it is optional: obtain the official BodyParts3D OBJ archive and English metadata tables, prepare the joined concepts and display-system mappings, run `scripts/convert-anatomy.py`, then `node scripts/optimize-anatomy.mjs` and `node scripts/compress-models.mjs`. Simplification uses a 0.2% relative error limit per structure.
+## Validation
 
-## Deploy
+`npm test` checks GLB headers and buffers, finite coordinates, valid triangle
+indices, transforms, exact class membership, counts, aliases, selection and
+visibility transitions, and WebMCP input validation. It also checks exploded
+layout overlap at five aspect ratios for all nine filters, camera framing in
+all four directions, and tap/drag/multitouch cancellation.
 
-Import this repository into Vercel as a Vite project. The included `vercel.json` configures `npm ci`, `npm run build`, and the `dist` output directory. It can also be served by a static host.
+Browser checks cover direct model selection, search, isolation, opacity,
+separation, camera presets, and responsive layouts at 1440×900, 390×844,
+320×568, and 667×375. Physical mobile GPU performance and hardware multitouch
+still require device testing.
 
-## License
+## Scope and credits
 
-Original application code is released under the [MIT License](LICENSE). **The anatomy data has its own CC BY 4.0 license**; preserve the attribution when redistributing it. Third-party dependencies retain their respective licenses.
+This is the EXMO 3D viewer frontend for one supplied case. Authentication,
+case storage, file uploads, server-side segmentation, and clinical
+interpretation are separate features.
 
-Issues and pull requests are welcome. Please include reproduction steps and browser/device details for interaction problems.
+Application code retains the upstream [MIT license](LICENSE).
+The supplied model has separate rights; no model license was stated in the
+source HTML. Source hashes, adaptation details and historical credits are in
+[ATTRIBUTION.md](public/ATTRIBUTION.md).

@@ -1,134 +1,610 @@
-import {useEffect,useRef} from 'react';
-import * as T from 'three';
-import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls.js';
-import {RoomEnvironment} from 'three/examples/jsm/environments/RoomEnvironment.js';
-import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import {createExplosionLayout} from './explosion-layout';
-import {decodeModelResponse} from './model-download';
-import {PointerTap} from './pointer-tap';
-import {SYSTEMS,type Atlas,type SceneState} from './anatomy';
-interface Props {atlas:Atlas;state:SceneState;onSelect:(id:string)=>void;onProgress:(n:number)=>void;onError:(s:string)=>void}
-export default function AnatomyScene({atlas,state,onSelect,onProgress,onError}:Props){
- const host=useRef<HTMLDivElement>(null),latest=useRef(state),select=useRef(onSelect);
- latest.current=state;select.current=onSelect;
- useEffect(()=>{
-  const el=host.current!;let disposed=false,frame=0,dirty=true,ready=false,lastView='',lastReset=-1,lastIsolate='',layoutKey='',amount=0;
-  let lastState:SceneState|null=null;
-  const abort=new AbortController();
-  let renderer:T.WebGLRenderer;
-  try{renderer=new T.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});}catch{onError('This browser could not start the 3D viewer. Please try a browser with WebGL enabled.');return;}
-  renderer.setPixelRatio(Math.min(devicePixelRatio,innerWidth<768?1.5:2));renderer.setClearColor('#f2f3f3');renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;el.appendChild(renderer.domElement);
-  renderer.domElement.setAttribute('aria-label','Interactive human anatomy. Drag to orbit, pinch or scroll to zoom, and tap a structure to inspect it.');
-  const scene=new T.Scene(),camera=new T.PerspectiveCamera(34,1,.005,100),controls=new OrbitControls(camera,renderer.domElement);
-  camera.position.set(1.4,1.05,3.6);controls.target.set(0,.85,0);controls.enableDamping=true;controls.dampingFactor=.085;controls.minDistance=.07;controls.maxDistance=40;controls.maxPolarAngle=Math.PI*.96;controls.addEventListener('change',()=>{dirty=true;});
-  const pmrem=new T.PMREMGenerator(renderer),room=new RoomEnvironment(),env=pmrem.fromScene(room,.04);scene.environment=env.texture;room.dispose();pmrem.dispose();
-  scene.add(new T.HemisphereLight(0xffffff,0xa7acb2,1.05));
-  const key=new T.DirectionalLight(0xfffaf4,2.3);key.position.set(-2,4,3);scene.add(key);
-  const rim=new T.DirectionalLight(0xe9f0ff,1.8);rim.position.set(2,2,-3);scene.add(rim);
-  const ground=new T.Mesh(new T.CircleGeometry(30,96),new T.MeshStandardMaterial({color:0xd5d9dc,roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.y=-.019;scene.add(ground);
-  const platform=new T.Mesh(new T.CylinderGeometry(.68,.7,.028,100),new T.MeshStandardMaterial({color:0xeeeeec,metalness:.12,roughness:.67}));platform.position.y=-.016;scene.add(platform);
-  const ring=new T.Mesh(new T.RingGeometry(.63,.632,128),new T.MeshBasicMaterial({color:0x8c969f,transparent:true,opacity:.4,side:T.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.y=.001;scene.add(ring);
-  const innerRing=new T.Mesh(new T.RingGeometry(.55,.551,128),new T.MeshBasicMaterial({color:0xa4aeb8,transparent:true,opacity:.16,side:T.DoubleSide}));innerRing.rotation.x=-Math.PI/2;innerRing.position.y=.001;scene.add(innerRing);
-  const width=T.MathUtils.ceilPowerOfTwo(atlas.parts.length),data=new Float32Array(width*4),partTexture=new T.DataTexture(data,width,1,T.RGBAFormat,T.FloatType);partTexture.needsUpdate=true;
-  const selectedData=new Uint8Array(width*4),selectionTexture=new T.DataTexture(selectedData,width,1);selectionTexture.needsUpdate=true;
-  const materials:T.Material[]=[],geometries:T.BufferGeometry[]=[],pickers:(T.Mesh|undefined)[]=[],centers=atlas.parts.map(p=>new T.Vector3().fromArray(p.bounds[0]).add(new T.Vector3().fromArray(p.bounds[1])).multiplyScalar(.5));
-  const offsets:T.Vector3[]=[],bounds=atlas.parts.map(p=>new T.Box3(new T.Vector3().fromArray(p.bounds[0]),new T.Vector3().fromArray(p.bounds[1])));
-  let packingWidth=1,packingHeight=1;
-  const markerPositions=new Float32Array(atlas.parts.length*3),markerGeometry=new T.BufferGeometry();markerGeometry.setAttribute('position',new T.BufferAttribute(markerPositions,3));
-  const markerMaterial=new T.PointsMaterial({color:0x64748b,size:5,sizeAttenuation:false,transparent:true,opacity:.72,depthTest:false});
-  markerMaterial.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif (distance(gl_PointCoord, vec2(0.5)) > 0.5) discard;');};
-  const markers=new T.Points(markerGeometry,markerMaterial);markers.frustumCulled=false;markers.renderOrder=10;markers.visible=false;scene.add(markers);
-  const hover=document.createElement('div');hover.className='part-hover';hover.setAttribute('role','tooltip');hover.hidden=true;el.appendChild(hover);
-  type Target={index:number;x:number;y:number;left:number;right:number;top:number;bottom:number};let targets:Target[]=[];
-  const projected=new T.Vector3();
-  const findTarget=(x:number,y:number,radius:number)=>{
-   let best=-1,score=Infinity;
-   for(const t of targets){const dx=Math.max(t.left-x,0,x-t.right),dy=Math.max(t.top-y,0,y-t.bottom),distance=Math.hypot(dx,dy);if(distance>radius)continue;const candidate=distance+Math.hypot(t.x-x,t.y-y)*.025;if(candidate<score){score=candidate;best=t.index;}}
-   return best;
-  };
-  const materialFor=(system:string)=>{
-   const m=new T.MeshStandardMaterial({color:SYSTEMS.find(s=>s.id===system)?.color??'#aebbb8',metalness:.08,roughness:.53,side:T.DoubleSide,transparent:system==='integumentary',opacity:system==='integumentary'?.1:1,depthWrite:system!=='integumentary'});
-   m.onBeforeCompile=shader=>{
-    shader.uniforms.partState={value:partTexture};shader.uniforms.selectionState={value:selectionTexture};shader.uniforms.stateWidth={value:width};
-    shader.vertexShader='attribute float partIndex; uniform sampler2D partState; uniform sampler2D selectionState; uniform float stateWidth; varying float partVisible; varying float partSelected;\n'+shader.vertexShader;
-    shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvec2 stateUv = vec2((partIndex + 0.5) / stateWidth, 0.5); vec4 state = texture2D(partState, stateUv); transformed += state.xyz; partVisible = state.w; partSelected = texture2D(selectionState, stateUv).r;');
-    shader.fragmentShader='varying float partVisible; varying float partSelected;\n'+shader.fragmentShader;
-    shader.fragmentShader=shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif (partVisible < 0.5) discard;');
-    shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.85, 0.78), partSelected * 0.75);');
-   };materials.push(m);return m;
-  };
-  const mats=new Map(SYSTEMS.map(s=>[s.id,materialFor(s.id)]));
-  let loaded=0;
-  const loadChunk=async(ci:number)=>{
-   const chunk=atlas.chunks[ci],compressed=!!chunk.gzip&&typeof DecompressionStream!=='undefined';const response=await fetch(compressed?chunk.gzip!:chunk.url,{signal:abort.signal});const buffer=await decodeModelResponse(response,chunk.bytes,compressed);if(disposed)return;
-   const groups=new Map<string,T.BufferGeometry[]>();
-   atlas.parts.forEach((p,i)=>{
-    if(p.chunk!==ci)return;
-    const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(new Float32Array(buffer,p.positions,p.vertexCount*3),3));
-    // GPU normalized signed-short normals keep the complete atlas compact in memory.
-    g.setAttribute('normal',new T.BufferAttribute(new Int16Array(buffer,p.normals,p.vertexCount*3),3,true));g.setIndex(new T.BufferAttribute(new Uint32Array(buffer,p.indices,p.indexCount),1));
-    g.boundingBox=bounds[i].clone();g.computeBoundingSphere();const pick=new T.Mesh(g);pick.matrixAutoUpdate=false;pickers[i]=pick;geometries.push(g);
-    g.setAttribute('partIndex',new T.BufferAttribute(new Float32Array(p.vertexCount).fill(i),1));
-    const list=groups.get(p.system)??[];list.push(g);groups.set(p.system,list);
-   });
-   groups.forEach((gs,system)=>{const geometry=mergeGeometries(gs,false);if(!geometry)throw new Error('Could not assemble anatomy geometry.');geometries.push(geometry);const mesh=new T.Mesh(geometry,mats.get(system as never));mesh.frustumCulled=false;scene.add(mesh);});
-   lastState=null;loaded++;onProgress(Math.round(loaded/atlas.chunks.length*100));dirty=true;
-  };
-  (async()=>{try{let cursor=0;await Promise.all(Array.from({length:3},async()=>{while(cursor<atlas.chunks.length){const i=cursor++;await loadChunk(i);}}));if(!disposed){ready=true;dirty=true;}}catch(e){if(!disposed)onError(e instanceof Error?e.message:'Could not load the anatomy.');}})();
-  const fit=(view:string,extent=0)=>{
-   const aspect=camera.aspect,mobile=el.clientWidth<768,normalDistance=mobile?Math.max(4.5,1.8*el.clientHeight/Math.max(160,el.clientHeight-350)/(2*Math.tan(T.MathUtils.degToRad(camera.fov/2)))):4;
-   const reservedHeight=mobile?350:270;const availableAspect=Math.max(.35,(el.clientWidth-(mobile?40:340))/Math.max(160,el.clientHeight-reservedHeight));const atlasDistance=Math.max(packingHeight,packingWidth/availableAspect)/(2*Math.tan(T.MathUtils.degToRad(camera.fov/2)))*(el.clientHeight/Math.max(160,el.clientHeight-reservedHeight))*1.08;
-   const distance=T.MathUtils.lerp(normalDistance,Math.max(.2,atlasDistance),extent);if(extent>.8)view='front';
-   const direction=view==='front'?new T.Vector3(0,.02,1):view==='back'?new T.Vector3(0,.02,-1):view==='side'?new T.Vector3(1,.02,0):new T.Vector3(.35,.06,1).normalize();
-   controls.target.set(extent>.1&&el.clientWidth>767?-packingWidth*.12:0,extent>.1||mobile?.85:.68,0);camera.position.copy(controls.target).addScaledVector(direction,distance);controls.update();dirty=true;
-  };
-  const resize=()=>{layoutKey='';lastState=null;renderer.setPixelRatio(Math.min(devicePixelRatio,el.clientWidth<768||el.clientHeight<600?1.5:2));camera.aspect=el.clientWidth/el.clientHeight;camera.updateProjectionMatrix();renderer.setSize(el.clientWidth,el.clientHeight);fit(latest.current.view,amount);};const observer=new ResizeObserver(resize);observer.observe(el);
-  const raycaster=new T.Raycaster(),pointer=new T.Vector2(),tap=new PointerTap(),worldBox=new T.Box3(),hitPoint=new T.Vector3();
-  const down=(e:PointerEvent)=>{hover.hidden=true;tap.down(e.pointerId,e.clientX,e.clientY,e.pointerType==='touch'?12:5);};
-  const move=(e:PointerEvent)=>{tap.move(e.pointerId,e.clientX,e.clientY);if(e.buttons||amount<.5||e.pointerType==='touch'){hover.hidden=true;return;}const rect=el.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top,index=findTarget(x,y,12);hover.hidden=index<0;renderer.domElement.style.cursor=index<0?'grab':'pointer';if(index>=0){hover.textContent=atlas.parts[index].name;hover.style.left=`${Math.max(8,Math.min(x+14,el.clientWidth-260))}px`;hover.style.top=`${Math.max(8,Math.min(y+18,el.clientHeight-55))}px`;}};
-  const cancel=(e:PointerEvent)=>tap.cancel(e.pointerId);
-  const up=(e:PointerEvent)=>{
-   const validTap=tap.up(e.pointerId,e.clientX,e.clientY);if(!validTap||!ready)return;const rect=renderer.domElement.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);raycaster.setFromCamera(pointer,camera);
-   let nearest=Infinity,found=-1;const hasSolid=atlas.parts.some((p,i)=>p.system!=='integumentary'&&data[i*4+3]>.5);
-   pickers.forEach((mesh,i)=>{if(!mesh||data[i*4+3]<.5||(hasSolid&&atlas.parts[i].system==='integumentary'))return;worldBox.copy(bounds[i]).translate(mesh.position);if(!raycaster.ray.intersectBox(worldBox,hitPoint))return;const hits=raycaster.intersectObject(mesh,false);if(hits[0]&&hits[0].distance<nearest){nearest=hits[0].distance;found=i;}});
-   if(found<0&&amount>.45)found=findTarget(e.clientX-rect.left,e.clientY-rect.top,e.pointerType==='touch'?24:16);if(found>=0){hover.hidden=true;select.current(atlas.parts[found].id);}
-  };
-  renderer.domElement.addEventListener('pointerdown',down);renderer.domElement.addEventListener('pointermove',move);renderer.domElement.addEventListener('pointerup',up);renderer.domElement.addEventListener('pointercancel',cancel);
-  const clock=new T.Clock();let lastExtent=-1;
-  const animate=()=>{
-   if(disposed)return;frame=requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05),s=latest.current;
-   const changed=lastState?.visible!==s.visible||lastState?.selected!==s.selected||lastState?.isolate!==s.isolate;
-   const moving=Math.abs(amount-s.explode)>.0001;
-   if(moving){amount=T.MathUtils.damp(amount,s.explode,8,dt);dirty=true;}
-   if(changed||moving||lastExtent<0){
-    const visible=new Set(s.visible),selection=new Set(s.selected);
-    const visibleParts=atlas.parts.filter(p=>s.isolate?selection.has(p.id):visible.has(p.system)||selection.has(p.id));
-    const nextLayoutKey=visibleParts.map(p=>p.id).join(',')+':'+camera.aspect.toFixed(3);
-    if(nextLayoutKey!==layoutKey){const layout=createExplosionLayout(visibleParts,camera.aspect);packingWidth=layout.width;packingHeight=layout.height;atlas.parts.forEach((p,i)=>{const cell=layout.cells.get(p.id);offsets[i]=cell?new T.Vector3(cell.x,cell.y+.85,0):centers[i].clone();});layoutKey=nextLayoutKey;if(amount>.05&&!s.isolate)fit(s.view,Math.max(0,(amount-.3)/.7));}
+import { useEffect, useRef, useState } from "react";
+import * as T from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { STRUCTURES, visibleStructures, type SceneState, type StructureId } from "./anatomy";
+import {
+  createExplosionLayout,
+  EXPLOSION_DURATION_MS,
+  transitionProgress,
+} from "./explosion-layout";
+import { fitCamera, viewDirection } from "./camera-fit";
+import { PointerTap } from "./pointer-tap";
+import { SegmentRotation } from "./segment-rotation";
 
-    atlas.parts.forEach((p,i)=>{
-     const c=centers[i],destination=offsets[i];let dx=0,dy=0,dz=0;
-     if(amount<=.45){const t=amount/.45;const group=SYSTEMS.findIndex(sys=>sys.id===p.system);const angle=group/SYSTEMS.length*Math.PI*2;dx=Math.sin(angle)*t*.48;dy=(c.y-.85)*t*.28;dz=Math.cos(angle)*t*.48;}
-     else {const t=(amount-.45)/.55,group=SYSTEMS.findIndex(sys=>sys.id===p.system),angle=group/SYSTEMS.length*Math.PI*2;dx=T.MathUtils.lerp(Math.sin(angle)*.48,destination.x-c.x,t);dy=T.MathUtils.lerp((c.y-.85)*.28,destination.y-c.y,t);dz=T.MathUtils.lerp(Math.cos(angle)*.48,-c.z,t);}
-     const selected=selection.has(p.id);data.set([dx,dy,dz,(s.isolate?selected:visible.has(p.system)||selected)?1:0],i*4);selectedData[i*4]=selected?255:0;
-     markerPositions.set(data[i*4+3]>.5?[c.x+dx,c.y+dy,c.z+dz]:[10000,10000,10000],i*3);const mesh=pickers[i];if(mesh){mesh.position.set(dx,dy,dz);mesh.updateMatrix();mesh.updateMatrixWorld(true);}
-    });partTexture.needsUpdate=true;selectionTexture.needsUpdate=true;markerGeometry.attributes.position.needsUpdate=true;lastState=s;lastExtent=amount;dirty=true;
-   }
-   if(s.view!==lastView||s.reset!==lastReset){fit(s.view,amount);lastView=s.view;lastReset=s.reset;}
-   if(moving&&!s.isolate)fit(amount>.5?'front':s.view,Math.max(0,(amount-.3)/.7));
-   const isolateKey=s.isolate?s.selected.join(',')+':'+s.reset+':'+s.inspectorOpen+':'+camera.aspect:'';
-   if(isolateKey!==lastIsolate||(s.isolate&&moving)){
-    if(s.isolate){const box=new T.Box3();atlas.parts.forEach((p,i)=>{if(s.selected.includes(p.id))box.union(bounds[i].clone().translate(new T.Vector3(data[i*4],data[i*4+1],data[i*4+2])));});
-     if(!box.isEmpty()){const center=box.getCenter(new T.Vector3()),size=box.getSize(new T.Vector3());const w=el.clientWidth,h=el.clientHeight,mobile=w<768,landscape=w>h&&h<=600;let left=20,right=w-20,top=mobile?175:110,bottom=h-170;if(s.inspectorOpen){if(landscape){right=w-335;top=100;bottom=h-125;}else if(mobile){const sheet=document.querySelector('.detail-sheet')?.getBoundingClientRect(),header=document.querySelector('.identity')?.getBoundingClientRect();top=(header?.bottom??94)+16;bottom=(sheet?.top??h*.58-139)-16;}else{right=w-370;left=w>1100?285:25;}}const availableWidth=Math.max(150,right-left),availableHeight=Math.max(40,bottom-top);camera.setViewOffset(w,h,w/2-(left+right)/2,h/2-(top+bottom)/2,w,h);const distance=Math.max(.07,Math.max(size.y*h/availableHeight,size.x*w/availableWidth/camera.aspect,size.z)/(2*Math.tan(T.MathUtils.degToRad(camera.fov/2)))*1.35);controls.maxDistance=Math.max(40,distance*2);controls.target.copy(center);camera.position.copy(center).add(new T.Vector3(.2,.1,1).normalize().multiplyScalar(distance));controls.update();dirty=true;}
-    }else if(lastIsolate){camera.clearViewOffset();fit(s.view,amount);}
-    lastIsolate=isolateKey;
-   }
-   controls.enableRotate=amount<.8;controls.mouseButtons.LEFT=amount<.8?T.MOUSE.ROTATE:T.MOUSE.PAN;controls.touches.ONE=amount<.8?T.TOUCH.ROTATE:T.TOUCH.PAN;ground.visible=platform.visible=ring.visible=innerRing.visible=amount<.5&&!s.isolate;markers.visible=amount>.75;controls.autoRotate=s.rotate&&!s.isolate&&amount<.4;controls.autoRotateSpeed=.65;controls.update();if(controls.autoRotate)dirty=true;
-   if(dirty){renderer.render(scene,camera);targets=[];if(amount>.45){const hasSolid=atlas.parts.some((p,i)=>p.system!=='integumentary'&&data[i*4+3]>.5);atlas.parts.forEach((p,i)=>{if(data[i*4+3]<.5||(hasSolid&&p.system==='integumentary'))return;let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;for(let corner=0;corner<8;corner++){projected.set(p.bounds[(corner&1)?1:0][0]+data[i*4],p.bounds[(corner&2)?1:0][1]+data[i*4+1],p.bounds[(corner&4)?1:0][2]+data[i*4+2]).project(camera);const x=(projected.x+1)*el.clientWidth/2,y=(1-projected.y)*el.clientHeight/2;left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}projected.copy(centers[i]).add(new T.Vector3(data[i*4],data[i*4+1],data[i*4+2])).project(camera);if(projected.z< -1||projected.z>1)return;targets.push({index:i,x:(projected.x+1)*el.clientWidth/2,y:(1-projected.y)*el.clientHeight/2,left,right,top,bottom});});}dirty=false;}
+interface Props {
+  state: SceneState;
+  onSelect: (id: StructureId | null) => void;
+  onProgress: (progress: number) => void;
+  onError: (message: string) => void;
+  onInteract: () => void;
+}
+interface Piece {
+  mesh: T.Mesh<T.BufferGeometry, T.MeshPhysicalMaterial>;
+  pivot: T.Group;
+  rotation: SegmentRotation;
+  box: T.Box3;
+  center: T.Vector3;
+  goal: T.Vector3;
+  from: T.Vector3;
+  rim: { value: number };
+}
 
-  };animate();
-  const contextLost=(e:Event)=>{e.preventDefault();onError('The 3D session was paused by your device. Reload to continue.');};renderer.domElement.addEventListener('webglcontextlost',contextLost);
-  return()=>{disposed=true;abort.abort();cancelAnimationFrame(frame);observer.disconnect();controls.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());scene.traverse(o=>{if(o instanceof T.Mesh&&!geometries.includes(o.geometry)){o.geometry.dispose();const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.dispose());}});env.dispose();partTexture.dispose();selectionTexture.dispose();markerGeometry.dispose();markerMaterial.dispose();hover.remove();renderer.dispose();renderer.domElement.remove();};
- },[atlas]);
- return <div className="scene" ref={host}/>;
+export default function AnatomyScene(props: Props) {
+  const host = useRef<HTMLDivElement>(null);
+  const current = useRef(props);
+  current.current = props;
+  const [hover, setHover] = useState("");
+  useEffect(() => {
+    const container = host.current!;
+    const abort = new AbortController();
+    let disposed = false,
+      ready = false,
+      dirty = true,
+      frame = 0,
+      lastTime = 0;
+    let previous: SceneState | null = null,
+      width = 1,
+      height = 1,
+      stageVisible = true,
+      movingCamera = false;
+    const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let renderer: T.WebGLRenderer;
+    try {
+      renderer = new T.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        powerPreference: "high-performance",
+      });
+    } catch {
+      current.current.onError(
+        "WebGL is unavailable. Enable hardware acceleration or try another browser.",
+      );
+      return;
+    }
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    renderer.outputColorSpace = T.SRGBColorSpace;
+    renderer.toneMapping = T.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.85;
+    const canvas = renderer.domElement;
+    canvas.tabIndex = 0;
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute(
+      "aria-label",
+      "Interactive EXMO anatomy. Drag or use arrow keys to orbit, or pan in the fully separated view. In the exploded view, right-drag rotates the selected structure. Scroll, pinch, or use plus and minus to zoom. In the assembled view, click structures to add or remove them from your selection. Click the background to clear selection.",
+    );
+    container.appendChild(canvas);
+    const scene = new T.Scene();
+    const camera = new T.PerspectiveCamera(30, 1, 0.01, 100);
+    camera.position.set(0, 0, 5);
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.075;
+    controls.autoRotateSpeed = 0.7;
+    controls.minDistance = 0.2;
+    controls.maxDistance = 30;
+    controls.minPolarAngle = 0.08;
+    controls.maxPolarAngle = Math.PI - 0.08;
+    controls.addEventListener("change", () => {
+      dirty = true;
+    });
+    controls.addEventListener("start", () => {
+      movingCamera = false;
+      current.current.onInteract();
+      setHover("");
+    });
+    scene.add(new T.HemisphereLight("#d9f7ff", "#07111a", 1.4));
+    const key = new T.DirectionalLight("#dffaff", 3.5);
+    key.position.set(1.05, 1.7, 1.77);
+    scene.add(key);
+    const rimLight = new T.DirectionalLight("#37d6ff", 2);
+    rimLight.position.set(-1.38, 0.4, -0.92);
+    scene.add(rimLight);
+    const pieces = new Map<StructureId, Piece>();
+    const targetPosition = new T.Vector3(),
+      targetLook = new T.Vector3();
+    const cameraFrom = new T.Vector3(),
+      lookFrom = new T.Vector3();
+    let transitionStarted = 0,
+      transitionDuration = 0;
+    const bounds = new T.Box3(),
+      raycaster = new T.Raycaster(),
+      pointer = new T.Vector2();
+    const tap = new PointerTap();
+    let segmentDrag: { pointerId: number; id: StructureId; x: number; y: number } | null = null;
+
+    function endSegmentDrag() {
+      if (!segmentDrag) return;
+      const id = segmentDrag.pointerId;
+      segmentDrag = null;
+      if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
+      canvas.style.cursor = "grab";
+    }
+
+    function applyState(refit = false) {
+      if (!ready) return;
+      const state = current.current.state;
+      const visible = visibleStructures(state);
+      const ids = new Set(visible.map((s) => s.id));
+      const restoreAll =
+        !!previous && (state.reset !== previous.reset || state.explode < previous.explode);
+      if (
+        segmentDrag &&
+        (!state.selected.includes(segmentDrag.id) || !ids.has(segmentDrag.id) || restoreAll)
+      )
+        endSegmentDrag();
+      const layout = createExplosionLayout(
+        visible.map((s) => {
+          const box = pieces.get(s.id)!.box;
+          return {
+            id: s.id,
+            bounds: [box.min.toArray(), box.max.toArray()] as [number[], number[]],
+          };
+        }),
+        camera.aspect,
+      );
+      bounds.makeEmpty();
+      for (const [id, piece] of pieces) {
+        const { mesh, box, center, goal, rim } = piece;
+        mesh.visible = ids.has(id);
+        const cell = layout.cells.get(id);
+        goal
+          .set(cell ? cell.x - center.x : 0, cell ? cell.y - center.y : 0, -center.z)
+          .multiplyScalar(state.explode);
+        if (mesh.visible) bounds.union(box.clone().translate(goal));
+        goal.add(center);
+        const selected = state.selected.includes(id);
+        if (!selected || !mesh.visible || restoreAll)
+          piece.rotation.restore(performance.now(), reducedMotion);
+        const dimmed = state.selected.length > 0 && !selected;
+        const material = mesh.material;
+        const transparent = dimmed && state.contextOpacity < 1;
+        if (material.transparent !== transparent) {
+          material.transparent = transparent;
+          material.needsUpdate = true;
+        }
+        material.opacity = dimmed ? state.contextOpacity : 1;
+        material.depthWrite = !transparent;
+        material.emissiveIntensity = selected ? 0.28 : dimmed ? 0.015 : 0.095;
+        material.clearcoat = selected ? 0.66 : 0.3;
+        rim.value = selected ? 0.62 : dimmed ? 0.02 : 0.18;
+        mesh.renderOrder = selected ? 3 : dimmed ? 1 : 2;
+      }
+      const fitChanged =
+        refit ||
+        !previous ||
+        state.group !== previous.group ||
+        state.hidden !== previous.hidden ||
+        state.isolate !== previous.isolate ||
+        (state.isolate && state.selected !== previous.selected) ||
+        (state.selected !== previous.selected &&
+          visibleStructures(previous)
+            .map((s) => s.id)
+            .join() !== visible.map((s) => s.id).join()) ||
+        state.explode !== previous.explode ||
+        state.view !== previous.view ||
+        state.reset !== previous.reset;
+      if (fitChanged) {
+        const now = performance.now();
+        const remaining = Math.max(0, transitionDuration - (now - transitionStarted));
+        transitionDuration =
+          reducedMotion || !previous
+            ? 0
+            : state.explode !== previous.explode
+              ? EXPLOSION_DURATION_MS
+              : remaining || 250;
+        transitionStarted = now;
+        // Clear residual orbit damping before the camera follows the animation timeline.
+        controls.enableDamping = false;
+        controls.autoRotate = false;
+        controls.update(0);
+        controls.enableDamping = true;
+        for (const piece of pieces.values()) piece.from.copy(piece.pivot.position);
+        cameraFrom.copy(camera.position);
+        lookFrom.copy(controls.target);
+      }
+      controls.enableRotate = state.explode < 0.99;
+      controls.mouseButtons.LEFT = controls.enableRotate ? T.MOUSE.ROTATE : T.MOUSE.PAN;
+      controls.touches.ONE = controls.enableRotate ? T.TOUCH.ROTATE : T.TOUCH.PAN;
+      controls.autoRotate = state.rotate && controls.enableRotate;
+      if (fitChanged && !bounds.isEmpty()) {
+        const forceView =
+          !previous ||
+          state.view !== previous.view ||
+          state.reset !== previous.reset ||
+          state.explode !== previous.explode;
+        const direction = forceView
+          ? viewDirection(state.view)
+          : camera.position.clone().sub(controls.target).normalize();
+        const fit = fitCamera(bounds, direction, camera.aspect, camera.fov);
+        targetPosition.copy(fit.position);
+        targetLook.copy(fit.target);
+        controls.maxDistance = Math.max(
+          8,
+          fit.distance * 3,
+          camera.position.distanceTo(controls.target) * 1.1,
+        );
+        controls.minDistance = Math.max(0.12, fit.distance * 0.12);
+        movingCamera = true;
+        if (!previous || reducedMotion) {
+          camera.position.copy(targetPosition);
+          controls.target.copy(targetLook);
+        }
+      }
+      previous = state;
+      dirty = true;
+    }
+    const resize = new ResizeObserver(() => {
+      stageVisible = container.clientWidth > 0 && container.clientHeight > 0;
+      if (!stageVisible) return;
+      if (width === container.clientWidth && height === container.clientHeight) return;
+      width = container.clientWidth;
+      height = container.clientHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+      applyState(true);
+      dirty = true;
+    });
+    resize.observe(container);
+
+    function hit(event: PointerEvent) {
+      const rect = canvas.getBoundingClientRect();
+      pointer.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        (-(event.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(pointer, camera);
+      const candidates = [...pieces.values()]
+        .filter((p) => p.mesh.visible && p.mesh.material.opacity > 0.01)
+        .map((p) => p.mesh);
+      return raycaster.intersectObjects(candidates, false)[0]?.object.name as
+        | StructureId
+        | undefined;
+    }
+    const down = (event: PointerEvent) => {
+      const selected = current.current.state.explode
+        ? current.current.state.selected[0]
+        : undefined;
+      if (
+        event.button === 2 &&
+        selected &&
+        pieces.get(selected)?.mesh.visible &&
+        event.buttons === 2
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        tap.cancel(event.pointerId);
+        segmentDrag = {
+          pointerId: event.pointerId,
+          id: selected,
+          x: event.clientX,
+          y: event.clientY,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        controls.autoRotate = false;
+        controls.enableDamping = false;
+        controls.update(0);
+        controls.enableDamping = true;
+        movingCamera = false;
+        pieces.get(selected)!.rotation.drag(0, 0, camera.quaternion);
+        current.current.onInteract();
+        setHover("");
+        canvas.style.cursor = "grabbing";
+        return;
+      }
+      if (event.button !== 0) return;
+      tap.down(
+        event.pointerId,
+        event.clientX,
+        event.clientY,
+        event.pointerType === "touch" ? 12 : 5,
+      );
+    };
+    const move = (event: PointerEvent) => {
+      if (segmentDrag?.pointerId === event.pointerId) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!(event.buttons & 2)) {
+          endSegmentDrag();
+          return;
+        }
+        pieces
+          .get(segmentDrag.id)!
+          .rotation.drag(
+            event.clientX - segmentDrag.x,
+            event.clientY - segmentDrag.y,
+            camera.quaternion,
+          );
+        segmentDrag.x = event.clientX;
+        segmentDrag.y = event.clientY;
+        dirty = true;
+        return;
+      }
+      tap.move(event.pointerId, event.clientX, event.clientY);
+      if (event.buttons || event.pointerType === "touch" || movingCamera) return;
+      const id = hit(event);
+      setHover(STRUCTURES.find((s) => s.id === id)?.name ?? "");
+      canvas.style.cursor = id ? "pointer" : "grab";
+    };
+    const up = (event: PointerEvent) => {
+      if (segmentDrag?.pointerId === event.pointerId) {
+        event.stopImmediatePropagation();
+        endSegmentDrag();
+        return;
+      }
+      if (tap.up(event.pointerId, event.clientX, event.clientY))
+        current.current.onSelect(hit(event) ?? null);
+    };
+    const cancel = (event: PointerEvent) => {
+      tap.cancel(event.pointerId);
+      if (segmentDrag?.pointerId === event.pointerId) endSegmentDrag();
+    };
+    const leave = () => setHover("");
+    const keydown = (event: KeyboardEvent) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-"].includes(event.key))
+        return;
+      event.preventDefault();
+      current.current.onInteract();
+      movingCamera = false;
+      const selected = current.current.state.explode
+        ? current.current.state.selected[0]
+        : undefined;
+      if (event.shiftKey && event.key.startsWith("Arrow") && selected) {
+        const piece = pieces.get(selected);
+        if (piece?.mesh.visible) {
+          piece.rotation.drag(
+            event.key === "ArrowLeft" ? -15 : event.key === "ArrowRight" ? 15 : 0,
+            event.key === "ArrowUp" ? -15 : event.key === "ArrowDown" ? 15 : 0,
+            camera.quaternion,
+          );
+          dirty = true;
+        }
+        return;
+      }
+      const offset = camera.position.clone().sub(controls.target);
+      const spherical = new T.Spherical().setFromVector3(offset);
+      if (event.key === "+" || event.key === "=") spherical.radius *= 0.88;
+      else if (event.key === "-") spherical.radius *= 1.12;
+      else if (controls.enableRotate) {
+        if (event.key === "ArrowLeft") spherical.theta -= 0.12;
+        if (event.key === "ArrowRight") spherical.theta += 0.12;
+        if (event.key === "ArrowUp") spherical.phi -= 0.12;
+        if (event.key === "ArrowDown") spherical.phi += 0.12;
+      } else {
+        const right = new T.Vector3().setFromMatrixColumn(camera.matrix, 0);
+        const up = new T.Vector3().setFromMatrixColumn(camera.matrix, 1);
+        const pan = new T.Vector3();
+        if (event.key === "ArrowLeft") pan.addScaledVector(right, -spherical.radius * 0.04);
+        if (event.key === "ArrowRight") pan.addScaledVector(right, spherical.radius * 0.04);
+        if (event.key === "ArrowUp") pan.addScaledVector(up, spherical.radius * 0.04);
+        if (event.key === "ArrowDown") pan.addScaledVector(up, -spherical.radius * 0.04);
+        controls.target.add(pan);
+      }
+      spherical.phi = T.MathUtils.clamp(spherical.phi, 0.08, Math.PI - 0.08);
+      spherical.radius = T.MathUtils.clamp(
+        spherical.radius,
+        controls.minDistance,
+        controls.maxDistance,
+      );
+      camera.position.copy(controls.target).add(new T.Vector3().setFromSpherical(spherical));
+      dirty = true;
+    };
+    const contextLost = (event: Event) => {
+      event.preventDefault();
+      current.current.onError(
+        "The graphics context was interrupted. Reload the model to continue.",
+      );
+    };
+    canvas.addEventListener("pointerdown", down, true);
+    canvas.addEventListener("pointermove", move, true);
+    canvas.addEventListener("pointerup", up, true);
+    canvas.addEventListener("pointercancel", cancel);
+    canvas.addEventListener("lostpointercapture", cancel);
+    canvas.addEventListener("pointerleave", leave);
+    canvas.addEventListener("keydown", keydown);
+    canvas.addEventListener("webglcontextlost", contextLost);
+
+    (async () => {
+      try {
+        current.current.onProgress(0);
+        const response = await fetch(import.meta.env.BASE_URL + "models/exmo-1001921.glb", {
+          signal: abort.signal,
+        });
+        if (!response.ok) throw new Error("The EXMO model could not be downloaded.");
+        const expectedBytes = 7660116;
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("This browser cannot read the model response.");
+        const bytes = new Uint8Array(expectedBytes);
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (received + value.byteLength > expectedBytes)
+            throw new Error("The model file has an unexpected size.");
+          bytes.set(value, received);
+          received += value.byteLength;
+          if (!disposed) current.current.onProgress(Math.round((received / expectedBytes) * 85));
+        }
+        if (received !== expectedBytes) throw new Error("The model download was incomplete.");
+        if (disposed) return;
+        const gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
+        gltf.scene.updateMatrixWorld(true);
+        const sourceBounds = new T.Box3().setFromObject(gltf.scene);
+        const center = sourceBounds.getCenter(new T.Vector3());
+        const scale = 2.4 / sourceBounds.getSize(new T.Vector3()).y;
+        const sourceMeshes: T.Mesh[] = [];
+        gltf.scene.traverse((object) => {
+          if (object instanceof T.Mesh) sourceMeshes.push(object);
+        });
+        try {
+          if (sourceMeshes.length !== STRUCTURES.length)
+            throw new Error("The model does not contain all 27 structures.");
+          for (const source of sourceMeshes) {
+            const structure = STRUCTURES.find((s) => s.id === source.name);
+            if (!structure || pieces.has(structure.id))
+              throw new Error("The model structure names do not match the catalogue.");
+            const geometry = source.geometry.clone();
+            geometry.applyMatrix4(source.matrixWorld);
+            geometry.translate(-center.x, -center.y, -center.z);
+            geometry.scale(scale, scale, scale);
+            geometry.computeVertexNormals();
+            geometry.computeBoundingBox();
+            const rim = { value: 0.18 };
+            const material = new T.MeshPhysicalMaterial({
+              color: structure.color,
+              emissive: structure.color,
+              emissiveIntensity: 0.095,
+              roughness: 0.56,
+              metalness: 0,
+              clearcoat: 0.3,
+              clearcoatRoughness: 0.28,
+              side: T.DoubleSide,
+            });
+            material.onBeforeCompile = (shader) => {
+              shader.uniforms.uRimStrength = rim;
+              shader.uniforms.uRimColor = {
+                value: new T.Color(structure.color).lerp(new T.Color("#ffffff"), 0.6),
+              };
+              shader.vertexShader = shader.vertexShader
+                .replace(
+                  "#include <common>",
+                  "#include <common>\nvarying vec3 vExmoNormal;\nvarying vec3 vExmoPosition;",
+                )
+                .replace(
+                  "#include <worldpos_vertex>",
+                  "#include <worldpos_vertex>\nvExmoPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvExmoNormal = normalize(mat3(modelMatrix) * objectNormal);",
+                );
+              shader.fragmentShader = shader.fragmentShader
+                .replace(
+                  "#include <common>",
+                  "#include <common>\nvarying vec3 vExmoNormal;\nvarying vec3 vExmoPosition;\nuniform vec3 uRimColor;\nuniform float uRimStrength;",
+                )
+                .replace(
+                  "#include <emissivemap_fragment>",
+                  "#include <emissivemap_fragment>\nfloat exmoRim = pow(1.0 - max(dot(normalize(vExmoNormal), normalize(cameraPosition - vExmoPosition)), 0.0), 2.4);\ntotalEmissiveRadiance += uRimColor * exmoRim * uRimStrength;",
+                );
+            };
+            const mesh = new T.Mesh(geometry, material);
+            mesh.name = structure.id;
+            const box = geometry.boundingBox!.clone();
+            const pivot = new T.Group();
+            const pieceCenter = box.getCenter(new T.Vector3());
+            pivot.position.copy(pieceCenter);
+            mesh.position.copy(pieceCenter).negate();
+            pivot.add(mesh);
+            pieces.set(structure.id, {
+              mesh,
+              pivot,
+              rotation: new SegmentRotation(pivot.quaternion),
+              box,
+              center: pieceCenter,
+              goal: new T.Vector3(),
+              from: new T.Vector3(),
+              rim,
+            });
+            scene.add(pivot);
+          }
+        } finally {
+          for (const source of sourceMeshes) {
+            source.geometry.dispose();
+            for (const material of Array.isArray(source.material)
+              ? source.material
+              : [source.material])
+              material.dispose();
+          }
+        }
+        if (disposed) {
+          for (const piece of pieces.values()) {
+            piece.mesh.geometry.dispose();
+            piece.mesh.material.dispose();
+          }
+          return;
+        }
+        ready = true;
+        applyState(true);
+        // Prepare both shader variants while loading, before the first selection changes opacity.
+        for (const transparent of [false, true]) {
+          for (const { mesh } of pieces.values()) {
+            mesh.material.transparent = transparent;
+            mesh.material.needsUpdate = true;
+          }
+          await renderer.compileAsync(scene, camera);
+          if (disposed) return;
+        }
+        applyState();
+        current.current.onProgress(100);
+      } catch (error) {
+        if (!disposed)
+          current.current.onError(
+            error instanceof Error ? error.message : "The EXMO model could not be loaded.",
+          );
+      }
+    })();
+    function tick(time: number) {
+      frame = requestAnimationFrame(tick);
+      if (document.hidden || !stageVisible || disposed) {
+        lastTime = time;
+        return;
+      }
+      const delta = Math.min((time - lastTime) / 1000, 0.05);
+      lastTime = time;
+      if (current.current.state !== previous) applyState();
+      const progress = transitionProgress(time - transitionStarted, transitionDuration);
+      for (const piece of pieces.values()) {
+        if (piece.rotation.update(time)) dirty = true;
+        if (piece.pivot.position.distanceToSquared(piece.goal) > 0.0000001) {
+          piece.pivot.position.lerpVectors(piece.from, piece.goal, progress);
+          dirty = true;
+        } else if (!piece.pivot.position.equals(piece.goal)) {
+          piece.pivot.position.copy(piece.goal);
+          dirty = true;
+        }
+      }
+      if (movingCamera) {
+        camera.position.lerpVectors(cameraFrom, targetPosition, progress);
+        controls.target.lerpVectors(lookFrom, targetLook, progress);
+        camera.lookAt(controls.target);
+        if (progress === 1) movingCamera = false;
+        dirty = true;
+      } else controls.update(delta);
+      if (dirty) {
+        renderer.render(scene, camera);
+        dirty = false;
+      }
+    }
+    frame = requestAnimationFrame(tick);
+    return () => {
+      disposed = true;
+      abort.abort();
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      controls.dispose();
+      endSegmentDrag();
+      canvas.removeEventListener("pointerdown", down, true);
+      canvas.removeEventListener("pointermove", move, true);
+      canvas.removeEventListener("pointerup", up, true);
+      canvas.removeEventListener("pointercancel", cancel);
+      canvas.removeEventListener("lostpointercapture", cancel);
+      canvas.removeEventListener("pointerleave", leave);
+      canvas.removeEventListener("keydown", keydown);
+      canvas.removeEventListener("webglcontextlost", contextLost);
+      for (const piece of pieces.values()) {
+        piece.mesh.geometry.dispose();
+        piece.mesh.material.dispose();
+      }
+      renderer.dispose();
+      canvas.remove();
+    };
+  }, []);
+  return (
+    <div className="scene">
+      <div className="canvas-mount" ref={host} />
+      {hover && (
+        <div className="hover-label" aria-hidden="true">
+          {hover}
+        </div>
+      )}
+    </div>
+  );
 }
