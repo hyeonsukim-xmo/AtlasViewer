@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as T from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { STRUCTURES, visibleStructures, type SceneState, type StructureId } from "./anatomy";
+import {
+  STRUCTURES,
+  structureColor,
+  visibleStructures,
+  type SceneState,
+  type StructureId,
+} from "./anatomy";
 import {
   createExplosionLayout,
   EXPLOSION_DURATION_MS,
@@ -11,6 +17,11 @@ import {
 import { fitCamera, viewDirection } from "./camera-fit";
 import { PointerTap } from "./pointer-tap";
 import { SegmentRotation } from "./segment-rotation";
+import { MeasurementTable } from "./measurements";
+import { tooltipPosition } from "./tooltip-position";
+import { sideFromTriangle, type Side } from "./model-side";
+
+type HoverTarget = { id: StructureId; side: Side | null };
 
 interface Props {
   state: SceneState;
@@ -28,13 +39,34 @@ interface Piece {
   goal: T.Vector3;
   from: T.Vector3;
   rim: { value: number };
+  rimColor: T.Color;
 }
 
 export default function AnatomyScene(props: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const tooltip = useRef<HTMLDivElement>(null);
+  const hoverPoint = useRef({ x: 0, y: 0 });
   const current = useRef(props);
   current.current = props;
-  const [hover, setHover] = useState("");
+  const [hover, setHover] = useState<HoverTarget | null>(null);
+  const hovered = STRUCTURES.find((s) => s.id === hover?.id);
+  function positionHover() {
+    const container = host.current;
+    const card = tooltip.current;
+    if (!container || !card) return;
+    const { left, top } = tooltipPosition(
+      hoverPoint.current.x,
+      hoverPoint.current.y,
+      container.clientWidth,
+      container.clientHeight,
+      card.offsetWidth,
+      card.offsetHeight,
+    );
+    card.style.left = left + "px";
+    card.style.top = top + "px";
+  }
+  // Measure the actual card after a class change; pointer movement only moves the existing card.
+  useLayoutEffect(positionHover, [hover]);
   useEffect(() => {
     const container = host.current!;
     const abort = new AbortController();
@@ -48,6 +80,7 @@ export default function AnatomyScene(props: Props) {
       height = 1,
       stageVisible = true,
       movingCamera = false;
+    let sideMidlineX = 0;
     const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let renderer: T.WebGLRenderer;
     try {
@@ -87,11 +120,12 @@ export default function AnatomyScene(props: Props) {
     controls.maxPolarAngle = Math.PI - 0.08;
     controls.addEventListener("change", () => {
       dirty = true;
+      setHover(null);
     });
     controls.addEventListener("start", () => {
       movingCamera = false;
       current.current.onInteract();
-      setHover("");
+      setHover(null);
     });
     scene.add(new T.HemisphereLight("#d9f7ff", "#07111a", 1.4));
     const key = new T.DirectionalLight("#dffaff", 3.5);
@@ -158,6 +192,13 @@ export default function AnatomyScene(props: Props) {
           piece.rotation.restore(performance.now(), reducedMotion);
         const dimmed = state.selected.length > 0 && !selected;
         const material = mesh.material;
+        const color = structureColor(
+          STRUCTURES.find((s) => s.id === id)!,
+          state.colorPreset,
+        );
+        material.color.set(color);
+        material.emissive.set(color);
+        piece.rimColor.set(color).lerp(new T.Color("#ffffff"), 0.6);
         const transparent = dimmed && state.contextOpacity < 1;
         if (material.transparent !== transparent) {
           material.transparent = transparent;
@@ -185,6 +226,7 @@ export default function AnatomyScene(props: Props) {
         state.view !== previous.view ||
         state.reset !== previous.reset;
       if (fitChanged) {
+        setHover(null);
         const now = performance.now();
         const remaining = Math.max(0, transitionDuration - (now - transitionStarted));
         transitionDuration =
@@ -248,7 +290,7 @@ export default function AnatomyScene(props: Props) {
     });
     resize.observe(container);
 
-    function hit(event: PointerEvent) {
+    function hit(event: PointerEvent): HoverTarget | null {
       const rect = canvas.getBoundingClientRect();
       pointer.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -258,9 +300,30 @@ export default function AnatomyScene(props: Props) {
       const candidates = [...pieces.values()]
         .filter((p) => p.mesh.visible && p.mesh.material.opacity > 0.01)
         .map((p) => p.mesh);
-      return raycaster.intersectObjects(candidates, false)[0]?.object.name as
-        | StructureId
-        | undefined;
+      const intersection = raycaster.intersectObjects(candidates, false)[0];
+      if (!intersection) return null;
+      const mesh = intersection.object as Piece["mesh"];
+      const id = mesh.name as StructureId;
+      const face = intersection.face;
+      // Read the source triangle, so camera motion, explode offsets and segment rotation
+      // cannot change its anatomical side.
+      const positions = mesh.geometry.getAttribute("position");
+      const side = face
+        ? sideFromTriangle(id, [
+            positions.getX(face.a) - sideMidlineX,
+            positions.getX(face.b) - sideMidlineX,
+            positions.getX(face.c) - sideMidlineX,
+          ])
+        : null;
+      return { id, side };
+    }
+    function updateHover(event: PointerEvent, target: HoverTarget | null) {
+      const rect = canvas.getBoundingClientRect();
+      hoverPoint.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      positionHover();
+      setHover((previous) =>
+        previous?.id === target?.id && previous?.side === target?.side ? previous : target,
+      );
     }
     const down = (event: PointerEvent) => {
       const selected = current.current.state.explode
@@ -289,7 +352,7 @@ export default function AnatomyScene(props: Props) {
         movingCamera = false;
         pieces.get(selected)!.rotation.drag(0, 0, camera.quaternion);
         current.current.onInteract();
-        setHover("");
+        setHover(null);
         canvas.style.cursor = "grabbing";
         return;
       }
@@ -322,10 +385,11 @@ export default function AnatomyScene(props: Props) {
         return;
       }
       tap.move(event.pointerId, event.clientX, event.clientY);
-      if (event.buttons || event.pointerType === "touch" || movingCamera) return;
-      const id = hit(event);
-      setHover(STRUCTURES.find((s) => s.id === id)?.name ?? "");
-      canvas.style.cursor = id ? "pointer" : "grab";
+      if (event.buttons || event.pointerType === "touch" || movingCamera || controls.autoRotate)
+        return;
+      const target = hit(event);
+      updateHover(event, target);
+      canvas.style.cursor = target ? "pointer" : "grab";
     };
     const up = (event: PointerEvent) => {
       if (segmentDrag?.pointerId === event.pointerId) {
@@ -333,18 +397,25 @@ export default function AnatomyScene(props: Props) {
         endSegmentDrag();
         return;
       }
-      if (tap.up(event.pointerId, event.clientX, event.clientY))
-        current.current.onSelect(hit(event) ?? null);
+      if (tap.up(event.pointerId, event.clientX, event.clientY)) {
+        const target = hit(event);
+        current.current.onSelect(target?.id ?? null);
+        if (event.pointerType !== "touch") updateHover(event, target);
+      }
     };
     const cancel = (event: PointerEvent) => {
       tap.cancel(event.pointerId);
       if (segmentDrag?.pointerId === event.pointerId) endSegmentDrag();
     };
-    const leave = () => setHover("");
+    const leave = () => setHover(null);
+    const dismissHover = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHover(null);
+    };
     const keydown = (event: KeyboardEvent) => {
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-"].includes(event.key))
         return;
       event.preventDefault();
+      setHover(null);
       current.current.onInteract();
       movingCamera = false;
       const selected = current.current.state.explode
@@ -392,6 +463,7 @@ export default function AnatomyScene(props: Props) {
     };
     const contextLost = (event: Event) => {
       event.preventDefault();
+      setHover(null);
       current.current.onError(
         "The graphics context was interrupted. Reload the model to continue.",
       );
@@ -404,6 +476,7 @@ export default function AnatomyScene(props: Props) {
     canvas.addEventListener("pointerleave", leave);
     canvas.addEventListener("keydown", keydown);
     canvas.addEventListener("webglcontextlost", contextLost);
+    window.addEventListener("keydown", dismissHover);
 
     (async () => {
       try {
@@ -433,6 +506,7 @@ export default function AnatomyScene(props: Props) {
         const sourceBounds = new T.Box3().setFromObject(gltf.scene);
         const center = sourceBounds.getCenter(new T.Vector3());
         const scale = 2.4 / sourceBounds.getSize(new T.Vector3()).y;
+        sideMidlineX = -center.x * scale;
         const sourceMeshes: T.Mesh[] = [];
         gltf.scene.traverse((object) => {
           if (object instanceof T.Mesh) sourceMeshes.push(object);
@@ -451,6 +525,7 @@ export default function AnatomyScene(props: Props) {
             geometry.computeVertexNormals();
             geometry.computeBoundingBox();
             const rim = { value: 0.18 };
+            const rimColor = new T.Color();
             const material = new T.MeshPhysicalMaterial({
               color: structure.color,
               emissive: structure.color,
@@ -463,9 +538,7 @@ export default function AnatomyScene(props: Props) {
             });
             material.onBeforeCompile = (shader) => {
               shader.uniforms.uRimStrength = rim;
-              shader.uniforms.uRimColor = {
-                value: new T.Color(structure.color).lerp(new T.Color("#ffffff"), 0.6),
-              };
+              shader.uniforms.uRimColor = { value: rimColor };
               shader.vertexShader = shader.vertexShader
                 .replace(
                   "#include <common>",
@@ -502,6 +575,7 @@ export default function AnatomyScene(props: Props) {
               goal: new T.Vector3(),
               from: new T.Vector3(),
               rim,
+              rimColor,
             });
             scene.add(pivot);
           }
@@ -589,6 +663,7 @@ export default function AnatomyScene(props: Props) {
       canvas.removeEventListener("pointerleave", leave);
       canvas.removeEventListener("keydown", keydown);
       canvas.removeEventListener("webglcontextlost", contextLost);
+      window.removeEventListener("keydown", dismissHover);
       for (const piece of pieces.values()) {
         piece.mesh.geometry.dispose();
         piece.mesh.material.dispose();
@@ -600,9 +675,26 @@ export default function AnatomyScene(props: Props) {
   return (
     <div className="scene">
       <div className="canvas-mount" ref={host} />
-      {hover && (
-        <div className="hover-label" aria-hidden="true">
-          {hover}
+      {hovered && (
+        <div
+          ref={tooltip}
+          className="hover-label measurement-card"
+          role="tooltip"
+          aria-label={(hover?.side ? hover.side + " " : "") + hovered.name + " demo values"}
+        >
+          <div className="hover-heading">
+            <strong>{hovered.name}</strong>
+            <span>Demo data</span>
+          </div>
+          {hover?.side ? (
+            <div className="hover-side">
+              <strong>{hover.side === "left" ? "Left" : "Right"}</strong>
+              <span>Patient side · under cursor</span>
+            </div>
+          ) : (
+            <p className="measurement-unavailable">Side not assigned for this structure.</p>
+          )}
+          <MeasurementTable structure={hovered} primarySide={hover?.side} />
         </div>
       )}
     </div>

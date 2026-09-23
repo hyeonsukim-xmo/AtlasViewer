@@ -2,6 +2,33 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { Box3, Group, Object3D, PerspectiveCamera, Quaternion, Vector3 } from "three";
 import { SegmentRotation, ROTATION_RETURN_MS } from "../app/segment-rotation.ts";
+import { tooltipPosition } from "../app/tooltip-position.ts";
+import { sideFromTriangle } from "../app/model-side.ts";
+
+assert.equal(sideFromTriangle("rectus_femoris", [1, 2, 3]), "left");
+assert.equal(sideFromTriangle("rectus_femoris", [-1, -2, -3]), "right");
+assert.equal(sideFromTriangle("rectus_femoris", [-1, 2, 3]), null);
+assert.equal(sideFromTriangle("rectus_femoris", [0, 2, 3]), null);
+assert.equal(sideFromTriangle("rectus_femoris", [NaN, 2, 3]), null);
+assert.equal(sideFromTriangle("iliac", [1, 2, 3]), null);
+
+// Each pointer quadrant opens toward the center; cards stay inside the canvas at its edges.
+assert.deepEqual(tooltipPosition(200, 150, 800, 600, 300, 140), { left: 216, top: 166 });
+assert.deepEqual(tooltipPosition(600, 150, 800, 600, 300, 140), { left: 284, top: 166 });
+assert.deepEqual(tooltipPosition(200, 450, 800, 600, 300, 140), { left: 216, top: 294 });
+assert.deepEqual(tooltipPosition(600, 450, 800, 600, 300, 140), { left: 284, top: 294 });
+for (const [width, height, cardWidth, cardHeight] of [
+  [800, 600, 300, 140],
+  [320, 200, 300, 160],
+]) {
+  for (const x of [0, width / 2 - 1, width / 2, width]) {
+    for (const y of [0, height / 2 - 1, height / 2, height]) {
+      const position = tooltipPosition(x, y, width, height, cardWidth, cardHeight);
+      assert.ok(position.left >= 8 && position.left + cardWidth <= width - 8);
+      assert.ok(position.top >= 8 && position.top + cardHeight <= height - 8);
+    }
+  }
+}
 
 assert.equal(ROTATION_RETURN_MS, 700);
 const pivot = new Group();
@@ -58,7 +85,35 @@ import {
   changeGroup,
   toggleStructureVisibility,
   visibleStructures,
+  structureColor,
 } from "../app/anatomy.ts";
+import { DEMO_MEASUREMENTS, volumeDifferencePercent } from "../app/demo-measurements.ts";
+
+// Demo comparisons must use symmetric percentage differences, not a one-sided denominator.
+assert.equal(volumeDifferencePercent(90, 110), 20);
+assert.equal(volumeDifferencePercent(110, 90), 20);
+assert.equal(volumeDifferencePercent(100, 100), 0);
+assert.equal(volumeDifferencePercent(0, 0), null);
+assert.equal(volumeDifferencePercent(0, 10), 200);
+for (const structure of STRUCTURES) {
+  assert.equal(structureColor(structure, "class"), structure.color);
+  assert.equal(
+    structureColor(structure, "anatomical"),
+    structure.group === "Bone" ? "#D9CFB6" : "#B95550",
+  );
+  const sample = DEMO_MEASUREMENTS[structure.id];
+  if (structure.group !== "Bone" && structure.group !== "Trunk") assert.ok(sample);
+  if (!sample) continue;
+  assert.ok(sample.volumeCm3.every((value) => Number.isFinite(value) && value > 0));
+  if (structure.group === "Bone") assert.equal(sample.fatInfiltrationPercent, undefined);
+  else
+    assert.ok(
+      sample.fatInfiltrationPercent.every(
+        (value) => Number.isFinite(value) && value >= 0 && value <= 100,
+      ),
+    );
+}
+assert.equal(DEMO_MEASUREMENTS.iliac, undefined); // Missing bilateral data must stay missing.
 
 const bytes = await readFile(new URL("../public/models/exmo-1001921.glb", import.meta.url));
 const gltf = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString());
@@ -198,5 +253,5 @@ assert.equal(tap.up(1, 10, 10), false);
 tap.down(1, 10, 10, 5);
 assert.equal(tap.up(1, 10, 10), true);
 console.log(
-  "Interactions: 45 group/aspect layouts, all four camera directions, search aliases, reveal/isolate, tool validation, tap/drag/multitouch/cancellation passed.",
+  "Interactions: demo comparisons/palettes, 45 group/aspect layouts, all four camera directions, search aliases, reveal/isolate, tool validation, tap/drag/multitouch/cancellation passed.",
 );

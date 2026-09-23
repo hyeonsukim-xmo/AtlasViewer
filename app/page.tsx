@@ -4,6 +4,7 @@ import { Input } from "../components/ui/input";
 import { Slider } from "../components/ui/slider";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../components/ui/dialog";
 import AnatomyScene from "./scene";
+import Measurements from "./measurements";
 import {
   GROUPS,
   INITIAL_STATE,
@@ -14,6 +15,7 @@ import {
   changeGroup,
   toggleStructureVisibility,
   visibleStructures,
+  structureColor,
   type Group,
   type StructureId,
   type View,
@@ -34,6 +36,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [library, setLibrary] = useState(() => !matchMedia("(max-width: 800px)").matches);
   const [about, setAbout] = useState(false);
+  const [panel, setPanel] = useState<"structures" | "measurements">("structures");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -65,7 +68,7 @@ export default function Home() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (target.matches('input,textarea,[contenteditable="true"]') || about) return;
+      if (target.matches('input,textarea,select,[contenteditable="true"]') || about) return;
       if (event.key === "/") {
         event.preventDefault();
         setLibrary(true);
@@ -168,6 +171,22 @@ export default function Home() {
               <span>{state.isolate ? "ISOLATED SELECTION" : state.group.toUpperCase()}</span>
               <span>{state.explode ? "EXPLODED VIEW" : "SEGMENTATION VIEW"}</span>
             </div>
+            <label className="color-preset">
+              Colors
+              <select
+                aria-label="Color preset"
+                value={state.colorPreset}
+                onChange={(event) =>
+                  setState((s) => ({
+                    ...s,
+                    colorPreset: event.target.value === "anatomical" ? "anatomical" : "class",
+                  }))
+                }
+              >
+                <option value="class">Class</option>
+                <option value="anatomical">Muscle</option>
+              </select>
+            </label>
 
             {!error && !ready && (
               <div className="loading-card" role="status">
@@ -315,6 +334,22 @@ export default function Home() {
                 Close
               </Button>
             </div>
+            <div className="library-panels" role="group" aria-label="Library display">
+              <Button
+                variant="ghost"
+                aria-pressed={panel === "structures"}
+                onClick={() => setPanel("structures")}
+              >
+                Structures
+              </Button>
+              <Button
+                variant="ghost"
+                aria-pressed={panel === "measurements"}
+                onClick={() => setPanel("measurements")}
+              >
+                Measurements <span>Demo</span>
+              </Button>
+            </div>
             <div className="search-box">
               <Input
                 ref={search}
@@ -355,56 +390,72 @@ export default function Home() {
               <span>{query.trim() ? "SEARCH ALL STRUCTURES" : state.group.toUpperCase()}</span>
               <span>{results.length} RESULTS</span>
             </div>
-            <div className="structure-list">
+            <div
+              className="structure-list"
+              role="region"
+              aria-label={panel === "measurements" ? "Demo measurements" : "Structures"}
+            >
               {results.length ? (
-                results.map((structure, index) => {
-                  const hidden = !visible.some((s) => s.id === structure.id);
-                  const reason = state.hidden.includes(structure.id)
-                    ? "Hidden"
-                    : state.isolate
-                      ? "Outside isolation"
-                      : "Outside group";
-                  return (
-                    <div
-                      className={
-                        "structure-row" +
-                        (state.selected.includes(structure.id) ? " selected" : "") +
-                        (hidden ? " is-hidden" : "")
-                      }
-                      key={structure.id}
-                    >
-                      <Button
-                        variant="ghost"
-                        className="structure-choice"
-                        aria-label={"Select " + structure.name}
-                        aria-pressed={state.selected.includes(structure.id)}
-                        onClick={() => choose(structure.id)}
+                panel === "measurements" ? (
+                  <Measurements
+                    structures={results}
+                    selected={state.selected}
+                    colorPreset={state.colorPreset}
+                    onSelect={choose}
+                  />
+                ) : (
+                  results.map((structure, index) => {
+                    const hidden = !visible.some((s) => s.id === structure.id);
+                    const reason = state.hidden.includes(structure.id)
+                      ? "Hidden"
+                      : state.isolate
+                        ? "Outside isolation"
+                        : "Outside group";
+                    return (
+                      <div
+                        className={
+                          "structure-row" +
+                          (state.selected.includes(structure.id) ? " selected" : "") +
+                          (hidden ? " is-hidden" : "")
+                        }
+                        key={structure.id}
                       >
-                        <span className="structure-number">
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <span className="structure-dot" style={{ background: structure.color }} />
-                        <span className="structure-text">
-                          <strong>{structure.name}</strong>
-                          <span>
-                            {structure.group}
-                            {hidden ? " · " + reason : ""}
+                        <Button
+                          variant="ghost"
+                          className="structure-choice"
+                          aria-label={"Select " + structure.name}
+                          aria-pressed={state.selected.includes(structure.id)}
+                          onClick={() => choose(structure.id)}
+                        >
+                          <span className="structure-number">
+                            {String(index + 1).padStart(2, "0")}
                           </span>
-                        </span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="visibility-button"
-                        aria-label={(hidden ? "Show " : "Hide ") + structure.name}
-                        aria-pressed={!hidden}
-                        onClick={() => hide(structure.id)}
-                      >
-                        {hidden ? "Show" : "Hide"}
-                      </Button>
-                    </div>
-                  );
-                })
+                          <span
+                            className="structure-dot"
+                            style={{ background: structureColor(structure, state.colorPreset) }}
+                          />
+                          <span className="structure-text">
+                            <strong>{structure.name}</strong>
+                            <span>
+                              {structure.group}
+                              {hidden ? " · " + reason : ""}
+                            </span>
+                          </span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="visibility-button"
+                          aria-label={(hidden ? "Show " : "Hide ") + structure.name}
+                          aria-pressed={!hidden}
+                          onClick={() => hide(structure.id)}
+                        >
+                          {hidden ? "Show" : "Hide"}
+                        </Button>
+                      </div>
+                    );
+                  })
+                )
               ) : (
                 <div className="empty-search">
                   <strong>No matching structures</strong>
@@ -517,8 +568,11 @@ export default function Home() {
               classes; All includes the 3 Trunk classes.
             </p>
             <p>
-              Display coordinates are normalized for viewing. This viewer does not provide physical
-              measurements, clinical orientation labels, or diagnostic interpretation.
+              The Measurements panel contains fictional left/right volume (cm³) and fat infiltration
+              (%) samples, not measurements of this case. Hovering a paired structure identifies its
+              patient side and emphasizes that side's sample values. In Front view, the patient's
+              left is on screen right. Choose Class or Muscle colors above the model to change its
+              appearance; these colors do not encode measurement values.
             </p>
             <a href={import.meta.env.BASE_URL + "ATTRIBUTION.md"} target="_blank" rel="noreferrer">
               Source and application credits

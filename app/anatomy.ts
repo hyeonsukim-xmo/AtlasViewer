@@ -43,7 +43,12 @@ export const GROUPS = [
 ] as const;
 export type Group = (typeof GROUPS)[number];
 export type View = "front" | "back" | "side" | "three-quarter";
+export type ColorPreset = "class" | "anatomical";
+export function structureColor(structure: Structure, preset: ColorPreset) {
+  return preset === "class" ? structure.color : structure.group === "Bone" ? "#D9CFB6" : "#B95550";
+}
 export interface SceneState {
+  colorPreset: ColorPreset;
   group: Group;
   hidden: StructureId[];
   selected: StructureId[];
@@ -55,6 +60,7 @@ export interface SceneState {
   reset: number;
 }
 export const INITIAL_STATE: SceneState = {
+  colorPreset: "class",
   group: "Lower Body",
   hidden: [],
   selected: [],

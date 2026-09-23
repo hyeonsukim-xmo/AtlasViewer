@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { Box3, Matrix4, Quaternion, Vector3 } from "three";
 import { STRUCTURES } from "../app/anatomy.ts";
+import { sideFromTriangle } from "../app/model-side.ts";
 
 const bytes = await readFile(new URL("../public/models/exmo-1001921.glb", import.meta.url));
 assert.equal(
@@ -54,6 +55,7 @@ function accessor(index) {
 }
 let vertices = 0,
   triangles = 0;
+const meshData = [];
 const meshBounds = gltf.meshes.map((mesh) => {
   assert.equal(mesh.primitives.length, 1);
   const primitive = mesh.primitives[0];
@@ -73,6 +75,7 @@ const meshBounds = gltf.meshes.map((mesh) => {
     assert.equal(new Set(indices.slice(i, i + 3)).size, 3);
   vertices += values.length;
   triangles += indices.length / 3;
+  meshData.push({ values, indices });
   return box;
 });
 assert.equal(vertices, 212316);
@@ -97,6 +100,18 @@ function visit(index, parent) {
     assert.equal(node.name, gltf.meshes[node.mesh].name);
     meshNames.push(node.name);
     sceneBounds.union(meshBounds[node.mesh].clone().applyMatrix4(matrix));
+    const { values, indices } = meshData[node.mesh];
+    const x = values.map((point) => new Vector3(...point).applyMatrix4(matrix).x);
+    const sides = new Set();
+    for (let i = 0; i < indices.length; i += 3) {
+      sides.add(sideFromTriangle(node.name, [x[indices[i]], x[indices[i + 1]], x[indices[i + 2]]]));
+    }
+    assert.deepEqual(
+      [...sides].sort(),
+      ["iliac", "mulifidus", "rectus_abdominis"].includes(node.name) ? [null] : ["left", "right"],
+      node.name +
+        ": every paired surface triangle must have a stable side without crossing the midline",
+    );
   }
   for (const child of node.children ?? []) visit(child, matrix);
 }
@@ -123,6 +138,6 @@ console.log(
     vertices.toLocaleString() +
     " vertices, " +
     triangles.toLocaleString() +
-    " triangles; all buffers, indices, bounds, transforms and groups valid.",
+    " triangles; buffers, indices, bounds, transforms, groups and 24 paired class sides valid.",
 );
 console.log("GLB SHA256: " + createHash("sha256").update(bytes).digest("hex"));

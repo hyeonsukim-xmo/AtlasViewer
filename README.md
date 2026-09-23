@@ -43,6 +43,17 @@ Development and preview servers bind to the local machine by default.
   another class, Assemble, or Reset restores its orientation over 0.7 seconds.
   Reduced-motion preferences make this return immediate.
 - Use Front, Back, Side, and 3/4 camera presets, automatic rotation, and Reset.
+- Switch **Colors → Class / Muscle** above the model. Muscle colors use red muscle
+  tissue and ivory bones; the library swatches follow the selected preset.
+- Open **Measurements · Demo** in the library for fictional left/right volumes
+  in **cm³**, fat infiltration in **%**, and bilateral differences. Search and
+  group filters apply to both library views; selecting a measurement card uses
+  the existing model selection behavior.
+- Hover over a model class to see the same demo measurements directly in the viewer.
+  The hovered patient's side is named and shown first with larger values; the opposite
+  side and absolute differences follow. In Front view, patient Left is on screen right.
+  The tooltip follows the pointer, opens toward the center based on its canvas quadrant,
+  and stays within the canvas edges. It clears on background hover, pointer exit, or camera movement.
 - Drag to orbit, scroll/pinch to zoom, right-drag/two-finger drag to pan.
   Focus the canvas for arrow-key navigation and +/− zoom.
 - Press **/** to search and **Esc** to clear selection. Sliders support keyboard
@@ -52,6 +63,24 @@ The optional browser WebMCP tools `find_anatomy` and
 `inspect_anatomical_structure` use the same catalogue and selection behavior.
 
 ## Source data
+
+### Measurement prototype
+
+`app/demo-measurements.ts` contains deliberately fictional samples, unrelated to
+case 1001921. The data uses structure IDs, paired `[left, right]` values in cm³
+and percent, and omits unavailable bilateral samples. Bone samples have no fat
+infiltration value. The UI always identifies this panel as **Demo**.
+
+Volume difference is `abs(L − R) / ((L + R) / 2) × 100`; two zero volumes have an
+undefined relative difference. Fat infiltration difference is `abs(L − R)` in
+percentage points, not a relative percent change. These are display conventions
+for this prototype, not clinical thresholds or a chosen measurement method.
+
+Real calculations and NRRD loading are not connected. Replace the demo values with the supplied calculation results when
+available, verify their units and L/R correspondence, and update the demo label
+at that point. Color presets are independent of all measurement values.
+
+### Model
 
 `public/models/exmo-1001921.glb` is a **7,660,116-byte**, byte-for-byte extraction
 of the supplied HTML model: **212,316 vertices / 424,456 triangles**. It requires
@@ -65,6 +94,15 @@ normal development and builds.
 The renderer preserves each node's transform, centers and uniformly scales the
 scene, computes the missing normals, and applies EXMO physical materials with
 rim lighting. It disposes graphics resources when reloaded or unmounted.
+
+The original `ExportSegmentationGLB.py` and its `exmo-muscles.json` manifest were
+found alongside the source NRRD. That export's GLB has the same SHA-256 as the
+packaged model (`555dbad58e9642dd5aaf18040b1008cf0f6ac1809bd88d98a0ba925a30306b0c`).
+It maps NRRD LPS `(x, y, z)` to `(x, z, -y)`, then centers the scene. Thus +X
+retains the patient-left direction. Tests verify that centered GLB X=0 separates
+every triangle of the 24 paired classes. Hover uses these source triangle
+coordinates, unaffected by camera view, explode translation, or segment rotation.
+Iliac, Multifidus, and Rectus abdominis cross the midline and are not assigned a side.
 
 The previous BodyParts3D assets and conversion pipeline are available in Git
 history. They are no longer copied into this application's build.

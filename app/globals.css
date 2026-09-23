@@ -280,6 +280,130 @@ h1 {
   font-size: 7px;
   color: #406473;
 }
+.color-preset {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px 3px 10px;
+  border: 1px solid #253b47;
+  border-radius: 6px;
+  background: #0b1720;
+  color: #8da8b6;
+  font-size: 10px;
+}
+.color-preset select {
+  min-height: 28px;
+  background: #0b1720;
+  color: #dfebef;
+  font: inherit;
+  cursor: pointer;
+  color-scheme: dark;
+}
+.library-panels {
+  display: flex;
+  margin: 0 21px 16px;
+  padding: 3px;
+  border: 1px solid #263b48;
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+.library-panels button {
+  flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: #8da8b6;
+}
+.library-panels button[aria-pressed="true"] {
+  background: #1a3540;
+  color: #d4f6f7;
+}
+.library-panels button span {
+  font-size: 8px;
+  color: #d6b880;
+}
+.measurement-notice {
+  padding: 8px 9px 16px;
+  color: #91a8b4;
+  font-size: 10px;
+  line-height: 1.65;
+}
+.measurement-notice strong {
+  color: #ddbf87;
+  font-size: 11px;
+  font-weight: 500;
+}
+.measurement-notice p {
+  margin: 5px 0;
+}
+.measurement-notice summary {
+  cursor: pointer;
+  color: #b0c6d0;
+}
+.measurement-card {
+  border: 1px solid #243845;
+  border-radius: 7px;
+  background: #0c1922;
+  padding: 6px 10px 12px;
+  margin-bottom: 8px;
+}
+.measurement-card.selected {
+  background: #12333c;
+  border-color: #2b6977;
+}
+.measurement-card .measurement-name {
+  width: 100%;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+  height: auto;
+  min-height: 34px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 450;
+  color: #d1e4ed;
+}
+.measurement-card table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.measurement-card th,
+.measurement-card td {
+  text-align: right;
+  padding: 6px 0 2px;
+  font-weight: 400;
+}
+.measurement-card th:first-child {
+  width: 28%;
+  text-align: left;
+  color: #92aebd;
+  font-size: 10px;
+}
+.measurement-card thead th {
+  color: #7997a7;
+  font-size: 9px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #25404d;
+}
+.measurement-card thead th:first-child {
+  color: #d6b880;
+}
+.measurement-card small {
+  font-size: 9px;
+  margin-left: 3px;
+  color: #92aebd;
+}
+.measurement-unavailable {
+  font-size: 11px;
+  color: #7997a7;
+  margin: 6px 0 0;
+}
 .orbit-hint {
   position: absolute;
   bottom: 3px;
@@ -297,18 +421,62 @@ h1 {
 }
 .hover-label {
   position: absolute;
-  left: 50%;
-  top: 10px;
-  transform: translateX(-50%);
   z-index: 1;
   pointer-events: none;
   background: #0c1a24e8;
   border: 1px solid #315465;
   color: #d5f9ff;
   border-radius: 6px;
-  padding: 7px 12px;
+  padding: 10px 12px 12px;
+  width: min(300px, calc(100% - 16px));
+  box-shadow: 0 10px 28px #0005;
   font-size: 12px;
-  white-space: nowrap;
+}
+.hover-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.hover-heading strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.hover-heading > span {
+  flex-shrink: 0;
+  color: #d6b880;
+  font-size: 9px;
+}
+.hover-side {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0 12px;
+}
+.hover-side strong {
+  color: #baf5f7;
+  font-size: 20px;
+  font-weight: 500;
+}
+.hover-side > span {
+  font-size: 9px;
+  color: #91a8b4;
+}
+.side-comparison thead span {
+  display: block;
+  margin-top: 2px;
+  font-size: 8px;
+  color: #91a8b4;
+}
+.measurement-card .side-comparison :is(th, td):nth-child(2) {
+  background: #173d46;
+  padding-right: 6px;
+  color: #dbffff;
+}
+.measurement-card .side-comparison tbody td:nth-child(2) {
+  font-size: 16px;
+  font-weight: 550;
 }
 .loading-card {
   position: absolute;
@@ -964,6 +1132,14 @@ h1 {
   }
 }
 @media (max-height: 680px) {
+  .library {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .library .structure-list {
+    overflow: visible;
+  }
   .topbar {
     height: 59px;
   }
