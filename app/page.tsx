@@ -107,14 +107,14 @@ export default function Home() {
             width={951}
             height={169.28}
           />
-          <span className="brand-caption">SEGMENTATION ATLAS</span>
+          <span className="brand-caption">Segmentation Atlas</span>
         </a>
         <div className="case-tag">
           <span>
-            CASE <strong>1001921</strong>
+            Case <strong>1001921</strong>
           </span>
           <span className="case-divider" />
-          <span>27 CLASSES</span>
+          <span>27 structures</span>
         </div>
         <nav className="header-actions" aria-label="Atlas panels">
           <Button
@@ -142,34 +142,9 @@ export default function Home() {
       <main className={"workspace" + (library ? " library-open" : "")}>
         <section className="viewer" aria-label="3D anatomy workspace">
           <div className="viewer-heading">
-            <div>
-              <div className="eyebrow">
-                <span /> INTERACTIVE ANATOMY
-              </div>
-              <h1>Anatomy, in focus.</h1>
-              <p>Explore the structures beneath the surface.</p>
-            </div>
-            <div className="view-summary">
-              <strong>{String(visible.length).padStart(2, "0")}</strong>
-              <span>
-                VISIBLE
-                <br />
-                STRUCTURES
-              </span>
-            </div>
-          </div>
-          <div className="canvas-stage" aria-busy={!ready && !error}>
-            <AnatomyScene
-              key={attempt}
-              state={state}
-              onSelect={choose}
-              onProgress={setProgress}
-              onError={setError}
-              onInteract={stopRotation}
-            />
-            <div className="stage-label">
-              <span>{state.isolate ? "ISOLATED SELECTION" : state.group.toUpperCase()}</span>
-              <span>{state.explode ? "EXPLODED VIEW" : "SEGMENTATION VIEW"}</span>
+            <div className="viewer-title">
+              <h1>{state.isolate ? "Selected structures" : state.group}</h1>
+              <span className="view-mode">{state.explode ? "Exploded" : "Assembled"}</span>
             </div>
             <label className="color-preset">
               Colors
@@ -187,6 +162,16 @@ export default function Home() {
                 <option value="anatomical">Muscle</option>
               </select>
             </label>
+          </div>
+          <div className="canvas-stage" aria-busy={!ready && !error}>
+            <AnatomyScene
+              key={attempt}
+              state={state}
+              onSelect={choose}
+              onProgress={setProgress}
+              onError={setError}
+              onInteract={stopRotation}
+            />
 
             {!error && !ready && (
               <div className="loading-card" role="status">
@@ -268,6 +253,7 @@ export default function Home() {
                 <Button
                   className="dock-explode"
                   variant={state.explode ? "default" : "outline"}
+                  aria-label={state.explode ? "Assemble anatomy" : "Explode anatomy"}
                   aria-pressed={state.explode === 1}
                   disabled={!ready || visible.length === 0}
                   onClick={() =>
@@ -290,7 +276,7 @@ export default function Home() {
                     }))
                   }
                 >
-                  {state.explode ? "Assemble anatomy" : "Explode anatomy"}
+                  {state.explode ? "Assemble" : "Explode"}
                 </Button>
               </div>
             </div>
@@ -317,9 +303,8 @@ export default function Home() {
           <aside className="library" id="structure-library" aria-label="Structure library">
             <div className="library-heading">
               <div>
-                <div className="eyebrow">EXPLORE THE ATLAS</div>
                 <h2>
-                  Structure library <span>27</span>
+                  Anatomy <span>27</span>
                 </h2>
               </div>
               <Button
@@ -387,8 +372,8 @@ export default function Home() {
               ))}
             </div>
             <div className="list-heading">
-              <span>{query.trim() ? "SEARCH ALL STRUCTURES" : state.group.toUpperCase()}</span>
-              <span>{results.length} RESULTS</span>
+              <span>{query.trim() ? "Search results" : state.group}</span>
+              <span>{results.length} structures</span>
             </div>
             <div
               className="structure-list"
@@ -404,7 +389,7 @@ export default function Home() {
                     onSelect={choose}
                   />
                 ) : (
-                  results.map((structure, index) => {
+                  results.map((structure) => {
                     const hidden = !visible.some((s) => s.id === structure.id);
                     const reason = state.hidden.includes(structure.id)
                       ? "Hidden"
@@ -427,9 +412,6 @@ export default function Home() {
                           aria-pressed={state.selected.includes(structure.id)}
                           onClick={() => choose(structure.id)}
                         >
-                          <span className="structure-number">
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
                           <span
                             className="structure-dot"
                             style={{ background: structureColor(structure, state.colorPreset) }}
@@ -471,7 +453,9 @@ export default function Home() {
                 <div className="library-selection" aria-live="polite">
                   <div className="selection-name">
                     <span>
-                      {selected.length === 1 ? selected[0].group : "ASSEMBLED VIEW"} / SELECTED
+                      {selected.length === 1
+                        ? selected[0].group + " · Selected"
+                        : "Selected together"}
                     </span>
                     <strong title={selected.map((s) => s.name).join(", ")}>
                       {selected.length === 1 ? selected[0].name : `${selected.length} structures`}
@@ -517,23 +501,14 @@ export default function Home() {
         )}
       </main>
 
-      <footer className="statusbar">
-        <span>
-          EXMO <span className="footer-divider">/</span> Segmentation Atlas
-        </span>
-        <span className="footer-center">CASE 1001921 · LOWER BODY</span>
-        <Button variant="ghost" onClick={() => setAbout(true)}>
-          About & controls
-        </Button>
-      </footer>
       <Dialog open={about} onOpenChange={setAbout}>
         <DialogContent className="about-dialog" initialFocus={aboutTitle}>
           <Button variant="ghost" className="about-close" onClick={() => setAbout(false)}>
             Close
           </Button>
-          <div className="eyebrow">EXMO / SEGMENTATION ATLAS</div>
+          <div className="eyebrow">EXMO Segmentation Atlas</div>
           <DialogTitle ref={aboutTitle} tabIndex={-1}>
-            Every structure, in focus.
+            About this atlas
           </DialogTitle>
           <DialogDescription>
             An interactive viewer for the 27 segmentation classes supplied in EXMO case 1001921.
