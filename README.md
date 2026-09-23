@@ -4,6 +4,13 @@ EXMO case **1001921** as a responsive React / Three.js application. The supplied
 HTML's 27 meshes, class names and colors replace the fork's BodyParts3D viewer.
 The original HTML is kept intact.
 
+## Product direction
+
+[EXMO Desktop·Web implementation direction](docs/EXMO_PRODUCT_ARCHITECTURE.md)
+records the product requirements, current implementation, proposed architecture,
+data and measurement rules, follow-up workflow, delivery stages, and open decisions
+in Korean. It is a planning document, not a claim that those features are implemented.
+
 ## Run
 
 Requires Node.js 22.13 or newer.
