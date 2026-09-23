@@ -120,7 +120,6 @@ export default function Home() {
           <Button
             variant="ghost"
             size="sm"
-            className="info-button"
             aria-label="About this atlas"
             onClick={() => setAbout(true)}
           >
@@ -302,11 +301,9 @@ export default function Home() {
         {library && (
           <aside className="library" id="structure-library" aria-label="Structure library">
             <div className="library-heading">
-              <div>
-                <h2>
-                  Anatomy <span>27</span>
-                </h2>
-              </div>
+              <h2>
+                Anatomy <span>27</span>
+              </h2>
               <Button
                 variant="ghost"
                 size="sm"

@@ -36,9 +36,6 @@
   --ring: #f98513;
   --popover: #17182e;
   --popover-foreground: #f3f4fb;
-  --secondary: #22233b;
-  --secondary-foreground: #e1e4ee;
-  --radius: 0.625rem;
   --destructive: #f88787;
   --glass: linear-gradient(145deg, #ffffff05, #ffffff00), #0f0f30c2;
   --glass-edge: inset 0 1px 0 #ffffff0d, 0 12px 32px #00000024;
@@ -55,8 +52,6 @@
   --color-ring: var(--ring);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
   --color-destructive: var(--destructive);
 }
 * {
@@ -358,22 +353,14 @@ kbd {
   flex-shrink: 0;
 }
 .library-panels button {
-  position: relative;
-  height: 39px;
-  padding: 0 0 12px;
+  height: 40px;
+  padding: 0 0 11px;
+  margin-bottom: -1px;
   border: 0;
+  border-bottom: 2px solid transparent;
   border-radius: 0;
   font-size: 13px;
   color: #969bb1;
-  background: transparent;
-}
-.library-panels button::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
   background: transparent;
 }
 .library-panels button:hover {
@@ -381,9 +368,7 @@ kbd {
 }
 .library-panels button[aria-pressed="true"] {
   color: #f3f4fb;
-}
-.library-panels button[aria-pressed="true"]::after {
-  background: #f98513;
+  border-bottom-color: #f98513;
 }
 .library-panels button span {
   font-size: 10px;
