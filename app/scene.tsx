@@ -47,6 +47,7 @@ export default function AnatomyScene(props: Props) {
   const tooltip = useRef<HTMLDivElement>(null);
   const hoverPoint = useRef({ x: 0, y: 0 });
   const current = useRef(props);
+  const invalidate = useRef(() => {});
   current.current = props;
   const [hover, setHover] = useState<HoverTarget | null>(null);
   const hovered = STRUCTURES.find((s) => s.id === hover?.id);
@@ -87,7 +88,7 @@ export default function AnatomyScene(props: Props) {
       renderer = new T.WebGLRenderer({
         antialias: true,
         alpha: true,
-        powerPreference: "high-performance",
+        powerPreference: "default",
       });
     } catch {
       current.current.onError(
@@ -119,7 +120,7 @@ export default function AnatomyScene(props: Props) {
     controls.minPolarAngle = 0.08;
     controls.maxPolarAngle = Math.PI - 0.08;
     controls.addEventListener("change", () => {
-      dirty = true;
+      requestRender();
       setHover(null);
     });
     controls.addEventListener("start", () => {
@@ -274,19 +275,27 @@ export default function AnatomyScene(props: Props) {
         }
       }
       previous = state;
-      dirty = true;
+      requestRender();
     }
     const resize = new ResizeObserver(() => {
       stageVisible = container.clientWidth > 0 && container.clientHeight > 0;
-      if (!stageVisible) return;
-      if (width === container.clientWidth && height === container.clientHeight) return;
+      if (!stageVisible) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        lastTime = 0;
+        return;
+      }
+      if (width === container.clientWidth && height === container.clientHeight) {
+        requestRender();
+        return;
+      }
       width = container.clientWidth;
       height = container.clientHeight;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
       applyState(true);
-      dirty = true;
+      requestRender();
     });
     resize.observe(container);
 
@@ -381,7 +390,7 @@ export default function AnatomyScene(props: Props) {
           );
         segmentDrag.x = event.clientX;
         segmentDrag.y = event.clientY;
-        dirty = true;
+        requestRender();
         return;
       }
       tap.move(event.pointerId, event.clientX, event.clientY);
@@ -429,7 +438,7 @@ export default function AnatomyScene(props: Props) {
             event.key === "ArrowUp" ? -15 : event.key === "ArrowDown" ? 15 : 0,
             camera.quaternion,
           );
-          dirty = true;
+          requestRender();
         }
         return;
       }
@@ -459,7 +468,7 @@ export default function AnatomyScene(props: Props) {
         controls.maxDistance,
       );
       camera.position.copy(controls.target).add(new T.Vector3().setFromSpherical(spherical));
-      dirty = true;
+      requestRender();
     };
     const contextLost = (event: Event) => {
       event.preventDefault();
@@ -615,21 +624,38 @@ export default function AnatomyScene(props: Props) {
           );
       }
     })();
+    // Render only after a change, or while motion/damping is still in progress.
+    // Keep the original material, lighting and 1.5x resolution limit.
+    function requestRender() {
+      dirty = true;
+      if (!frame && !disposed && !document.hidden && stageVisible)
+        frame = requestAnimationFrame(tick);
+    }
+    invalidate.current = requestRender;
+    function visibilityChanged() {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      lastTime = 0;
+      if (!document.hidden) requestRender();
+    }
+    document.addEventListener("visibilitychange", visibilityChanged);
     function tick(time: number) {
-      frame = requestAnimationFrame(tick);
+      frame = 0;
       if (document.hidden || !stageVisible || disposed) {
-        lastTime = time;
+        lastTime = 0;
         return;
       }
-      const delta = Math.min((time - lastTime) / 1000, 0.05);
+      // Follow display cadence; a fixed 60 fps gate skips unevenly on 100/144 Hz screens.
+      const delta = lastTime ? Math.min((time - lastTime) / 1000, 0.05) : 1 / 60;
       lastTime = time;
       if (current.current.state !== previous) applyState();
       const progress = transitionProgress(time - transitionStarted, transitionDuration);
+      let moving = false;
       for (const piece of pieces.values()) {
-        if (piece.rotation.update(time)) dirty = true;
+        if (piece.rotation.update(time)) moving = dirty = true;
         if (piece.pivot.position.distanceToSquared(piece.goal) > 0.0000001) {
           piece.pivot.position.lerpVectors(piece.from, piece.goal, progress);
-          dirty = true;
+          moving = dirty = true;
         } else if (!piece.pivot.position.equals(piece.goal)) {
           piece.pivot.position.copy(piece.goal);
           dirty = true;
@@ -641,17 +667,21 @@ export default function AnatomyScene(props: Props) {
         camera.lookAt(controls.target);
         if (progress === 1) movingCamera = false;
         dirty = true;
-      } else controls.update(delta);
+      } else if (controls.update(delta)) moving = true;
       if (dirty) {
         renderer.render(scene, camera);
         dirty = false;
       }
+      if (moving || movingCamera || controls.autoRotate) requestRender();
+      if (!frame) lastTime = 0;
     }
-    frame = requestAnimationFrame(tick);
+    requestRender();
     return () => {
       disposed = true;
+      invalidate.current = () => {};
       abort.abort();
       cancelAnimationFrame(frame);
+      document.removeEventListener("visibilitychange", visibilityChanged);
       resize.disconnect();
       controls.dispose();
       endSegmentDrag();
@@ -672,6 +702,7 @@ export default function AnatomyScene(props: Props) {
       canvas.remove();
     };
   }, []);
+  useEffect(() => invalidate.current(), [props.state]);
   return (
     <div className="scene">
       <div className="canvas-mount" ref={host} />

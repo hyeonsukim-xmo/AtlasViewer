@@ -27,6 +27,7 @@ yarn-error.log*
 # deployment and generated files
 .vercel
 /dist/
+/release/
 /outputs/
 /work/
 *.tsbuildinfo

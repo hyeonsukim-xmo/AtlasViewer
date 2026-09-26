@@ -2,6 +2,9 @@
   "name": "exmo-segmentation-atlas",
   "version": "0.1.0",
   "private": true,
+  "description": "EXMO segmentation atlas desktop and web viewer",
+  "author": "EXMO",
+  "main": "desktop/main.cjs",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -10,7 +13,11 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types scripts/validate-atlas.mjs && node --experimental-strip-types scripts/validate-interactions.mjs",
     "extract:model": "node scripts/extract-exmo.mjs",
-    "preview": "vite preview --host 127.0.0.1 --port 3017"
+    "preview": "vite preview --host 127.0.0.1 --port 3017",
+    "desktop": "npm run build && electron .",
+    "desktop:pack": "npm run build && electron-builder --win --x64 --dir",
+    "desktop:dist": "npm run build && electron-builder --win nsis --x64",
+    "test:desktop": "npm run build && electron scripts/validate-desktop.cjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
@@ -29,10 +36,27 @@
     "@types/react-dom": "19.2.3",
     "@types/three": "0.185.0",
     "@vitejs/plugin-react": "6.0.2",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
     "oxfmt": "0.61.0",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "vite": "8.0.16"
+  },
+  "build": {
+    "appId": "com.exmo.atlas",
+    "productName": "EXMO Atlas",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "desktop/**/*", "package.json", "LICENSE", "!node_modules/**/*"],
+    "asar": true,
+    "npmRebuild": false,
+    "win": { "icon": "desktop/icon.ico", "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "artifactName": "EXMO-Atlas-Setup-${version}.${ext}"
+    }
   },
   "engines": {
     "node": ">=22.13.0"

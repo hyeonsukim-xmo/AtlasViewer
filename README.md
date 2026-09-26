@@ -33,6 +33,51 @@ The production preview uses http://127.0.0.1:3017. Static deployment files are
 written to `dist/`; the existing Vercel configuration supports this build.
 Development and preview servers bind to the local machine by default.
 
+## Windows desktop
+
+The same viewer also runs as an Electron application, with the model, fonts and
+branding bundled locally. It requires no running Vite server or internet connection
+after installation. The desktop currently opens the supplied case; DICOM/NRRD/NIfTI
+import, segmentation inference and real measurements are not connected yet.
+
+```sh
+npm ci
+npm run desktop
+```
+
+The first development launch may download the pinned Electron runtime. Build a
+Windows x64 installer or an unpacked application with:
+
+```sh
+npm run desktop:dist
+npm run desktop:pack
+```
+
+Outputs: `release/EXMO-Atlas-Setup-0.1.0.exe` and
+`release/win-unpacked/EXMO Atlas.exe`. The installer is per-user and adds a desktop
+shortcut. This development build is unsigned; a production signing certificate
+has not been configured. Do not distribute patient data with application builds.
+
+GPU rendering uses the system's default GPU preference and keeps hardware
+acceleration enabled. Rendering follows the display's refresh cadence only when
+the scene changes or moves, with a 1.5× pixel-ratio limit. Idle scenes stop
+requesting frames; hidden/minimized windows stop scene rendering and resume when
+shown. These limits reduce rendering work, not a guaranteed GPU utilization
+percentage. Segment colors, materials, lighting and animation durations are unchanged.
+
+```sh
+npm run test:desktop
+```
+
+This check opens and closes a real app window, verifies packaged asset access and
+the sandbox, measures frame pacing and idle/animated/minimized rendering, and exercises selection,
+Explode and rotation return. Its screenshot and GPU report are written to
+`outputs/desktop-check/`. To check the packaged assets after building:
+
+```sh
+npx electron scripts/validate-desktop.cjs release/win-unpacked/resources/app.asar
+```
+
 ## Explore
 
 - Search all 27 structures by display name, source ID, or group. Search also
