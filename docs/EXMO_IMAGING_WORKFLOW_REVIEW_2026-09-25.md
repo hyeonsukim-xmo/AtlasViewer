@@ -6,6 +6,8 @@
 - 코드 검토 기준: AtlasViewer `design/marimo-glass`, 문서 커밋 `cbaa6e7` 시점의 앱 코드
 - 관련 문서: [EXMO Desktop·Web 구현 방향](https://github.com/hyeonsukim-xmo/AtlasViewer/blob/cbaa6e7/docs/EXMO_PRODUCT_ARCHITECTURE.md)
 
+**2026-09-26 상태 안내:** 현재는 Web과 Windows Desktop 뷰어가 모두 있다. 이 문서의 새 영상 분석·비교 흐름은 여전히 계획 단계다. `cbaa6e7`의 코드 분석과 당시 미결정 사항은 기록으로 보존하며, 실제 개발에는 [`eca2152` 기준 개발 준비 문서](EXMO_DEVELOPMENT_READINESS.md)의 현재 구현·변경 범위·회귀 검증 계획을 적용한다.
+
 이 문서는 사용자가 설명한 실제 사용 흐름과 그에 대한 기술 검토를 기록한다. **사용자가 명시한 요구사항, 구현 제안, 아직 결정하지 않은 정책을 구분한다.** 이번 작업은 문서 저장이며, 앱 기능 수정이나 모델 연결을 시작하라는 지시로 해석하지 않는다.
 
 ## 1. 제품 범위와 전체 흐름

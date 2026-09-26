@@ -6,10 +6,17 @@ The original HTML is kept intact.
 
 ## Product direction
 
+[Development readiness and regression requirements](docs/EXMO_DEVELOPMENT_READINESS.md)
+is the current implementation guide: the implemented Web/Windows baseline, protected
+viewer behavior, data contracts, scoped development stages, and validation gates.
+
 [EXMO Desktop·Web implementation direction](docs/EXMO_PRODUCT_ARCHITECTURE.md)
 records the product requirements, current implementation, proposed architecture,
 data and measurement rules, follow-up workflow, delivery stages, and open decisions
 in Korean. It is a planning document, not a claim that those features are implemented.
+
+[Imaging workflow and three-result comparison review](docs/EXMO_IMAGING_WORKFLOW_REVIEW_2026-09-25.md)
+records the requested Series preview, review grid, analysis and comparison interactions.
 
 ## Run
 
@@ -161,7 +168,8 @@ history. They are no longer copied into this application's build.
 
 ## Validation
 
-`npm test` checks GLB headers and buffers, finite coordinates, valid triangle
+`npm test` locks the approved 27-class color mapping and checks GLB headers and
+buffers, finite coordinates, valid triangle
 indices, transforms, exact class membership, counts, aliases, selection and
 visibility transitions, and WebMCP input validation. It also checks exploded
 layout overlap at five aspect ratios for all nine filters, camera framing in

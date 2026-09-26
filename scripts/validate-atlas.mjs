@@ -27,6 +27,40 @@ assert.equal(gltf.buffers.length, 1);
 assert.ok(!gltf.buffers[0].uri);
 assert.ok(gltf.buffers[0].byteLength <= binary.length);
 assert.equal(new Set(STRUCTURES.map((s) => s.id)).size, 27);
+// Preserve the approved class palette independently of the live catalogue.
+assert.deepEqual(
+  Object.fromEntries(STRUCTURES.map(({ id, color }) => [id, color])),
+  {
+    femoral: "#AAB8BC",
+    iliac: "#B7CAE9",
+    iliopsoas: "#16A6B6",
+    pectineus: "#D6A33D",
+    obturator_internus: "#2C8E86",
+    obturator_externus: "#7D4A9E",
+    quadratus_femoris: "#9A6F55",
+    piriformis: "#C85870",
+    gluteus_maximus: "#FF8150",
+    gluteus_medius: "#F0693F",
+    gluteus_minimus: "#D94F5D",
+    tensor_fascia_latae: "#36CDE5",
+    sartorius: "#F14D9B",
+    rectus_femoris: "#34B6ED",
+    vastus_lateralis: "#147FD1",
+    vastus_intermedius: "#5D9FE6",
+    vastus_medialis: "#405CC6",
+    adductor_longus: "#FF86B5",
+    adductor_brevis: "#EF5890",
+    adductor_magnus: "#C93B7C",
+    gracilis: "#A83D94",
+    biceps_femoris: "#8063DF",
+    semitendinosus: "#C66DE9",
+    semimembranosus: "#5C46BE",
+    abdominal_oblique: "#52B77D",
+    mulifidus: "#4DB3DB",
+    rectus_abdominis: "#35A861",
+  },
+  "Approved segment class colors changed",
+);
 assert.deepEqual(gltf.meshes.map((m) => m.name).sort(), STRUCTURES.map((s) => s.id).sort());
 
 function accessor(index) {
