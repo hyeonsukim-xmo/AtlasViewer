@@ -821,6 +821,15 @@
 .metric-table {
   table-layout: fixed;
 }
+.metric-table:not(.qc-table) {
+  height: 100%;
+}
+.metric-table thead {
+  height: 1px;
+}
+.result-body:not(.comparing) .metric-table th:first-child {
+  width: 52%;
+}
 .metric-table th:first-child {
   width: 36%;
 }
@@ -926,18 +935,25 @@
   position: sticky;
   top: 0;
   background: #16152b;
-  padding: 10px 9px;
+  padding: 16px 12px;
+  font-size: 12px;
 }
 .metric-table td {
-  padding: 9px;
-  font-size: 11px;
+  padding: 16px 12px;
+  font-size: 13px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.metric-table:not(.qc-table) td {
+  height: 56px;
+  vertical-align: middle;
+}
+.metric-table small {
+  font-size: 11px;
 }
 .metric-table th:not(:first-child),
 .metric-table td:not(:first-child) {
   text-align: right;
-  vertical-align: top;
 }
 .metric-table td:first-child {
   white-space: normal;
@@ -950,7 +966,7 @@
   border: 0;
   text-align: left;
   color: #bec3d9;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
   padding: 0;
   cursor: pointer;
