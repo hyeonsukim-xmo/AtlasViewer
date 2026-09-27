@@ -1,13 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import * as T from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
   STRUCTURES,
   structureColor,
   visibleStructures,
   type SceneState,
   type StructureId,
+  type Structure,
+  type RenderStructure,
 } from "./anatomy";
 import {
   createExplosionLayout,
@@ -21,14 +24,22 @@ import { MeasurementTable } from "./measurements";
 import { tooltipPosition } from "./tooltip-position";
 import { sideFromTriangle, type Side } from "./model-side";
 
-type HoverTarget = { id: StructureId; side: Side | null };
+type HoverTarget<Id extends string> = { id: Id; side: Side | null };
 
-interface Props {
-  state: SceneState;
-  onSelect: (id: StructureId | null) => void;
+interface Props<Id extends string> {
+  state: SceneState<Id>;
+  onSelect: (id: Id | null) => void;
   onProgress: (progress: number) => void;
   onError: (message: string) => void;
   onInteract: () => void;
+  model?: {
+    url: string;
+    bytes: number;
+    structures: readonly RenderStructure<Id>[];
+    parts?: readonly { id: string; structureId: Id; side: Side | "unassigned" }[];
+  };
+  renderMeasurement?: (structure: RenderStructure<Id>, side: Side | null) => ReactNode;
+  caseOpacity?: number;
 }
 interface Piece {
   mesh: T.Mesh<T.BufferGeometry, T.MeshPhysicalMaterial>;
@@ -42,15 +53,17 @@ interface Piece {
   rimColor: T.Color;
 }
 
-export default function AnatomyScene(props: Props) {
+export default function AnatomyScene<Id extends string = StructureId>(props: Props<Id>) {
+  const catalog =
+    props.model?.structures || (STRUCTURES as unknown as readonly RenderStructure<Id>[]);
   const host = useRef<HTMLDivElement>(null);
   const tooltip = useRef<HTMLDivElement>(null);
   const hoverPoint = useRef({ x: 0, y: 0 });
   const current = useRef(props);
   const invalidate = useRef(() => {});
   current.current = props;
-  const [hover, setHover] = useState<HoverTarget | null>(null);
-  const hovered = STRUCTURES.find((s) => s.id === hover?.id);
+  const [hover, setHover] = useState<HoverTarget<Id> | null>(null);
+  const hovered = catalog.find((s) => s.id === hover?.id);
   function positionHover() {
     const container = host.current;
     const card = tooltip.current;
@@ -76,11 +89,12 @@ export default function AnatomyScene(props: Props) {
       dirty = true,
       frame = 0,
       lastTime = 0;
-    let previous: SceneState | null = null,
+    let previous: SceneState<Id> | null = null,
       width = 1,
       height = 1,
       stageVisible = true,
       movingCamera = false;
+    let previousCaseOpacity: number | undefined;
     let sideMidlineX = 0;
     const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let renderer: T.WebGLRenderer;
@@ -135,7 +149,7 @@ export default function AnatomyScene(props: Props) {
     const rimLight = new T.DirectionalLight("#37d6ff", 2);
     rimLight.position.set(-1.38, 0.4, -0.92);
     scene.add(rimLight);
-    const pieces = new Map<StructureId, Piece>();
+    const pieces = new Map<Id, Piece>();
     const targetPosition = new T.Vector3(),
       targetLook = new T.Vector3();
     const cameraFrom = new T.Vector3(),
@@ -146,7 +160,7 @@ export default function AnatomyScene(props: Props) {
       raycaster = new T.Raycaster(),
       pointer = new T.Vector2();
     const tap = new PointerTap();
-    let segmentDrag: { pointerId: number; id: StructureId; x: number; y: number } | null = null;
+    let segmentDrag: { pointerId: number; id: Id; x: number; y: number } | null = null;
 
     function endSegmentDrag() {
       if (!segmentDrag) return;
@@ -159,7 +173,8 @@ export default function AnatomyScene(props: Props) {
     function applyState(refit = false) {
       if (!ready) return;
       const state = current.current.state;
-      const visible = visibleStructures(state);
+      previousCaseOpacity = current.current.caseOpacity;
+      const visible = visibleStructures(state, catalog);
       const ids = new Set(visible.map((s) => s.id));
       const restoreAll =
         !!previous && (state.reset !== previous.reset || state.explode < previous.explode);
@@ -177,6 +192,7 @@ export default function AnatomyScene(props: Props) {
           };
         }),
         camera.aspect,
+        !!current.current.model,
       );
       bounds.makeEmpty();
       for (const [id, piece] of pieces) {
@@ -194,18 +210,19 @@ export default function AnatomyScene(props: Props) {
         const dimmed = state.selected.length > 0 && !selected;
         const material = mesh.material;
         const color = structureColor(
-          STRUCTURES.find((s) => s.id === id)!,
+          catalog.find((s) => s.id === id)!,
           state.colorPreset,
         );
         material.color.set(color);
         material.emissive.set(color);
         piece.rimColor.set(color).lerp(new T.Color("#ffffff"), 0.6);
-        const transparent = dimmed && state.contextOpacity < 1;
+        const opacity = (dimmed ? state.contextOpacity : 1) * (current.current.caseOpacity ?? 1);
+        const transparent = opacity < 1;
         if (material.transparent !== transparent) {
           material.transparent = transparent;
           material.needsUpdate = true;
         }
-        material.opacity = dimmed ? state.contextOpacity : 1;
+        material.opacity = opacity;
         material.depthWrite = !transparent;
         material.emissiveIntensity = selected ? 0.28 : dimmed ? 0.015 : 0.095;
         material.clearcoat = selected ? 0.66 : 0.3;
@@ -220,7 +237,7 @@ export default function AnatomyScene(props: Props) {
         state.isolate !== previous.isolate ||
         (state.isolate && state.selected !== previous.selected) ||
         (state.selected !== previous.selected &&
-          visibleStructures(previous)
+          visibleStructures(previous, catalog)
             .map((s) => s.id)
             .join() !== visible.map((s) => s.id).join()) ||
         state.explode !== previous.explode ||
@@ -299,7 +316,7 @@ export default function AnatomyScene(props: Props) {
     });
     resize.observe(container);
 
-    function hit(event: PointerEvent): HoverTarget | null {
+    function hit(event: PointerEvent): HoverTarget<Id> | null {
       const rect = canvas.getBoundingClientRect();
       pointer.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -312,21 +329,29 @@ export default function AnatomyScene(props: Props) {
       const intersection = raycaster.intersectObjects(candidates, false)[0];
       if (!intersection) return null;
       const mesh = intersection.object as Piece["mesh"];
-      const id = mesh.name as StructureId;
+      const id = mesh.name as Id;
       const face = intersection.face;
       // Read the source triangle, so camera motion, explode offsets and segment rotation
       // cannot change its anatomical side.
       const positions = mesh.geometry.getAttribute("position");
-      const side = face
-        ? sideFromTriangle(id, [
-            positions.getX(face.a) - sideMidlineX,
-            positions.getX(face.b) - sideMidlineX,
-            positions.getX(face.c) - sideMidlineX,
-          ])
-        : null;
+      const patientSide = mesh.geometry.getAttribute("patientSide");
+      const sideCode = face && patientSide?.getX(face.a);
+      const side = current.current.model
+        ? sideCode === 1
+          ? "left"
+          : sideCode === 2
+            ? "right"
+            : null
+        : face
+          ? sideFromTriangle(id as string as StructureId, [
+              positions.getX(face.a) - sideMidlineX,
+              positions.getX(face.b) - sideMidlineX,
+              positions.getX(face.c) - sideMidlineX,
+            ])
+          : null;
       return { id, side };
     }
-    function updateHover(event: PointerEvent, target: HoverTarget | null) {
+    function updateHover(event: PointerEvent, target: HoverTarget<Id> | null) {
       const rect = canvas.getBoundingClientRect();
       hoverPoint.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
       positionHover();
@@ -335,9 +360,14 @@ export default function AnatomyScene(props: Props) {
       );
     }
     const down = (event: PointerEvent) => {
-      const selected = current.current.state.explode
-        ? current.current.state.selected[0]
-        : undefined;
+      const selection = current.current.state.explode ? current.current.state.selected : [];
+      const target = event.button === 2 && selection.length > 1 ? hit(event)?.id : undefined;
+      const selected =
+        selection.length === 1
+          ? selection[0]
+          : target && selection.includes(target)
+            ? target
+            : undefined;
       if (
         event.button === 2 &&
         selected &&
@@ -490,11 +520,14 @@ export default function AnatomyScene(props: Props) {
     (async () => {
       try {
         current.current.onProgress(0);
-        const response = await fetch(import.meta.env.BASE_URL + "models/exmo-1001921.glb", {
-          signal: abort.signal,
-        });
+        const response = await fetch(
+          props.model?.url || import.meta.env.BASE_URL + "models/exmo-1001921.glb",
+          {
+            signal: abort.signal,
+          },
+        );
         if (!response.ok) throw new Error("The EXMO model could not be downloaded.");
-        const expectedBytes = 7660116;
+        const expectedBytes = props.model?.bytes || 7660116;
         const reader = response.body?.getReader();
         if (!reader) throw new Error("This browser cannot read the model response.");
         const bytes = new Uint8Array(expectedBytes);
@@ -521,72 +554,102 @@ export default function AnatomyScene(props: Props) {
           if (object instanceof T.Mesh) sourceMeshes.push(object);
         });
         try {
-          if (sourceMeshes.length !== STRUCTURES.length)
-            throw new Error("The model does not contain all 27 structures.");
-          for (const source of sourceMeshes) {
-            const structure = STRUCTURES.find((s) => s.id === source.name);
-            if (!structure || pieces.has(structure.id))
-              throw new Error("The model structure names do not match the catalogue.");
-            const geometry = source.geometry.clone();
-            geometry.applyMatrix4(source.matrixWorld);
-            geometry.translate(-center.x, -center.y, -center.z);
-            geometry.scale(scale, scale, scale);
-            geometry.computeVertexNormals();
-            geometry.computeBoundingBox();
-            const rim = { value: 0.18 };
-            const rimColor = new T.Color();
-            const material = new T.MeshPhysicalMaterial({
-              color: structure.color,
-              emissive: structure.color,
-              emissiveIntensity: 0.095,
-              roughness: 0.56,
-              metalness: 0,
-              clearcoat: 0.3,
-              clearcoatRoughness: 0.28,
-              side: T.DoubleSide,
-            });
-            material.onBeforeCompile = (shader) => {
-              shader.uniforms.uRimStrength = rim;
-              shader.uniforms.uRimColor = { value: rimColor };
-              shader.vertexShader = shader.vertexShader
-                .replace(
-                  "#include <common>",
-                  "#include <common>\nvarying vec3 vExmoNormal;\nvarying vec3 vExmoPosition;",
-                )
-                .replace(
-                  "#include <worldpos_vertex>",
-                  "#include <worldpos_vertex>\nvExmoPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvExmoNormal = normalize(mat3(modelMatrix) * objectNormal);",
+          const parts = props.model?.parts;
+          if (sourceMeshes.length !== (parts?.length ?? catalog.length))
+            throw new Error("The model does not match the structure catalogue.");
+          const grouped = new Map<Id, T.BufferGeometry[]>();
+          const seen = new Set<string>();
+          try {
+            for (const source of sourceMeshes) {
+              const part = parts?.find((p) => p.id === source.name);
+              const structure = catalog.find((s) => s.id === (part?.structureId ?? source.name));
+              if (!structure || seen.has(source.name) || (parts && !part))
+                throw new Error("The model structure names do not match the catalogue.");
+              seen.add(source.name);
+              const geometry = source.geometry.clone();
+              geometry.applyMatrix4(source.matrixWorld);
+              geometry.translate(-center.x, -center.y, -center.z);
+              geometry.scale(scale, scale, scale);
+              if (parts) {
+                const side = part!.side === "left" ? 1 : part!.side === "right" ? 2 : 0;
+                geometry.setAttribute(
+                  "patientSide",
+                  new T.Float32BufferAttribute(
+                    new Float32Array(geometry.getAttribute("position").count).fill(side),
+                    1,
+                  ),
                 );
-              shader.fragmentShader = shader.fragmentShader
-                .replace(
-                  "#include <common>",
-                  "#include <common>\nvarying vec3 vExmoNormal;\nvarying vec3 vExmoPosition;\nuniform vec3 uRimColor;\nuniform float uRimStrength;",
-                )
-                .replace(
-                  "#include <emissivemap_fragment>",
-                  "#include <emissivemap_fragment>\nfloat exmoRim = pow(1.0 - max(dot(normalize(vExmoNormal), normalize(cameraPosition - vExmoPosition)), 0.0), 2.4);\ntotalEmissiveRadiance += uRimColor * exmoRim * uRimStrength;",
-                );
-            };
-            const mesh = new T.Mesh(geometry, material);
-            mesh.name = structure.id;
-            const box = geometry.boundingBox!.clone();
-            const pivot = new T.Group();
-            const pieceCenter = box.getCenter(new T.Vector3());
-            pivot.position.copy(pieceCenter);
-            mesh.position.copy(pieceCenter).negate();
-            pivot.add(mesh);
-            pieces.set(structure.id, {
-              mesh,
-              pivot,
-              rotation: new SegmentRotation(pivot.quaternion),
-              box,
-              center: pieceCenter,
-              goal: new T.Vector3(),
-              from: new T.Vector3(),
-              rim,
-              rimColor,
-            });
-            scene.add(pivot);
+              }
+              const geometries = grouped.get(structure.id) || [];
+              geometries.push(geometry);
+              grouped.set(structure.id, geometries);
+            }
+            // One class = one pivot and one layout cell. Side tags are used only for hover.
+            for (const structure of catalog) {
+              const geometries = grouped.get(structure.id);
+              if (!geometries) throw new Error("The model is missing a catalogued structure.");
+              const geometry = mergeGeometries(geometries);
+              if (!geometry) throw new Error("The structure geometry could not be combined.");
+              geometry.computeVertexNormals();
+              geometry.computeBoundingBox();
+              const rim = { value: 0.18 };
+              const rimColor = new T.Color();
+              const material = new T.MeshPhysicalMaterial({
+                color: structure.color,
+                emissive: structure.color,
+                emissiveIntensity: 0.095,
+                roughness: 0.56,
+                metalness: 0,
+                clearcoat: 0.3,
+                clearcoatRoughness: 0.28,
+                side: T.DoubleSide,
+              });
+              material.onBeforeCompile = (shader) => {
+                shader.uniforms.uRimStrength = rim;
+                shader.uniforms.uRimColor = { value: rimColor };
+                shader.vertexShader = shader.vertexShader
+                  .replace(
+                    "#include <common>",
+                    "#include <common>\nvarying vec3 vExmoNormal;\nvarying vec3 vExmoPosition;",
+                  )
+                  .replace(
+                    "#include <worldpos_vertex>",
+                    "#include <worldpos_vertex>\nvExmoPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvExmoNormal = normalize(mat3(modelMatrix) * objectNormal);",
+                  );
+                shader.fragmentShader = shader.fragmentShader
+                  .replace(
+                    "#include <common>",
+                    "#include <common>\nvarying vec3 vExmoNormal;\nvarying vec3 vExmoPosition;\nuniform vec3 uRimColor;\nuniform float uRimStrength;",
+                  )
+                  .replace(
+                    "#include <emissivemap_fragment>",
+                    "#include <emissivemap_fragment>\nfloat exmoRim = pow(1.0 - max(dot(normalize(vExmoNormal), normalize(cameraPosition - vExmoPosition)), 0.0), 2.4);\ntotalEmissiveRadiance += uRimColor * exmoRim * uRimStrength;",
+                  );
+              };
+              const mesh = new T.Mesh(geometry, material);
+              mesh.name = structure.id;
+              const box = geometry.boundingBox!.clone();
+              const pivot = new T.Group();
+              const pieceCenter = box.getCenter(new T.Vector3());
+              pivot.position.copy(pieceCenter);
+              mesh.position.copy(pieceCenter).negate();
+              pivot.add(mesh);
+              pieces.set(structure.id, {
+                mesh,
+                pivot,
+                rotation: new SegmentRotation(pivot.quaternion),
+                box,
+                center: pieceCenter,
+                goal: new T.Vector3(),
+                from: new T.Vector3(),
+                rim,
+                rimColor,
+              });
+              scene.add(pivot);
+            }
+          } finally {
+            for (const geometries of grouped.values())
+              for (const geometry of geometries) geometry.dispose();
           }
         } finally {
           for (const source of sourceMeshes) {
@@ -648,7 +711,8 @@ export default function AnatomyScene(props: Props) {
       // Follow display cadence; a fixed 60 fps gate skips unevenly on 100/144 Hz screens.
       const delta = lastTime ? Math.min((time - lastTime) / 1000, 0.05) : 1 / 60;
       lastTime = time;
-      if (current.current.state !== previous) applyState();
+      if (current.current.state !== previous || current.current.caseOpacity !== previousCaseOpacity)
+        applyState();
       const progress = transitionProgress(time - transitionStarted, transitionDuration);
       let moving = false;
       for (const piece of pieces.values()) {
@@ -701,8 +765,8 @@ export default function AnatomyScene(props: Props) {
       renderer.dispose();
       canvas.remove();
     };
-  }, []);
-  useEffect(() => invalidate.current(), [props.state]);
+  }, [props.model?.url]);
+  useEffect(() => invalidate.current(), [props.state, props.caseOpacity]);
   return (
     <div className="scene">
       <div className="canvas-mount" ref={host} />
@@ -711,21 +775,42 @@ export default function AnatomyScene(props: Props) {
           ref={tooltip}
           className="hover-label measurement-card"
           role="tooltip"
-          aria-label={(hover?.side ? hover.side + " " : "") + hovered.name + " demo values"}
+          aria-label={
+            (hover?.side ? hover.side + " " : "") +
+            hovered.name +
+            (props.model ? " measurements" : " demo values")
+          }
         >
-          <div className="hover-heading">
-            <strong>{hovered.name}</strong>
-            <span>Demo data</span>
-          </div>
-          {hover?.side ? (
-            <div className="hover-side">
-              <strong>{hover.side === "left" ? "Left" : "Right"}</strong>
-              <span>Patient side · under cursor</span>
-            </div>
+          {props.model ? (
+            <>
+              <div className="hover-heading">
+                <strong>
+                  {hovered.name}
+                  {hover?.side ? ` · ${hover.side === "left" ? "Left" : "Right"}` : ""}
+                </strong>
+              </div>
+              {props.renderMeasurement?.(hovered, hover?.side ?? null)}
+            </>
           ) : (
-            <p className="measurement-unavailable">Side not assigned for this structure.</p>
+            <>
+              <div className="hover-heading">
+                <strong>{hovered.name}</strong>
+                <span>Demo data</span>
+              </div>
+              {hover?.side ? (
+                <div className="hover-side">
+                  <strong>{hover.side === "left" ? "Left" : "Right"}</strong>
+                  <span>Patient side · under cursor</span>
+                </div>
+              ) : (
+                <p className="measurement-unavailable">Side not assigned for this structure.</p>
+              )}
+              <MeasurementTable
+                structure={hovered as unknown as Structure}
+                primarySide={hover?.side}
+              />
+            </>
           )}
-          <MeasurementTable structure={hovered} primarySide={hover?.side} />
         </div>
       )}
     </div>

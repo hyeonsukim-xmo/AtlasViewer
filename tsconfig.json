@@ -25,7 +25,9 @@
     "components/**/*.tsx",
     "lib/**/*.ts",
     "vite.config.ts",
-    "web/**/*.tsx"
+    "web/**/*.tsx",
+    "desktop/ui/**/*.ts",
+    "desktop/ui/**/*.tsx"
   ],
   "exclude": ["node_modules"]
 }

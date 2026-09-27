@@ -1,7 +1,7 @@
 # EXMO Desktop·Web 영상 분석 서비스 구현 방향
 
 - 작성일: 2026-09-24 (Asia/Seoul)
-- 최종 상태 갱신: 2026-09-26 — Web·Windows Desktop 뷰어 구현, 영상 분석·회원·비교 기능은 계획 단계
+- 최종 상태 갱신: 2026-09-27 — Desktop CT/MRI Water/X-ray 추론·실측·Overlay·로컬 저장·3개 비교 연결. 회원·서버 연동은 계획 단계. 구체적인 지원 조건과 검증은 [통합 검증 기록](EXMO_MODALITY_VALIDATION_2026-09-27.md)이 우선한다.
 - 현재 구현 기준: `design/marimo-glass` / `eca2152` (최초 문서 기준 `0297125`)
 - 대상: 현재 EXMO Segmentation Atlas를 기반으로 발전시킬 Desktop·Web 서비스
 
@@ -13,11 +13,13 @@
 
 사용자는 Desktop App에서 X-ray·MRI·CT 검사를 가져와 분석하고, 근육과 뼈의 segmentation 결과를 3D로 확인하려 한다. 구조별 부피, 지방 관련 지표, 좌우 차이와 시간에 따른 변화를 함께 보고, 회원 계정으로 웹에서도 허용된 검사 결과를 열람·비교하는 서비스가 목표다.
 
+**2026-09-27 확정:** 영상 가져오기·업로드·분류·분석은 Desktop 전용이다. Web에는 이 기능을 넣지 않고 서버에서 받은 결과의 조회·비교만 제공한다. 현재 서버 결과 조회는 미구현이며 Web의 고정 데모 뷰어를 유지한다.
+
 현재 AtlasViewer는 이 서비스의 **공통 결과 뷰어**로 발전시킨다. Desktop과 Web이 동일한 검사 결과와 표시 규칙을 사용하도록 하고, 분석 실행과 저장·동기화를 연결한다.
 
 ```text
-환자 선택 또는 등록
-  → 검사 가져오기·입력 확인
+분석 선택 (CT / MRI / X-ray 허벅지 근육 분석)
+  → 검사 가져오기·환자/검사 정보 확인
   → 영상 조건에 맞는 분석 실행
   → segmentation mask·측정 결과·표시용 3D 생성
   → 결과 확인·저장
@@ -54,6 +56,8 @@
 
 같은 프런트엔드를 Electron으로 패키징한 Windows x64 Desktop 버전도 있다. 모델·폰트·브랜드를 번들로 제공하며 별도 서버 없이 데모를 연다. 필요한 때만 화면 주기에 맞춰 렌더링하고 idle/최소화 시 장면 렌더링을 멈춘다. Windows 개발용 설치 파일 생성과 실행 검증까지 완료했으며 운영용 코드 서명·자동 업데이트는 미구현이다.
 
+Desktop은 CT / MRI / X-ray 허벅지 근육 분석을 먼저 선택하고, 영상 추가·대상 선택·바둑판 검토로 진행한다. X-ray 단일 프레임 흑백 DICOM 및 2D NRRD의 미리보기와 `AP / LAT-LT / LAT-RT / Parts` 분류는 영상 추가 시 제공 모델 그대로 자동 수행한다. CPU worker·모델은 Web과 별도 패키징하고 낮은 점수·Parts는 검토 대상으로 보류한다. 실제 임상 샘플 정확도는 이번 연결 검사의 대상이 아니다. CT/MRI는 파일 준비·선택 목록까지만 연결했으며 reader와 근육 분석은 연결 대기다. 기존 3D 뷰어는 별도 데모로 유지한다.
+
 | 기능 | 현재 동작과 유지할 기준 |
 | --- | --- |
 | 구조 목록 | 27개 class, Lower Body 24개, 이름·ID·그룹 검색 |
@@ -72,7 +76,7 @@
 
 ### 3.2 아직 구현되지 않은 범위
 
-- 일반 검사 파일 가져오기, DICOM series 선택, NRRD/NIfTI 읽기.
+- 일반 3D 검사 가져오기, DICOM series 선택, volume NRRD/NIfTI 읽기. Desktop X-ray 2D DICOM/NRRD 가져오기는 구현했다.
 - 앱에서 segmentation 모델 실행, 실제 부피·지방 관련 지표 계산 연결.
 - 임의의 신규 검사에 적용할 좌우 식별과 결과 패키지 로딩.
 - Desktop 운영용 코드 서명·업데이트와 분석 실행 환경 묶기. 기존 Windows 뷰어 패키징과 구분한다.
@@ -106,7 +110,7 @@ Desktop과 Web에서 현재 React/Three.js 화면과 표시 규칙을 공유한�
 
 ### 4.2 Desktop
 
-Electron을 채택해 현재 웹 UI를 Windows x64 앱으로 패키징했다. `desktop/main.cjs`가 sandbox와 context isolation을 유지하면서 `atlas://app/`로 번들 자산을 제공한다. 로컬 영상 파일 접근, preload/분석 IPC, 모델 실행은 아직 연결하지 않았다. 다른 OS 지원은 별도 검증 대상이다. [Electron 공식 프로세스 문서](https://www.electronjs.org/docs/latest/tutorial/process-model)
+Electron을 채택해 공통 결과 뷰어와 Desktop 전용 분석 화면을 Windows x64 앱으로 패키징했다. `desktop/main.cjs`가 sandbox와 context isolation을 유지하면서 `atlas://app/`로 Desktop 번들 자산을 제공한다. X-ray 파일 선택·제한된 preload IPC·별도 CPU 분류 프로세스를 연결했으며 Segmentation은 미연결이다. 다른 OS 지원은 별도 검증 대상이다. [Electron 공식 프로세스 문서](https://www.electronjs.org/docs/latest/tutorial/process-model)
 
 후속 Desktop 기능의 책임은 입력 선택, 분석 요청·상태 표시·취소, 로컬 결과 저장, 결과 확인과 동기화 요청이다. 무거운 영상 처리와 모델 실행은 화면을 그리는 프로세스에서 직접 하지 않는다. 분석 프로세스의 실패가 UI 종료와 이전 결과 손실로 이어지지 않도록 한다.
 
@@ -124,7 +128,7 @@ Electron을 채택해 현재 웹 UI를 Windows x64 앱으로 패키징했다. `d
 
 서버는 계정·접근 권한, 환자·검사·분석 결과의 관계, 파일 저장 위치와 동기화 상태를 관리한다. 초기 구성은 단일 백엔드 API, 관계형 DB, 비공개 파일 저장소 정도로 시작하는 방향을 제안한다. 구체 제품과 호스팅 사업자는 미정이다.
 
-계정 기반 Web은 로그인 후 권한이 있는 결과를 받아 공통 뷰어로 표시하는 방향이다. 이후 사용자가 웹 데모에도 영상 가져오기·분석 흐름을 요청했으며, 상세 요구는 영상 워크플로 검토 문서에 기록했다. 실제 파일 처리와 모델 실행 위치·서버 전송 범위는 아직 결정하지 않았다.
+계정 기반 Web은 로그인 후 권한이 있는 결과를 서버에서 받아 공통 뷰어로 표시한다. 이전 웹 데모의 영상 가져오기·분석 제안은 2026-09-27 사용자 지시로 대체되었다. 업로드·분류·분석 진입점은 Desktop 전용이며 서버 전송 범위와 접근 권한은 실제 동기화 기능에서 확정한다.
 
 ## 5. 영상 입력과 분석 범위
 

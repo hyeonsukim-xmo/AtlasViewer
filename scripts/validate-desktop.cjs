@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { app, BrowserWindow, session } = require("electron");
 
 app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "exmo-desktop-check-")));
@@ -15,7 +16,8 @@ app.on("web-contents-created", (_, contents) => {
     if (details.level === "error") errors.push(details.message);
   });
 });
-require(path.resolve(process.argv[2] || ".", "desktop/main.cjs"));
+const appRoot = path.resolve(process.argv[2] || ".");
+require(path.join(appRoot, "desktop/main.cjs"));
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const timeout = setTimeout(() => { console.error("Desktop validation timed out"); app.exit(1); }, 90000);
@@ -34,7 +36,26 @@ const timeout = setTimeout(() => { console.error("Desktop validation timed out")
     throw new Error("UI did not reach expected state: " + fn);
   };
   if (contents.isLoading()) await new Promise((resolve) => contents.once("did-finish-load", resolve));
-  await waitFor(() => document.querySelector('.canvas-stage[aria-busy="false"] canvas') && !document.querySelector('[role="alert"]'));
+  const secondaryEntry = path.join(app.getPath("userData"), "second-instance.cjs");
+  fs.writeFileSync(secondaryEntry,
+    `const { app } = require("electron"); app.setPath("userData", ${JSON.stringify(app.getPath("userData"))}); require(${JSON.stringify(path.join(appRoot, "desktop/main.cjs"))});`);
+  await new Promise((resolve, reject) => {
+    const second = spawn(process.execPath, [secondaryEntry], { windowsHide: true, stdio: "ignore" });
+    const timer = setTimeout(() => {
+      second.kill();
+      reject(new Error("Duplicate application must exit without opening the shared store"));
+    }, 10000);
+    second.once("error", (error) => { clearTimeout(timer); reject(error); });
+    second.once("exit", (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolve() : reject(new Error("Duplicate application failed: " + code));
+    });
+  });
+  await waitFor(() => document.querySelector(".analysis-catalog"));
+  await delay(600);
+  fs.writeFileSync(path.join(output, "analysis-catalog.png"), (await contents.capturePage()).toPNG());
+  await run(() => document.querySelector(".desktop-demo-link").click());
+  await waitFor(() => document.querySelector('.canvas-stage[aria-busy="false"] canvas') && !document.querySelector('.studio [role="alert"]'));
   await run(() => {
     window.__frames = { raf: 0, renders: 0, times: [] };
     const originalRAF = window.requestAnimationFrame;
@@ -143,7 +164,7 @@ const timeout = setTimeout(() => { console.error("Desktop validation timed out")
   fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2));
   assert.deepEqual(errors, [], "Renderer must not emit errors");
   console.log(JSON.stringify(report, null, 2));
-  console.log("Desktop: offline assets, sandbox, protocol boundary, idle/minimized rendering, animations and selection passed.");
+  console.log("Desktop: single instance, offline assets, sandbox, protocol boundary, idle/minimized rendering, animations and selection passed.");
   clearTimeout(timeout);
   app.exit(0);
 })().catch((error) => {

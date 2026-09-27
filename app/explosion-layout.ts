@@ -14,7 +14,7 @@ export interface LayoutCell {
   height: number;
 }
 /** Pack only visible source meshes. Every projected bounding box gets its own cell. */
-export function createExplosionLayout(parts: BoundedPart[], aspect = 1) {
+export function createExplosionLayout(parts: BoundedPart[], aspect = 1, preserveOrder = false) {
   const cards = parts.map((p) => ({
     id: p.id,
     width: Math.max(0.035, p.bounds[1][0] - p.bounds[0][0]) + 0.08,
@@ -26,7 +26,7 @@ export function createExplosionLayout(parts: BoundedPart[], aspect = 1) {
     maxWidth,
     Math.sqrt(area * Math.max(0.5, Math.min(1.5, aspect))) * 1.18,
   );
-  cards.sort((a, b) => b.height - a.height || a.id.localeCompare(b.id));
+  if (!preserveOrder) cards.sort((a, b) => b.height - a.height || a.id.localeCompare(b.id));
   const cells = new Map<string, LayoutCell>();
   let x = 0,
     y = 0,

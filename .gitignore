@@ -27,11 +27,15 @@ yarn-error.log*
 # deployment and generated files
 .vercel
 /dist/
+/dist-desktop/
 /release/
 /outputs/
 /work/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 
 # Local source archives; extracted runtime assets are tracked in public/
 /EXMO_Segmentation_Atlas.html
 /[[]엑스모] 로고 디자인_f_260824.zip
+/엑스모 로고 디자인/

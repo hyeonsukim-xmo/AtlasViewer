@@ -31,7 +31,7 @@ const VIEWS: { id: View; label: string }[] = [
 const sliderValue = (value: number | readonly number[]) =>
   typeof value === "number" ? value : value[0];
 
-export default function Home() {
+export default function Home({ onHome }: { onHome?: () => void } = {}) {
   const [state, setState] = useState(INITIAL_STATE);
   const [query, setQuery] = useState("");
   const [library, setLibrary] = useState(() => !matchMedia("(max-width: 800px)").matches);
@@ -98,6 +98,14 @@ export default function Home() {
         <a
           className="brand"
           href={import.meta.env.BASE_URL}
+          onClick={
+            onHome
+              ? (event) => {
+                  event.preventDefault();
+                  onHome();
+                }
+              : undefined
+          }
           aria-label="EXMO Segmentation Atlas home"
         >
           <img

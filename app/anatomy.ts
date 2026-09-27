@@ -28,8 +28,14 @@ export const STRUCTURES = [
   { id: "rectus_abdominis", name: "Rectus abdominis", group: "Trunk", color: "#35A861" },
 ] as const;
 
-export type Structure = (typeof STRUCTURES)[number];
-export type StructureId = Structure["id"];
+export type StructureId = (typeof STRUCTURES)[number]["id"];
+export type RenderStructure<Id extends string = string> = {
+  id: Id;
+  name: string;
+  group: Group;
+  color: string;
+};
+export type Structure = RenderStructure<StructureId>;
 export const GROUPS = [
   "Lower Body",
   "All",
@@ -44,14 +50,14 @@ export const GROUPS = [
 export type Group = (typeof GROUPS)[number];
 export type View = "front" | "back" | "side" | "three-quarter";
 export type ColorPreset = "class" | "anatomical";
-export function structureColor(structure: Structure, preset: ColorPreset) {
+export function structureColor(structure: RenderStructure, preset: ColorPreset) {
   return preset === "class" ? structure.color : structure.group === "Bone" ? "#D9CFB6" : "#B95550";
 }
-export interface SceneState {
+export interface SceneState<Id extends string = StructureId> {
   colorPreset: ColorPreset;
   group: Group;
-  hidden: StructureId[];
-  selected: StructureId[];
+  hidden: Id[];
+  selected: Id[];
   isolate: boolean;
   contextOpacity: number;
   explode: number;
@@ -71,14 +77,22 @@ export const INITIAL_STATE: SceneState = {
   rotate: false,
   reset: 0,
 };
-export function inGroup(structure: Structure, group: Group) {
+export function inGroup(structure: RenderStructure, group: Group) {
   return (
     group === "All" ||
     (group === "Lower Body" ? structure.group !== "Trunk" : structure.group === group)
   );
 }
-export function visibleStructures(state: SceneState) {
-  return STRUCTURES.filter(
+export function visibleStructures(state: SceneState): Structure[];
+export function visibleStructures<Id extends string>(
+  state: SceneState<Id>,
+  catalog: readonly RenderStructure<Id>[],
+): RenderStructure<Id>[];
+export function visibleStructures(
+  state: SceneState<string>,
+  catalog: readonly RenderStructure[] = STRUCTURES,
+) {
+  return catalog.filter(
     (s) =>
       (inGroup(s, state.group) || (!state.explode && state.selected.includes(s.id))) &&
       !state.hidden.includes(s.id) &&

@@ -165,6 +165,21 @@ for (const group of GROUPS)
     }
   }
 assert.equal(createExplosionLayout([]).cells.size, 0);
+// Desktop keeps catalogue order instead of sorting left/right parts by their heights.
+const orderedLayout = createExplosionLayout(parts, 1, true);
+assert.deepEqual(
+  [...orderedLayout.cells.keys()],
+  parts.map((p) => p.id),
+);
+const orderedCells = [...orderedLayout.cells.values()];
+for (let i = 0; i < orderedCells.length; i++) {
+  const a = orderedCells[i];
+  for (const b of orderedCells.slice(i + 1))
+    assert.ok(
+      Math.abs(a.x - b.x) >= (a.width + b.width) / 2 - 1e-8 ||
+        Math.abs(a.y - b.y) >= (a.height + b.height) / 2 - 1e-8,
+    );
+}
 assert.equal(viewDirection("front").dot(viewDirection("back")), -1);
 assert.equal(visibleStructures(INITIAL_STATE).length, 24);
 assert.equal(visibleStructures({ ...INITIAL_STATE, group: "All" }).length, 27);

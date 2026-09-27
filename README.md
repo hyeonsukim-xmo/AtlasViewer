@@ -4,6 +4,13 @@ EXMO case **1001921** as a responsive React / Three.js application. The supplied
 HTML's 27 meshes, class names and colors replace the fork's BodyParts3D viewer.
 The original HTML is kept intact.
 
+Windows Desktop also runs the supplied CT, MRI Water and X-ray thigh-analysis
+models locally, with native measurements, overlays and case comparison.
+
+**Product boundary:** image import and analysis belong to Desktop. Web is a result
+viewer; server-backed result retrieval is planned, not implemented. The Web build
+contains neither the Desktop analysis UI nor its Python runtime/model files.
+
 ## Product direction
 
 [Development readiness and regression requirements](docs/EXMO_DEVELOPMENT_READINESS.md)
@@ -42,48 +49,112 @@ Development and preview servers bind to the local machine by default.
 
 ## Windows desktop
 
-The same viewer also runs as an Electron application, with the model, fonts and
-branding bundled locally. It requires no running Vite server or internet connection
-after installation. The desktop currently opens the supplied case; DICOM/NRRD/NIfTI
-import, segmentation inference and real measurements are not connected yet.
+Desktop opens a clinical analysis worklist: choose **CT / MRI Water / X-ray thigh
+muscle estimation**, import images, review selected series, run segmentation, and
+inspect native measurements, overlays and CT/MRI surfaces. The existing viewer is
+available separately as **3D demo**; its 27 colors and interactions are unchanged.
 
-```sh
+- CT: coded-mm NIfTI, self-contained NRRD and conventional DICOM series. DICOM
+  rescale is applied once; other inputs require bound HU evidence or explicit user
+  confirmation. Original UNETR/MONAI 1.3.2 FP32 CPU recipe, native volume in cm3,
+  HU fat-range fraction. This fraction is not PDFF or a validated clinical FI score.
+- MRI: Water-only 3D images, with explicit sequence confirmation unless the input
+  matches a delivered sample. Original full6 FP32 model and two-pass TTA; raw and
+  PP500 variants, native volume, entropy and component QC. A separate **strong review
+  candidate** applies PP500 then retains up to two components in muscle labels 1–23.
+  Raw remains intact; native volumes, removed volume and entropy are recomputed.
+  The editable 1.16% TTA review threshold flags cases without changing their original
+  disagreement score. This candidate is not a validated correction. Water alone provides no FI.
+- X-ray: automatic original kNN view classification; NRRD AP or LAT-LT/LAT-RT
+  segmentation. AP keeps its original recipe; LAT retains all five folds and
+  mirroring, with CPU accumulation to fit this 8 GB GPU. Projection area is cm2,
+  never an invented volume. DICOM preview/classification is available, but DICOM
+  segmentation and nonstandard AP orientations remain blocked pending validation.
+
+CT/MRI DICOM files are grouped by Study/Series UIDs and checked for spatial ordering,
+orientation, spacing, duplicate/missing slices and rescale. Enhanced/multiframe,
+color, 4D, detached NRRD and unsupported geometry are rejected. CT/MRI protocol
+classification has not been supplied; input checks do not claim protocol suitability.
+Hover temporarily previews a series; click pins it. Checkboxes select analysis inputs,
+right-click excludes them, and wheel/slider or middle-button vertical dragging changes
+slices in axial/coronal/sagittal views. Variant switching preserves view and slice.
+
+Completed results persist locally. Up to three results with matching class schemas
+can be inspected together, with measurements and QC in adjacent case columns.
+Overlay starts with all classes selected; entire metric rows and the left header
+checkbox toggle selection. The metrics/QC panel has a draggable divider. Selection and
+Explode/Assemble apply to every compared case. Each 3D case has its own camera and structure rotation;
+matching structures use semantic IDs, not coincident numeric label IDs. Views fit
+independently, without patient registration. CT/MRI retain their original class labels
+and derive patient L/R measurements from physical coordinates and paired femur components.
+Ambiguous or fused components remain unassigned; L + R + unassigned preserves the native
+volume. L/R details appear on hover; both sides remain one structure for selection,
+explosion layout and rotation. The table keeps compact totals and QC values.
+This is a review heuristic, not validated anatomical truth; real results never borrow
+bilateral values from the demo.
+
+### Local engine setup
+
+Install Python 3.12, uv and Node, then use the supplied private deliveries:
+
+```powershell
 npm ci
+npm run desktop:engine -- -Source "Y:\김현수\temp\260927"
 npm run desktop
 ```
 
-The first development launch may download the pinned Electron runtime. Build a
-Windows x64 installer or an unpacked application with:
+Setup checks archive and payload SHA-256 values and creates four pinned environments
+under ignored `work/modality-integration`. The app stores the engine directory in
+`%APPDATA%/EXMO Atlas/engine.json`; `EXMO_ENGINE_ROOT` can override it for tests.
+Keep that directory and its Python base interpreter installed. GPU MRI/X-ray need a
+compatible NVIDIA driver; explicit CPU execution is also exposed. Only one analysis
+job runs at a time. Cancellation terminates its owned process tree and does not
+publish partial results. CT uses a disk-backed probability inverse with the same
+classwise resampling, normalization and native argmax.
+
+The installer contains the UI and private adapter scripts. The multi-GB model/runtime
+store is installed separately; the installer alone is not a portable inference package.
+No network is required once the local engine is prepared. Private weights, input
+snapshots, masks and logs never enter `public/`, Git or the Web build. The renderer
+receives opaque IDs, curated measurements, composed PNGs and permitted meshes.
+Original input files are not modified. Clearing the worklist retains completed
+results and the inputs they need. Local-machine owners can still inspect local assets;
+this implementation does not claim DRM against the machine owner.
 
 ```sh
-npm run desktop:dist
 npm run desktop:pack
+npm run desktop:dist
 ```
 
-Outputs: `release/EXMO-Atlas-Setup-0.1.0.exe` and
-`release/win-unpacked/EXMO Atlas.exe`. The installer is per-user and adds a desktop
-shortcut. This development build is unsigned; a production signing certificate
-has not been configured. Do not distribute patient data with application builds.
+Outputs: `release/win-unpacked/EXMO Atlas.exe` and
+`release/EXMO-Atlas-Setup-0.1.0.exe`. This internal development build is unsigned.
+Application updates do not replace the private engine store. The web-only build is
+still `npm run build` -> `dist/`; Desktop builds to `dist-desktop/`.
 
-GPU rendering uses the system's default GPU preference and keeps hardware
-acceleration enabled. Rendering follows the display's refresh cadence only when
-the scene changes or moves, with a 1.5× pixel-ratio limit. Idle scenes stop
-requesting frames; hidden/minimized windows stop scene rendering and resume when
-shown. These limits reduce rendering work, not a guaranteed GPU utilization
-percentage. Segment colors, materials, lighting and animation durations are unchanged.
+### Checks
 
-```sh
+```powershell
+npm run check
+npm test
+npm run test:classifier
+npm run test:imaging
 npm run test:desktop
+# Populate private integration fixtures after running the sample jobs:
+work\modality-integration\envs\ct\Scripts\python.exe -X utf8 scripts/validate-imaging.py --results
+npm run test:imaging:desktop
+# Check the packaged application using the same local engine:
+npx electron scripts/validate-imaging-desktop.cjs release/win-unpacked/resources/app.asar
 ```
 
-This check opens and closes a real app window, verifies packaged asset access and
-the sandbox, measures frame pacing and idle/animated/minimized rendering, and exercises selection,
-Explode and rotation return. Its screenshot and GPU report are written to
-`outputs/desktop-check/`. To check the packaged assets after building:
+`--results` rebuilds only `outputs/imaging-check/userdata/imaging`, the generated test
+fixture. It does not delete real application userData. Model job JSON files use opaque
+case IDs and private local input/output paths; run them with the matching environment
+and `desktop/model-runner.py --engine-root ... --job ...`.
 
-```sh
-npx electron scripts/validate-desktop.cjs release/win-unpacked/resources/app.asar
-```
+[Integration plan](docs/EXMO_MODALITY_INTEGRATION_PLAN_2026-09-27.md) and
+[validation / remaining limits](docs/EXMO_MODALITY_VALIDATION_2026-09-27.md) record the
+actual tested hardware, recipes, numerical differences and unsupported paths.
+Rendering remains demand-driven: idle/minimized scenes do not continuously redraw.
 
 ## Explore
 
@@ -135,7 +206,7 @@ undefined relative difference. Fat infiltration difference is `abs(L − R)` in
 percentage points, not a relative percent change. These are display conventions
 for this prototype, not clinical thresholds or a chosen measurement method.
 
-Real calculations and NRRD loading are not connected. Replace the demo values with the supplied calculation results when
+This legacy demo remains fictional. Desktop real measurements use a separate result path. Replace these demo values only when
 available, verify their units and L/R correspondence, and update the demo label
 at that point. Color presets are independent of all measurement values.
 
@@ -182,8 +253,8 @@ still require device testing.
 
 ## Scope and credits
 
-This is the EXMO 3D viewer frontend for one supplied case. Authentication,
-case storage, file uploads, server-side segmentation, and clinical
+Web remains the EXMO demo viewer; Desktop now includes local imaging analysis. Authentication,
+server synchronization, server-side segmentation, and clinical
 interpretation are separate features.
 
 Application code retains the upstream [MIT license](LICENSE).
