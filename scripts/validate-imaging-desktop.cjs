@@ -5,10 +5,12 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { app, BrowserWindow, dialog } = require("electron");
 const root = path.resolve(".");
-const output = path.join(root, "outputs/imaging-check");
+const output = path.resolve(process.env.EXMO_VALIDATION_OUTPUT || path.join(root, "outputs/imaging-check"));
+fs.mkdirSync(output, { recursive: true });
 const appRoot = path.resolve(process.argv[2] || ".");
-app.setPath("userData", path.join(output, "userdata"));
-process.env.EXMO_ENGINE_ROOT = path.join(root, "work/modality-integration");
+app.setPath("userData", process.env.EXMO_VALIDATION_USER_DATA || path.join(output, "userdata"));
+process.env.EXMO_ENGINE_ROOT ||= path.join(root, "work/modality-integration");
+const imagingStore = path.join(app.getPath("userData"), "imaging");
 const original = path.join(
   process.env.EXMO_ENGINE_ROOT,
   "packages/EXMO_XRAY/samples/AP/AP_01/input.nrrd",
@@ -16,8 +18,8 @@ const original = path.join(
 const hash = () => createHash("sha256").update(fs.readFileSync(original)).digest("hex");
 const originalHash = hash();
 const protectedSources = new Map();
-for (const name of fs.readdirSync(path.join(output, "userdata/imaging/runs"))) {
-  const file = path.join(output, "userdata/imaging/runs", name, "published.json");
+for (const name of fs.readdirSync(path.join(imagingStore, "runs"))) {
+  const file = path.join(imagingStore, "runs", name, "published.json");
   if (!fs.existsSync(file)) continue;
   const publication = JSON.parse(fs.readFileSync(file, "utf8"));
   if (publication.summary.analysis === "xray") continue;
@@ -231,6 +233,13 @@ const deadline = setTimeout(() => {
     "Released drag must stop",
   );
   await capture("ct-result-overlay");
+  contents.sendInputEvent({ type: "mouseWheel", ...imageRect, deltaY: -120, deltaX: 0 });
+  await sleep(500);
+  assert.notEqual(
+    await run(() => Number(document.querySelector('input[aria-label="Slice"]').value)),
+    initialSlice + 10,
+    "Mouse wheel scrolls the actual image viewport",
+  );
   await click("3D anatomy");
   await wait(
     () =>
@@ -749,6 +758,27 @@ const deadline = setTimeout(() => {
     ),
     0,
   );
+  await click("← 결과 목록으로");
+  await wait(() => document.querySelector(".desktop-workspace:not([hidden]) .results-list"));
+  await run(() => {
+    const rows = [...document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list tbody tr")];
+    const ap = rows.find((row) => row.querySelector("strong").textContent === "AP_01");
+    if (!ap) throw new Error("Delivered AP result is missing");
+    ap.querySelector('input[type="checkbox"]').click();
+  });
+  await sleep(200);
+  assert.ok(await run(() => {
+    const rows = [...document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list tbody tr")];
+    const lateral = rows.filter((row) => /^LAT_(LT|RT)_01$/.test(row.querySelector("strong").textContent));
+    return lateral.length === 2 && lateral.every((row) => row.querySelector("input").disabled);
+  }), "AP and LAT comparison must be blocked");
+  await run(() => {
+    const rows = [...document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list tbody tr")];
+    rows.find((row) => row.querySelector("strong").textContent === "LAT_LT_01").click();
+  });
+  await sleep(200);
+  assert.equal(await run(() => document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list input:checked").length), 1,
+    "Whole-row click cannot bypass AP/LAT comparison restriction");
   const access = await run(async () => {
     const paths = [
       "/../desktop/imaging-worker.py",
@@ -811,6 +841,7 @@ const deadline = setTimeout(() => {
           "opaque IDs",
           "physical slice views",
           "middle-button slice drag",
+          "mouse-wheel slice scroll",
           "real CT mesh",
           "existing palette",
           "no demo measurements",
@@ -833,6 +864,7 @@ const deadline = setTimeout(() => {
           "X-ray multi-class overlay",
           "explicit back navigation",
           "AP routing",
+          "AP/LAT mixed comparison rejection",
           "cancel/retry",
           "single inference",
           "input immutability",

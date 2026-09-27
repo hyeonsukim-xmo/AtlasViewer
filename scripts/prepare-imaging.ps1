@@ -28,7 +28,7 @@ try {
       & $UvPath --no-config venv --python 3.12.8 --managed-python $environmentPath
       if ($LASTEXITCODE -ne 0) { throw "Cannot create $name runtime" }
     }
-    $index = if ($name -eq "ct") { "https://download.pytorch.org/whl/cpu" } elseif ($name -eq "mri") { "https://download.pytorch.org/whl/cu128" } else { "https://download.pytorch.org/whl/cu126" }
+    $index = if ($name -eq "ct") { "https://download.pytorch.org/whl/cpu" } else { "https://download.pytorch.org/whl/cu128" }
     & $UvPath --no-config pip install --python $pythonPath -r "desktop/requirements-$name.txt" --extra-index-url $index --index-strategy unsafe-best-match
     if ($LASTEXITCODE -ne 0) { throw "Cannot install $name runtime" }
     & $UvPath --no-config pip check --python $pythonPath

@@ -148,7 +148,8 @@ def ct_inverse(runtime, scratch):
 
 def ct_case_id(value):
     # The vendor rejects leading digits and eight consecutive digits (date-like IDs).
-    return "case_" + hashlib.sha256(value.encode("utf8")).hexdigest().translate(str.maketrans("0123456789", "ghijklmnop"))
+    # Retain 128 bits of identity while leaving room for Windows transaction filenames.
+    return "case_" + hashlib.sha256(value.encode("utf8")).hexdigest()[:32].translate(str.maketrans("0123456789", "ghijklmnop"))
 
 
 def run_ct(root, job):

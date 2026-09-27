@@ -21,5 +21,5 @@ python-dateutil==2.9.0.post0
 setuptools==78.1.0
 six==1.17.0
 sympy==1.14.0
-torch==2.7.0+cu126
+torch==2.7.0+cu128
 typing-extensions==4.13.2

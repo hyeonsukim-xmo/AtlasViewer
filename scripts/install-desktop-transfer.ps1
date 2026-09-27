@@ -43,4 +43,8 @@ $installerPath = Join-Path $bundleRoot "EXMO-Atlas-Setup.exe"
 Write-Output "Installing EXMO Atlas..."
 $installer = Start-Process -FilePath $installerPath -ArgumentList "/S" -WindowStyle Hidden -Wait -PassThru
 if ($installer.ExitCode -ne 0) { throw "Desktop installer failed: $($installer.ExitCode)" }
+# Apply the verified transfer adapter, including machine-compatibility corrections.
+$installedAdapter = Join-Path $env:LOCALAPPDATA "Programs/exmo-segmentation-atlas/resources/imaging/model-runner.py"
+if (-not (Test-Path -LiteralPath $installedAdapter)) { throw "Cannot locate installed Desktop adapter: $installedAdapter" }
+Copy-Item -LiteralPath (Join-Path $bundleRoot "desktop/model-runner.py") -Destination $installedAdapter -Force
 Write-Output "Setup complete. Open EXMO Atlas from its shortcut. Run 02-Verify-workflows.cmd for real sample inference."

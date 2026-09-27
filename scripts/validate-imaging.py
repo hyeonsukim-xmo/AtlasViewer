@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -31,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", action="store_true")
     args = parser.parse_args()
-    engine = ROOT / "work/modality-integration"
+    engine = Path(os.environ.get("EXMO_ENGINE_ROOT", ROOT / "work/modality-integration"))
     worker = module("imaging_worker", ROOT / "desktop/imaging-worker.py")
     runner = module("model_runner", ROOT / "desktop/model-runner.py")
     sys.path.insert(0, str(engine / "packages/EXMO_CT/src"))
@@ -39,6 +40,7 @@ def main():
     # Real import UUIDs can start with digits or contain a date-like digit run.
     ids = ["2f58176a1fc24e848116d39f65316815", "0" * 32, "a12345678" + "f" * 23, "EXMO_CASE_001"]
     mapped = [identifier(runner.ct_case_id(value)) for value in ids]
+    assert all(len(value) == 37 for value in mapped), "Leave room for Windows transaction paths"
     assert len(set(mapped)) == len(ids) and mapped == [runner.ct_case_id(value) for value in ids]
     output = ROOT / "outputs/imaging-check"
     output.mkdir(exist_ok=True, parents=True)
