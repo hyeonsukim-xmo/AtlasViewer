@@ -39,6 +39,7 @@ def prepare(source, target):
         actual = digest(archive)
         if actual != expected:
             raise ValueError("Archive checksum mismatch: " + filename)
+        print(json.dumps({"stage": "extracting", "archive": filename}), flush=True)
         if filename.endswith(".zip"):
             with zipfile.ZipFile(archive) as package:
                 members = package.infolist()

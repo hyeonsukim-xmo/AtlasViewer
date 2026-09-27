@@ -95,7 +95,13 @@ bilateral values from the demo.
 
 ### Local engine setup
 
-Install Python 3.12, uv and Node, then use the supplied private deliveries:
+For a second Windows PC, use the private transfer folder and the
+[Desktop transfer guide](docs/EXMO_DESKTOP_TRANSFER.md): `01-Install.cmd` installs
+the app and engine; `02-Verify-workflows.cmd` runs all five delivered sample routes.
+The complete folder is required. Initial setup needs internet; subsequent local
+analysis does not. Weights and sample/reference data remain outside GitHub.
+
+For source development, install uv and Node, then use the supplied private deliveries:
 
 ```powershell
 npm ci
@@ -103,10 +109,11 @@ npm run desktop:engine -- -Source "Y:\김현수\temp\260927"
 npm run desktop
 ```
 
-Setup checks archive and payload SHA-256 values and creates four pinned environments
-under ignored `work/modality-integration`. The app stores the engine directory in
+Setup installs a private managed Python 3.12.8, checks archive and payload SHA-256
+values, creates four pinned environments under ignored `work/modality-integration`,
+and verifies dependency imports and actual CPU/CUDA execution. The app stores the engine directory in
 `%APPDATA%/EXMO Atlas/engine.json`; `EXMO_ENGINE_ROOT` can override it for tests.
-Keep that directory and its Python base interpreter installed. GPU MRI/X-ray need a
+Keep that directory, including its `python` folder, installed. GPU MRI/X-ray need a
 compatible NVIDIA driver; explicit CPU execution is also exposed. Only one analysis
 job runs at a time. Cancellation terminates its owned process tree and does not
 publish partial results. CT uses a disk-backed probability inverse with the same

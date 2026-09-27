@@ -22,6 +22,7 @@
     "test:desktop": "npm run build:desktop && electron scripts/validate-desktop.cjs",
     "test:classifier": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-classifier.py",
     "test:imaging": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-imaging.py",
+    "test:transfer": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-transfer-integrity.py",
     "test:imaging:desktop": "npm run build && npm run build:desktop && electron scripts/validate-imaging-desktop.cjs"
   },
   "dependencies": {
