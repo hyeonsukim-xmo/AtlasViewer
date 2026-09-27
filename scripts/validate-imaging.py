@@ -34,6 +34,12 @@ def main():
     engine = ROOT / "work/modality-integration"
     worker = module("imaging_worker", ROOT / "desktop/imaging-worker.py")
     runner = module("model_runner", ROOT / "desktop/model-runner.py")
+    sys.path.insert(0, str(engine / "packages/EXMO_CT/src"))
+    from thigh_muscle_seg_ct.core.artifacts import identifier
+    # Real import UUIDs can start with digits or contain a date-like digit run.
+    ids = ["2f58176a1fc24e848116d39f65316815", "0" * 32, "a12345678" + "f" * 23, "EXMO_CASE_001"]
+    mapped = [identifier(runner.ct_case_id(value)) for value in ids]
+    assert len(set(mapped)) == len(ids) and mapped == [runner.ct_case_id(value) for value in ids]
     output = ROOT / "outputs/imaging-check"
     output.mkdir(exist_ok=True, parents=True)
     report = {"geometry": [], "replays": {}}

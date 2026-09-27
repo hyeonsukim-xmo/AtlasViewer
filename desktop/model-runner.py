@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import importlib.util
 import itertools
 import json
@@ -145,12 +146,18 @@ def ct_inverse(runtime, scratch):
     return inverse
 
 
+def ct_case_id(value):
+    # The vendor rejects leading digits and eight consecutive digits (date-like IDs).
+    return "case_" + hashlib.sha256(value.encode("utf8")).hexdigest().translate(str.maketrans("0123456789", "ghijklmnop"))
+
+
 def run_ct(root, job):
     import numpy as np
     import torch
     import SimpleITK as sitk
     runtime = load_module("exmo_ct_vendor", root / "run.py")
     from thigh_muscle_seg_ct.core import atomic
+    from thigh_muscle_seg_ct.core.artifacts import identifier
     windows_transactions(atomic)
     cfg = read(root / "configs/inference.json")
     torch.set_num_threads(4)
@@ -159,7 +166,8 @@ def run_ct(root, job):
     np.random.seed(cfg["seed"])
     torch.use_deterministic_algorithms(True)
     source = Path(job["input"])
-    case = {"case_id": job["id"], "input": str(source), "input_sha256": runtime.sha256_file(source)}
+    case_id = identifier(ct_case_id(job["id"]))
+    case = {"case_id": case_id, "input": str(source), "input_sha256": runtime.sha256_file(source)}
     for name in ("hu_evidence", "source_proof"):
         case[name + "_sha256"] = runtime.sha256_file(source.parent / (name + ".json"))
     device = "cpu"  # Supplied, verified CT recipe is FP32 CPU; no implicit CUDA/AMP conversion.
@@ -170,7 +178,7 @@ def run_ct(root, job):
     runtime.inverse = ct_inverse(runtime, output)
     runtime.log = lambda event, **value: emit(event, **value)
     runtime.run_case(case, cfg, model, model_hash, device, output, 4)
-    return output / job["id"]
+    return output / case_id
 
 
 def run_mri(root, job):
@@ -294,7 +302,7 @@ def main():
     handler = {"ct": run_ct, "mri": run_mri, "xray": run_ap if job.get("route") == "AP" else run_lat}[modality]
     result = handler(root, job)
     identity = {"schema": 1, "analysis": modality, "route": job.get("route"), "seconds": time.monotonic() - start,
-                "adapter": "EXMO_WINDOWS_V1", "adapter_sha256": __import__("hashlib").sha256(Path(__file__).read_bytes()).hexdigest(), "complete": True}
+                "adapter": "EXMO_WINDOWS_V1", "adapter_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "complete": True}
     (result / "desktop-complete.json").write_text(json.dumps(identity), encoding="utf-8")
     emit("complete", result=str(result), **identity)
 
