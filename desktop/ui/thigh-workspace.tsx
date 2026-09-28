@@ -1,3 +1,4 @@
+import { t, useLanguage, localeTag } from "./language";
 import { useEffect, useRef, useState } from "react";
 import ImagePreview from "./image-preview";
 import ResultView from "./result-view";
@@ -25,6 +26,7 @@ export default function ThighWorkspace({
   onBack: () => void;
   initialResult?: string;
 }) {
+  const language = useLanguage();
   const [model, setModel] = useState<ModelStatus>();
   const [files, setFiles] = useState<ImagingFile[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -152,7 +154,7 @@ export default function ThighWorkspace({
     setChanging(true);
     setError("");
     try {
-      const added = unwrap(await window.exmoDesktop.chooseFiles(analysis, folder));
+      const added = unwrap(await window.exmoDesktop.chooseFiles(analysis, folder, language));
       setFiles((old) => [...old, ...added]);
       if (added.length) {
         setActive(added[0].id);
@@ -228,24 +230,26 @@ export default function ThighWorkspace({
       <header className="workspace-heading">
         <div>
           <button className="clinical-button back-button" onClick={onBack}>
-            ← 분석 선택으로
+            {t("← 분석 선택으로")}
           </button>
           <h1>
             {name} <span>Thigh muscle estimation</span>
           </h1>
           <p>
             {analysis === "ct"
-              ? "3D CT · HU 기반 근육 체적 분석"
+              ? t("3D CT · HU 기반 근육 체적 분석")
               : analysis === "mri"
-                ? "3D MRI Water · 근육 체적 분석"
-                : "AP / LAT-LT / LAT-RT · 근육 투영 면적 분석"}
+                ? t("3D MRI Water · 근육 체적 분석")
+                : t("AP / LAT-LT / LAT-RT · 근육 투영 면적 분석")}
           </p>
         </div>
         <span className="engine-state">
-          {model?.estimationAvailable ? `엔진 연결됨 · ${model.device}` : "엔진 확인 중"}
+          {model?.estimationAvailable
+            ? t("엔진 연결됨 · {{value0}}", { value0: model.device })
+            : t("엔진 확인 중")}
         </span>
       </header>
-      <div className="workflow-tabs" role="tablist" aria-label="분석 단계">
+      <div className="workflow-tabs" role="tablist" aria-label={t("분석 단계")}>
         {(["input", "review", "results"] as const).map((value, i) => (
           <button
             key={value}
@@ -253,7 +257,7 @@ export default function ThighWorkspace({
             aria-selected={step === value}
             onClick={() => setStep(value)}
           >
-            {["영상·Series", "선택 영상 검토", "분석 결과"][i]}
+            {[t("영상·Series"), t("선택 영상 검토"), t("분석 결과")][i]}
             <span>{[files.length, selected.length, results.length][i]}</span>
           </button>
         ))}
@@ -261,14 +265,14 @@ export default function ThighWorkspace({
       </div>
       {error && (
         <p className="inline-error" role="alert">
-          {error}
+          {t(error)}
         </p>
       )}
       {running && (
         <div className="job-status" role="status">
           <div>
             <strong>
-              {job.analysis.toUpperCase()} · {job.stage}
+              {job.analysis.toUpperCase()} · {t(job.stage)}
             </strong>
             <span>
               {job.current} · {job.completed.length + job.failed.length} / {job.total}
@@ -276,7 +280,7 @@ export default function ThighWorkspace({
           </div>
           <progress max={100} value={job.progress ?? undefined} />
           <button className="clinical-button" disabled={changing} onClick={() => void cancel()}>
-            실행 취소
+            {t("실행 취소")}
           </button>
         </div>
       )}
@@ -284,7 +288,7 @@ export default function ThighWorkspace({
         <div className="inline-error" role="alert">
           {job.failed.map((file) => (
             <p key={file.id}>
-              {file.name} · {file.error}
+              {file.name} · {t(file.error)}
             </p>
           ))}
         </div>
@@ -294,8 +298,8 @@ export default function ThighWorkspace({
           <div className="workspace-actions">
             <input
               className="clinical-search"
-              aria-label="Series 검색"
-              placeholder="Case / Study / Series 검색"
+              aria-label={t("Series 검색")}
+              placeholder={t("Case / Study / Series 검색")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -304,21 +308,21 @@ export default function ThighWorkspace({
               disabled={busy || !files.length}
               onClick={() => void clear()}
             >
-              목록 비우기
+              {t("목록 비우기")}
             </button>
             <button
               className="clinical-button"
               disabled={busy || !model?.reviewAvailable}
               onClick={() => void add(true)}
             >
-              DICOM 폴더
+              {t("DICOM 폴더")}
             </button>
             <button
               className="clinical-button primary"
               disabled={busy || !model?.reviewAvailable}
               onClick={() => void add()}
             >
-              영상 추가
+              {t("영상 추가")}
             </button>
           </div>
           <div className="input-layout">
@@ -330,7 +334,7 @@ export default function ThighWorkspace({
                       <th>
                         <input
                           type="checkbox"
-                          aria-label="분석 가능한 영상 전체 선택"
+                          aria-label={t("분석 가능한 영상 전체 선택")}
                           checked={
                             files.length > 0 &&
                             files
@@ -348,8 +352,8 @@ export default function ThighWorkspace({
                         />
                       </th>
                       <th>Case / Series description</th>
-                      <th>영상</th>
-                      <th>상태</th>
+                      <th>{t("영상")}</th>
+                      <th>{t("상태")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -367,7 +371,7 @@ export default function ThighWorkspace({
                         <td>
                           <input
                             type="checkbox"
-                            aria-label={`${file.name} 분석 선택`}
+                            aria-label={t("{{value0}} 분석 선택", { value0: file.name })}
                             checked={selected.includes(file.id)}
                             disabled={busy || !file.ready}
                             onChange={(e) => include(file.id, e.target.checked)}
@@ -386,7 +390,7 @@ export default function ThighWorkspace({
                             <strong>{file.metadata?.caseName || file.name}</strong>
                             <span>{file.metadata?.seriesDescription || file.name}</span>
                             <small>
-                              {file.metadata?.studyDescription || "Study description 없음"}
+                              {file.metadata?.studyDescription || t("Study description 없음")}
                             </small>
                           </button>
                         </td>
@@ -397,11 +401,13 @@ export default function ThighWorkspace({
                         <td>
                           <span className={file.ready ? "status-ready" : "status-review"}>
                             {file.classification?.predicted_label ||
-                              (file.ready ? "입력 확인됨" : "검토 필요")}
+                              (file.ready ? t("입력 확인됨") : t("검토 필요"))}
                           </span>
                           {file.confirmation && (
                             <small>
-                              {file.confirmation === "hu" ? "HU 확인 필요" : "Water 확인 필요"}
+                              {file.confirmation === "hu"
+                                ? t("HU 확인 필요")
+                                : t("Water 확인 필요")}
                             </small>
                           )}
                         </td>
@@ -412,14 +418,14 @@ export default function ThighWorkspace({
                 {!files.length && (
                   <div className="clinical-empty">
                     <strong>
-                      {changing ? "영상과 metadata 확인 중" : "등록된 영상이 없습니다"}
+                      {changing ? t("영상과 metadata 확인 중") : t("등록된 영상이 없습니다")}
                     </strong>
                     <p>
                       {analysis === "mri"
-                        ? "Water sequence의 DICOM series 또는 3D NRRD·NIfTI를 추가하세요."
+                        ? t("Water sequence의 DICOM series 또는 3D NRRD·NIfTI를 추가하세요.")
                         : analysis === "ct"
-                          ? "DICOM series 또는 mm geometry가 포함된 3D NRRD·NIfTI를 추가하세요."
-                          : "X-ray DICOM·NRRD를 추가하면 촬영 방향을 확인합니다."}
+                          ? t("DICOM series 또는 mm geometry가 포함된 3D NRRD·NIfTI를 추가하세요.")
+                          : t("X-ray DICOM·NRRD를 추가하면 촬영 방향을 확인합니다.")}
                     </p>
                   </div>
                 )}
@@ -430,27 +436,27 @@ export default function ThighWorkspace({
                 <>
                   <div className="panel-title">
                     <strong>{current.metadata.seriesDescription}</strong>
-                    <span>{hovered ? "Hover preview" : "선택 영상"}</span>
+                    <span>{hovered ? "Hover preview" : t("선택 영상")}</span>
                   </div>
                   <ImagePreview key={current.id} analysis={analysis} id={current.id} />
                   <div className="metadata-strip">
                     <span>{current.metadata.size.join(" × ")}</span>
                     <span>{current.metadata.spacing.map((n) => number(n, 3)).join(" × ")} mm</span>
                   </div>
-                  {current.error && <p className="inline-error">{current.error}</p>}
+                  {current.error && <p className="inline-error">{t(current.error)}</p>}
                   {current.warnings?.map((warning) => (
                     <p className="muted-note" key={warning}>
-                      {warning}
+                      {t(warning)}
                     </p>
                   ))}
                   {current.classification && (
                     <details className="qc-details">
-                      <summary>촬영 방향 분류 상세</summary>
+                      <summary>{t("촬영 방향 분류 상세")}</summary>
                       <p>
                         {current.classification.predicted_label} ·{" "}
                         {number(current.classification.confidence * 100)}%
                       </p>
-                      <p>분류 점수이며 segmentation 정확도가 아닙니다.</p>
+                      <p>{t("분류 점수이며 segmentation 정확도가 아닙니다.")}</p>
                     </details>
                   )}
                 </>
@@ -458,7 +464,8 @@ export default function ThighWorkspace({
                 <div className="clinical-empty">
                   <span>Series preview</span>
                   <p>
-                    {current?.error || "목록에 마우스를 올려 영상을 확인하고, 클릭해 고정합니다."}
+                    {t(current?.error) ||
+                      t("목록에 마우스를 올려 영상을 확인하고, 클릭해 고정합니다.")}
                   </p>
                 </div>
               )}
@@ -466,14 +473,16 @@ export default function ThighWorkspace({
           </div>
           <footer className="workspace-bottom">
             <span>
-              {selected.length}개 분석 선택 {changing && "· 영상 가져오는 중"}
+              {selected.length}
+              {t("개 분석 선택 ")}
+              {changing && t("· 영상 가져오는 중")}
             </span>
             <button
               className="clinical-button primary"
               disabled={!selected.length || busy}
               onClick={() => setStep("review")}
             >
-              선택 영상 검토
+              {t("선택 영상 검토")}
             </button>
           </footer>
         </>
@@ -502,7 +511,7 @@ export default function ThighWorkspace({
                     disabled={busy}
                     onClick={() => include(file.id, false)}
                   >
-                    제외
+                    {t("제외")}
                   </button>
                 </div>
                 <ImagePreview analysis={analysis} id={file.id} compact />
@@ -527,8 +536,8 @@ export default function ThighWorkspace({
                         }
                       />
                       {file.confirmation === "hu"
-                        ? "이 영상의 voxel 값이 HU 단위임을 확인했습니다."
-                        : "이 영상이 Water sequence임을 확인했습니다."}
+                        ? t("이 영상의 voxel 값이 HU 단위임을 확인했습니다.")
+                        : t("이 영상이 Water sequence임을 확인했습니다.")}
                     </label>
                   )}
                 </div>
@@ -536,16 +545,19 @@ export default function ThighWorkspace({
             ))}
             {!chosen.length && (
               <div className="clinical-empty">
-                <strong>검토할 영상이 없습니다</strong>
-                <p>영상·Series 탭에서 분석 대상을 선택하세요.</p>
+                <strong>{t("검토할 영상이 없습니다")}</strong>
+                <p>{t("영상·Series 탭에서 분석 대상을 선택하세요.")}</p>
               </div>
             )}
           </div>
           <footer className="workspace-bottom">
-            <span>{chosen.length}개 검사 · 우클릭으로 분석 선택 해제</span>
+            <span>
+              {chosen.length}
+              {t("개 검사 · 우클릭으로 분석 선택 해제")}
+            </span>
             {analysis !== "ct" && (
               <select
-                aria-label="추론 장치"
+                aria-label={t("추론 장치")}
                 value={device}
                 disabled={busy}
                 onChange={(e) => setDevice(e.target.value)}
@@ -559,7 +571,7 @@ export default function ThighWorkspace({
               disabled={busy || !canRun || !model?.estimationAvailable}
               onClick={() => void run()}
             >
-              Segmentation 실행
+              {t("Segmentation 실행")}
             </button>
           </footer>
         </>
@@ -567,24 +579,28 @@ export default function ThighWorkspace({
       {step === "results" && (
         <>
           <div className="workspace-actions">
-            <span>{results.length}개 완료된 검사</span>
+            <span>
+              {results.length}
+              {t("개 완료된 검사")}
+            </span>
             <button
               className="clinical-button"
               disabled={compared.length < 2}
               onClick={() => setOpened(compared)}
             >
-              선택 검사 비교 ({compared.length}/3)
+              {t("선택 검사 비교 (")}
+              {compared.length}/3)
             </button>
           </div>
           <div className="results-list">
             <table className="clinical-table">
               <thead>
                 <tr>
-                  <th>비교</th>
+                  <th>{t("비교")}</th>
                   <th>Case / Study</th>
                   <th>Series</th>
-                  <th>결과</th>
-                  <th>분석 일시</th>
+                  <th>{t("결과")}</th>
+                  <th>{t("분석 일시")}</th>
                   <th />
                 </tr>
               </thead>
@@ -598,11 +614,11 @@ export default function ThighWorkspace({
                   >
                     <td>
                       <input
-                        aria-label={`${result.name} 비교`}
+                        aria-label={t("{{value0}} 비교", { value0: result.name })}
                         type="checkbox"
                         checked={compared.includes(result.id)}
                         disabled={comparisonBlocked(result)}
-                        title="동일한 class 구성의 결과끼리 최대 3개 비교"
+                        title={t("동일한 class 구성의 결과끼리 최대 3개 비교")}
                         onClick={(e) => e.stopPropagation()}
                         onChange={() => toggleComparison(result)}
                       />
@@ -614,19 +630,22 @@ export default function ThighWorkspace({
                     <td>{result.metadata.seriesDescription}</td>
                     <td>
                       {result.rows.length} structures · {result.unit}
-                      <small>{result.variant.toUpperCase()} · 임상 검토 전</small>
+                      <small>
+                        {result.variant.toUpperCase()}
+                        {t(" · 임상 검토 전")}
+                      </small>
                     </td>
-                    <td>{new Date(result.createdAt).toLocaleString("ko-KR")}</td>
+                    <td>{new Date(result.createdAt).toLocaleString(localeTag())}</td>
                     <td>
                       <button
                         className="clinical-button"
-                        aria-label={`${result.metadata.caseName} 결과 열기`}
+                        aria-label={t("{{value0}} 결과 열기", { value0: result.metadata.caseName })}
                         onClick={(e) => {
                           e.stopPropagation();
                           setOpened([result.id]);
                         }}
                       >
-                        결과 열기
+                        {t("결과 열기")}
                       </button>
                     </td>
                   </tr>
@@ -635,8 +654,8 @@ export default function ThighWorkspace({
             </table>
             {!results.length && (
               <div className="clinical-empty">
-                <strong>완료된 분석이 없습니다</strong>
-                <p>분석 완료 후 실제 측정값·Overlay·3D 결과가 저장됩니다.</p>
+                <strong>{t("완료된 분석이 없습니다")}</strong>
+                <p>{t("분석 완료 후 실제 측정값·Overlay·3D 결과가 저장됩니다.")}</p>
               </div>
             )}
           </div>

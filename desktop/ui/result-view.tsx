@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./language";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import AnatomyScene from "../../app/scene";
 import { GROUPS, INITIAL_STATE, inGroup, type SceneState } from "../../app/anatomy";
@@ -13,6 +14,7 @@ import {
 const sideName = { left: "Left", right: "Right", unassigned: "미분류" };
 
 function SideValues({ row, primarySide }: { row: MetricRow; primarySide: AnatomicalSide }) {
+  useLanguage();
   if (!row.sides) return null;
   const order: AnatomicalSide[] = primarySide === "right" ? ["right", "left"] : ["left", "right"];
   return (
@@ -20,8 +22,8 @@ function SideValues({ row, primarySide }: { row: MetricRow; primarySide: Anatomi
       {order.map((side) => (
         <div key={side} data-primary={primarySide === side}>
           <span>
-            {sideName[side]}
-            {primarySide === side && " · 현재"}
+            {t(sideName[side])}
+            {primarySide === side && t(" · 현재")}
           </span>
           <strong>{number(row.sides![side].count ? row.sides![side].value : null)}</strong>
           {row.sides![side].fat != null && <small>Fat-range {number(row.sides![side].fat)}%</small>}
@@ -32,19 +34,23 @@ function SideValues({ row, primarySide }: { row: MetricRow; primarySide: Anatomi
       ))}
       <small
         className="bilateral-difference"
-        title="|L − R| / mean(L, R) × 100. 양쪽이 검출되고 미분류가 없을 때만 계산합니다."
+        title={t("|L − R| / mean(L, R) × 100. 양쪽이 검출되고 미분류가 없을 때만 계산합니다.")}
       >
         {row.sides.differencePercent == null ? (
-          "Δ 판정 보류"
+          t("Δ 판정 보류")
         ) : (
           <>
-            차이 {number(row.sides.differenceCm3)} cm³ · 양측 평균 대비{" "}
-            {number(row.sides.differencePercent)}%
+            {t("차이 ")}
+            {number(row.sides.differenceCm3)}
+            {t(" cm³ · 양측 평균 대비")} {number(row.sides.differencePercent)}%
           </>
         )}
       </small>
       {row.sides.unassigned.count > 0 && (
-        <small className="side-unassigned">미분류 {number(row.sides.unassigned.value)} cm³</small>
+        <small className="side-unassigned">
+          {t("미분류 ")}
+          {number(row.sides.unassigned.value)} cm³
+        </small>
       )}
     </div>
   );
@@ -59,6 +65,7 @@ export default function ResultView({
   onClose: () => void;
   onUpdate: (result: AnalysisResult) => void;
 }) {
+  useLanguage();
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
   const [requestedMode, setMode] = useState<"overlay" | "3d">("overlay");
   const [state, setState] = useState<SceneState<string>>({ ...INITIAL_STATE, group: "All" });
@@ -213,14 +220,16 @@ export default function ResultView({
       <header className="workspace-heading">
         <div>
           <button className="clinical-button back-button" onClick={onClose}>
-            ← 결과 목록으로
+            {t("← 결과 목록으로")}
           </button>
           <h1>
-            {results.length > 1 ? `${results.length}개 검사 비교` : primary.metadata.caseName}
+            {results.length > 1
+              ? t("{{value0}}개 검사 비교", { value0: results.length })
+              : primary.metadata.caseName}
           </h1>
           <p>
             {results.length > 1
-              ? `${primary.analysis.toUpperCase()} · 구조 이름 기준 비교`
+              ? t("{{value0}} · 구조 이름 기준 비교", { value0: primary.analysis.toUpperCase() })
               : `${primary.metadata.studyDescription || primary.name} · ${primary.analysis.toUpperCase()} · ${primary.variant.toUpperCase()}`}
           </p>
         </div>
@@ -242,7 +251,7 @@ export default function ResultView({
       </header>
       {error && (
         <p className="inline-error" role="alert">
-          {error}
+          {t(error)}
         </p>
       )}
       <div
@@ -256,25 +265,31 @@ export default function ResultView({
           <div className="panel-title">
             <div className="control-segment">
               <button aria-pressed={table === "metrics"} onClick={() => setTable("metrics")}>
-                측정값
+                {t("측정값")}
               </button>
               <button aria-pressed={table === "qc"} onClick={() => setTable("qc")}>
-                QC·후처리
+                {t("QC·후처리")}
               </button>
             </div>
           </div>
           <div className="metric-note">
             {primary.analysis === "xray"
-              ? "Projection area · 체적 환산 없음"
-              : "촬영 범위 내 체적 · 환자 기준 좌우"}{" "}
+              ? t("Projection area · 체적 환산 없음")
+              : t("촬영 범위 내 체적 · 환자 기준 좌우")}{" "}
             · {primary.unit}
-            <span> · {allSelected ? "전체 구조 선택" : `${selectedIds.length}개 구조 선택`}</span>
+            <span>
+              {" "}
+              ·{" "}
+              {allSelected
+                ? t("전체 구조 선택")
+                : t("{{value0}}개 구조 선택", { value0: selectedIds.length })}
+            </span>
           </div>
           {primary.analysis === "mri" && table === "qc" && (
             <label className="qc-threshold">
-              TTA 검토 기준
+              {t("TTA 검토 기준")}
               <input
-                aria-label="TTA 검토 기준 %"
+                aria-label={t("TTA 검토 기준 %")}
                 type="number"
                 min={0}
                 max={100}
@@ -290,7 +305,7 @@ export default function ResultView({
           )}
           {(changing || preparing) && (
             <p className="metric-note" role="status">
-              {preparing ? "좌우 측정·3D 준비 중" : "결과 variant 준비 중"}
+              {preparing ? t("좌우 측정·3D 준비 중") : t("결과 variant 준비 중")}
             </p>
           )}
           <div className="metric-scroll">
@@ -302,7 +317,7 @@ export default function ResultView({
                       <label className="metric-name">
                         <input
                           type="checkbox"
-                          aria-label="전체 구조 선택"
+                          aria-label={t("전체 구조 선택")}
                           checked={allSelected}
                           ref={(input) => {
                             if (input) input.indeterminate = !allSelected && selectedIds.length > 0;
@@ -312,7 +327,7 @@ export default function ResultView({
                         Structure
                       </label>
                     ) : (
-                      "QC / 처리"
+                      t("QC / 처리")
                     )}
                   </th>
                   {results.map((result) => (
@@ -322,14 +337,16 @@ export default function ResultView({
                       </strong>
                       {result.analysis === "mri" ? (
                         <select
-                          aria-label={`${result.metadata.caseName} MRI 결과 variant`}
+                          aria-label={t("{{value0}} MRI 결과 variant", {
+                            value0: result.metadata.caseName,
+                          })}
                           disabled={changing || preparing}
                           value={result.variant}
                           onChange={(e) => void changeVariant(result, e.target.value)}
                         >
                           <option value="raw">Raw</option>
                           <option value="pp500">PP500</option>
-                          <option value="strong">강화 후보</option>
+                          <option value="strong">{t("강화 후보")}</option>
                         </select>
                       ) : (
                         <small>{result.unit}</small>
@@ -337,7 +354,7 @@ export default function ResultView({
                       {result.qc.ttaDisagreement != null &&
                         result.qc.ttaDisagreement * 100 > ttaThreshold && (
                           <button className="qc-review" onClick={() => setTable("qc")}>
-                            검토 필요
+                            {t("검토 필요")}
                           </button>
                         )}
                       {table === "metrics" && result.analysis !== "xray" && (
@@ -362,7 +379,7 @@ export default function ResultView({
                         <button
                           className="metric-name"
                           type="button"
-                          aria-label={`${row.name} 선택`}
+                          aria-label={t("{{value0}} 선택", { value0: row.name })}
                           aria-pressed={selectedIds.includes(row.id)}
                         >
                           <span className="class-dot" style={{ background: row.color }} />
@@ -383,9 +400,15 @@ export default function ResultView({
                             {own?.rawValue != null && result.variant !== "raw" && (
                               <small
                                 className="pp-difference"
-                                title={`Raw ${number(own.rawValue)} ${result.unit} · 제거 ${number(own.rawValue - own.value)} ${result.unit}`}
+                                title={t("Raw {{value0}} {{value1}} · 제거 {{value2}} {{value3}}", {
+                                  value0: number(own.rawValue),
+                                  value1: result.unit,
+                                  value2: number(own.rawValue - own.value),
+                                  value3: result.unit,
+                                })}
                               >
-                                제거 {number(own.rawValue - own.value)}
+                                {t("제거 ")}
+                                {number(own.rawValue - own.value)}
                               </small>
                             )}
                           </td>
@@ -398,18 +421,22 @@ export default function ResultView({
                 <tbody>
                   {primary.analysis !== "xray" && (
                     <tr>
-                      <td>좌우 분류</td>
+                      <td>{t("좌우 분류")}</td>
                       {results.map((result) => (
                         <td key={result.id}>
-                          {result.laterality?.reason || "좌우 정보 준비 전"}
+                          {t(result.laterality?.reason) || t("좌우 정보 준비 전")}
                           {result.laterality && (
-                            <small>미분류 {number(result.laterality.unassignedCm3)} cm³</small>
+                            <small>
+                              {t("미분류 ")}
+                              {number(result.laterality.unassignedCm3)} cm³
+                            </small>
                           )}
                           {result.rows
                             .filter((row) => row.sides?.unassigned.count)
                             .map((row) => (
                               <p key={row.id}>
-                                {row.name} · {number(row.sides!.unassigned.value)} cm³ 판정 보류
+                                {row.name} · {number(row.sides!.unassigned.value)}
+                                {t(" cm³ 판정 보류")}
                               </p>
                             ))}
                         </td>
@@ -423,7 +450,7 @@ export default function ResultView({
                     ))}
                   </tr>
                   <tr>
-                    <td>처리 시간</td>
+                    <td>{t("처리 시간")}</td>
                     {results.map((r) => (
                       <td key={r.id}>{number(r.seconds, 0)} s</td>
                     ))}
@@ -442,13 +469,16 @@ export default function ResultView({
                             {r.qc.ttaDisagreement != null &&
                               r.qc.ttaDisagreement * 100 > ttaThreshold && (
                                 <>
-                                  <small className="qc-review">{ttaThreshold}% 초과</small>
+                                  <small className="qc-review">
+                                    {ttaThreshold}
+                                    {t("% 초과")}
+                                  </small>
                                   <button
                                     className="clinical-button"
                                     disabled={changing || preparing || r.variant === "strong"}
                                     onClick={() => void changeVariant(r, "strong")}
                                   >
-                                    강화 후보 비교
+                                    {t("강화 후보 비교")}
                                   </button>
                                 </>
                               )}
@@ -462,19 +492,19 @@ export default function ResultView({
                         ))}
                       </tr>
                       <tr>
-                        <td>후처리</td>
+                        <td>{t("후처리")}</td>
                         {results.map((r) => (
                           <td key={r.id}>
                             {r.variant === "raw"
-                              ? "없음"
+                              ? t("없음")
                               : r.variant === "pp500"
-                                ? "500 mm³ 미만 제거"
-                                : "PP500 + 근육별 최대 2성분"}
+                                ? t("500 mm³ 미만 제거")
+                                : t("PP500 + 근육별 최대 2성분")}
                           </td>
                         ))}
                       </tr>
                       <tr>
-                        <td>Raw 대비 제거량</td>
+                        <td>{t("Raw 대비 제거량")}</td>
                         {results.map((r) => (
                           <td key={r.id}>
                             {r.qc.postprocessing ? (
@@ -505,30 +535,34 @@ export default function ResultView({
                               return (
                                 <p key={flag}>
                                   {match
-                                    ? `${r.rows.find((row) => row.label === Number(match[1]))?.name || match[1]} · 1 cm³ 초과 성분 > 2`
-                                    : flag}
+                                    ? t("{{value0}} · 1 cm³ 초과 성분 > 2", {
+                                        value0:
+                                          r.rows.find((row) => row.label === Number(match[1]))
+                                            ?.name || match[1],
+                                      })
+                                    : t(flag)}
                                 </p>
                               );
                             })
-                          : "해당 경고 없음"}
+                          : t("해당 경고 없음")}
                       </td>
                     ))}
                   </tr>
                   <tr>
-                    <td>미검출 구조</td>
+                    <td>{t("미검출 구조")}</td>
                     {results.map((r) => (
                       <td key={r.id}>
                         {r.rows
                           .filter((row) => !row.present)
                           .map((row) => row.name)
-                          .join(", ") || "없음"}
+                          .join(", ") || t("없음")}
                       </td>
                     ))}
                   </tr>
                   <tr>
-                    <td>예상 외 label</td>
+                    <td>{t("예상 외 label")}</td>
                     {results.map((r) => (
-                      <td key={r.id}>{r.qc.unexpected.join(", ") || "없음"}</td>
+                      <td key={r.id}>{r.qc.unexpected.join(", ") || t("없음")}</td>
                     ))}
                   </tr>
                 </tbody>
@@ -536,33 +570,38 @@ export default function ResultView({
             </table>
           </div>
           <details className="qc-details">
-            <summary>측정·후처리 기준</summary>
+            <summary>{t("측정·후처리 기준")}</summary>
             <p>
               {primary.analysis === "ct"
-                ? "Fat-range: −190 ~ −30 HU 범위 voxel 비율. 임상 지방침윤율·PDFF와 다릅니다."
+                ? t("Fat-range: −190 ~ −30 HU 범위 voxel 비율. 임상 지방침윤율·PDFF와 다릅니다.")
                 : primary.analysis === "mri"
-                  ? "Water-only 모델은 지방침윤을 계산하지 않습니다. Entropy는 검토 지표이며 보정된 신뢰도가 아닙니다."
-                  : "촬영 방향 점수는 분류 모델 점수입니다. Segmentation 정확도·근육 지방침윤율이 아닙니다."}
+                  ? t(
+                      "Water-only 모델은 지방침윤을 계산하지 않습니다. Entropy는 검토 지표이며 보정된 신뢰도가 아닙니다.",
+                    )
+                  : t(
+                      "촬영 방향 점수는 분류 모델 점수입니다. Segmentation 정확도·근육 지방침윤율이 아닙니다.",
+                    )}
             </p>
             {primary.analysis === "mri" && (
               <>
                 <p>
-                  강화 후보: 6-connectivity에서 500 mm³ 미만 성분을 제거하고 근육 label 1–23은 큰
-                  성분을 최대 2개 유지합니다. 몸통·뼈 label 24–28에는 개수 제한을 적용하지 않습니다.
+                  {t(
+                    "강화 후보: 6-connectivity에서 500 mm³ 미만 성분을 제거하고 근육 label 1–23은 큰 성분을 최대 2개 유지합니다. 몸통·뼈 label 24–28에는 개수 제한을 적용하지 않습니다.",
+                  )}
                 </p>
                 <p>
-                  분리된 정상 근육 일부도 제거될 수 있는 검토용 후보입니다. Raw 대비 체적·Overlay를
-                  확인하세요. TTA 검토 기준은 사용자 설정이며 후처리로 원래 TTA disagreement가
-                  바뀌지 않습니다.
+                  {t(
+                    "분리된 정상 근육 일부도 제거될 수 있는 검토용 후보입니다. Raw 대비 체적·Overlay를 확인하세요. TTA 검토 기준은 사용자 설정이며 후처리로 원래 TTA disagreement가 바뀌지 않습니다.",
+                  )}
                 </p>
               </>
             )}
-            <p>모델 산출물 · 임상 검토 전</p>
+            <p>{t("모델 산출물 · 임상 검토 전")}</p>
             {primary.analysis !== "xray" && (
               <p>
-                좌우 체적은 원본 voxel 기준이며 Left + Right + 미분류 = 합계입니다. Δ = |L − R|, Δ%
-                = |L − R| / mean(L, R) × 100. 한쪽 미검출·미분류가 있으면 차이를 확정하지 않습니다.
-                촬영 범위가 다른 검사끼리 체적을 직접 해석할 때 주의하세요.
+                {t(
+                  "좌우 체적은 원본 voxel 기준이며 Left + Right + 미분류 = 합계입니다. Δ = |L − R|, Δ% = |L − R| / mean(L, R) × 100. 한쪽 미검출·미분류가 있으면 차이를 확정하지 않습니다. 촬영 범위가 다른 검사끼리 체적을 직접 해석할 때 주의하세요.",
+                )}
               </p>
             )}
           </details>
@@ -571,13 +610,13 @@ export default function ResultView({
           className="metrics-resizer"
           role="separator"
           tabIndex={0}
-          aria-label="측정 패널 너비"
+          aria-label={t("측정 패널 너비")}
           aria-orientation="vertical"
           aria-valuemin={280}
           aria-valuemax={panelSize.max}
           aria-valuenow={panelSize.width}
           aria-valuetext={`${panelSize.width} px`}
-          title="드래그하여 너비 조절 · 두 번 클릭하면 기본 너비"
+          title={t("드래그하여 너비 조절 · 두 번 클릭하면 기본 너비")}
           onPointerDown={(e) => {
             if (e.button !== 0) return;
             e.preventDefault();
@@ -636,7 +675,7 @@ export default function ResultView({
                 {state.explode ? "Assemble" : "Explode anatomy"}
               </button>
               <select
-                aria-label="구조 그룹"
+                aria-label={t("구조 그룹")}
                 value={state.group}
                 onChange={(e) =>
                   setState((s) => ({
@@ -651,7 +690,7 @@ export default function ResultView({
                 ))}
               </select>
               <select
-                aria-label="색상 preset"
+                aria-label={t("색상 preset")}
                 value={state.colorPreset}
                 onChange={(e) =>
                   setState((s) => ({
@@ -693,9 +732,13 @@ export default function ResultView({
                     {selectedIds.length > 0 && !allSelected && (
                       <span>
                         {selectedIds.length === 1
-                          ? `${selected?.name || chosen[0]?.name || "선택 구조"} · ${number(chosen[0]?.value)} ${result.unit}`
-                          : `${selectedIds.length}개 구조 선택`}
-                        {!chosen.some((row) => row.present) && " · 미검출 / 판정 보류"}
+                          ? t("{{value0}} · {{value1}} {{value2}}", {
+                              value0: selected?.name || chosen[0]?.name || t("선택 구조"),
+                              value1: number(chosen[0]?.value),
+                              value2: result.unit,
+                            })
+                          : t("{{value0}}개 구조 선택", { value0: selectedIds.length })}
+                        {!chosen.some((row) => row.present) && t(" · 미검출 / 판정 보류")}
                       </span>
                     )}
                   </button>
@@ -729,8 +772,10 @@ export default function ResultView({
                               <div className="actual-laterality">
                                 <p>
                                   {hoveredSide == null
-                                    ? "좌우 판정 보류 영역"
-                                    : `환자 ${hoveredSide === "left" ? "좌측" : "우측"} · 분할 체적`}{" "}
+                                    ? t("좌우 판정 보류 영역")
+                                    : t("환자 {{value0}} · 분할 체적", {
+                                        value0: t(hoveredSide === "left" ? "좌측" : "우측"),
+                                      })}{" "}
                                   · cm³
                                 </p>
                                 <SideValues row={row} primarySide={hoveredSide || "unassigned"} />
@@ -747,13 +792,16 @@ export default function ResultView({
                                 </>
                               )}
                               <dt>Side</dt>
-                              <dd>좌우 미분리</dd>
+                              <dd>{t("좌우 미분리")}</dd>
                             </dl>
                           );
                         }}
                       />
                       {(progress[result.id] ?? 0) < 100 && (
-                        <div className="scene-loading">3D 준비 {progress[result.id] || 0}%</div>
+                        <div className="scene-loading">
+                          {t("3D 준비 ")}
+                          {progress[result.id] || 0}%
+                        </div>
                       )}
                     </div>
                   )}
@@ -763,7 +811,9 @@ export default function ResultView({
           </div>
           {mode === "3d" && (
             <footer className="render-hint">
-              <span>좌클릭 선택 · 드래그 회전 · 휠 확대 · Explode 선택 구조 우클릭 회전</span>
+              <span>
+                {t("좌클릭 선택 · 드래그 회전 · 휠 확대 · Explode 선택 구조 우클릭 회전")}
+              </span>
               <label>
                 Surrounding opacity
                 <input

@@ -1,6 +1,6 @@
 {
   "name": "exmo-segmentation-atlas",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "EXMO segmentation atlas desktop and web viewer",
   "license": "MIT",
@@ -11,6 +11,7 @@
     "dev": "vite --host 127.0.0.1 --port 3016",
     "build": "vite build",
     "check": "tsc --noEmit",
+    "test:language": "node scripts/validate-language.mjs",
     "test": "node --experimental-strip-types scripts/validate-atlas.mjs && node --experimental-strip-types scripts/validate-interactions.mjs",
     "extract:model": "node scripts/extract-exmo.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 3017",

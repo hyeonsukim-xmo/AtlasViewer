@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Slider } from "../components/ui/slider";
@@ -31,7 +31,10 @@ const VIEWS: { id: View; label: string }[] = [
 const sliderValue = (value: number | readonly number[]) =>
   typeof value === "number" ? value : value[0];
 
-export default function Home({ onHome }: { onHome?: () => void } = {}) {
+export default function Home({
+  onHome,
+  headerAccessory,
+}: { onHome?: () => void; headerAccessory?: ReactNode } = {}) {
   const [state, setState] = useState(INITIAL_STATE);
   const [query, setQuery] = useState("");
   const [library, setLibrary] = useState(() => !matchMedia("(max-width: 800px)").matches);
@@ -125,6 +128,7 @@ export default function Home({ onHome }: { onHome?: () => void } = {}) {
           <span>27 structures</span>
         </div>
         <nav className="header-actions" aria-label="Atlas panels">
+          {headerAccessory}
           <Button
             variant="ghost"
             size="sm"

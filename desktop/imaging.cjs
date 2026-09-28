@@ -262,9 +262,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       .filter((r) => r.analysis === analysis)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   });
-  handle("choose", async (analysis, folder = false) => {
+  handle("choose", async (analysis, folder = false, language = "ko") => {
     validateAnalysis(analysis);
     if (typeof folder !== "boolean") throw new Error("잘못된 입력 선택입니다.");
+    if (language !== "ko" && language !== "en") throw new Error("Invalid language.");
     if (selecting) return [];
     if (batch?.state === "running")
       throw new Error("실행 중인 분석을 완료하거나 취소한 뒤 영상을 추가하세요.");
@@ -273,7 +274,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     let importRoot;
     try {
       const selection = await dialog.showOpenDialog(window, {
-        title: `${analysis.toUpperCase()} · ${folder ? "DICOM 폴더" : "영상 파일"} 추가`,
+        title:
+          language === "en"
+            ? `${analysis.toUpperCase()} · Add ${folder ? "DICOM folder" : "images"}`
+            : `${analysis.toUpperCase()} · ${folder ? "DICOM 폴더" : "영상 파일"} 추가`,
         properties: folder ? ["openDirectory"] : ["openFile", "multiSelections"],
         ...(folder
           ? {}

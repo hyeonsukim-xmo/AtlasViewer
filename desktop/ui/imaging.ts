@@ -133,7 +133,11 @@ declare global {
       status(analysis: Analysis): Promise<Reply<ModelStatus>>;
       list(analysis: Analysis): Promise<Reply<ImagingFile[]>>;
       results(analysis: Analysis): Promise<Reply<AnalysisResult[]>>;
-      chooseFiles(analysis: Analysis, folder?: boolean): Promise<Reply<ImagingFile[]>>;
+      chooseFiles(
+        analysis: Analysis,
+        folder?: boolean,
+        language?: "ko" | "en",
+      ): Promise<Reply<ImagingFile[]>>;
       preview(analysis: Analysis, id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
       resultPreview(id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
       run(

@@ -140,6 +140,15 @@ const deadline = setTimeout(() => {
       "Metrics stay compact: " + JSON.stringify(tableLayout),
     );
   }
+  // This regression suite uses Korean labels regardless of the saved UI preference.
+  await run(() => {
+    const language = document.querySelector('[data-language-switch] select');
+    if (language) {
+      language.value = "ko";
+      language.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  await sleep(150);
   await wait(() => document.querySelector(".protocol-table"));
   assert.equal(await run(() => typeof window.require), "undefined");
   assert.equal(

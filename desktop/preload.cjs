@@ -7,7 +7,8 @@ contextBridge.exposeInMainWorld(
     status: (analysis) => ipcRenderer.invoke("exmo:imaging:status", analysis),
     list: (analysis) => ipcRenderer.invoke("exmo:imaging:list", analysis),
     results: (analysis) => ipcRenderer.invoke("exmo:imaging:results", analysis),
-    chooseFiles: (analysis, folder) => ipcRenderer.invoke("exmo:imaging:choose", analysis, folder),
+    chooseFiles: (analysis, folder, language) =>
+      ipcRenderer.invoke("exmo:imaging:choose", analysis, folder, language),
     preview: (analysis, id, options) =>
       ipcRenderer.invoke("exmo:imaging:preview", analysis, id, options),
     resultPreview: (id, options) => ipcRenderer.invoke("exmo:imaging:resultPreview", id, options),

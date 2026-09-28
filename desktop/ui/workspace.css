@@ -42,6 +42,38 @@
   flex: 1;
   min-height: 0;
 }
+.language-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #b0b2c8;
+}
+.language-select select {
+  min-width: 94px;
+  padding: 7px 9px;
+  border: 1px solid #ffffff25;
+  border-radius: 9px;
+  background: #18182f;
+  color: #e5e5ef;
+  font: inherit;
+  color-scheme: dark;
+}
+.language-select select:focus-visible {
+  outline: 2px solid #9bafff;
+  outline-offset: 2px;
+}
+@media (max-width: 900px) {
+  .desktop-nav {
+    gap: 14px;
+    padding-inline: 20px;
+  }
+  .desktop-nav-label,
+  .language-select > span {
+    display: none;
+  }
+}
 .desktop-content .studio {
   height: 100%;
   min-height: 0;

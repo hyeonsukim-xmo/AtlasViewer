@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./language";
 import { useEffect, useRef, useState } from "react";
 import { type Analysis, type Preview, type PreviewOptions, unwrap } from "./imaging";
 
@@ -18,6 +19,7 @@ export default function ImagePreview({
   revision?: string;
   compact?: boolean;
 }) {
+  useLanguage();
   const [view, setView] = useState<NonNullable<PreviewOptions["view"]>>("axial");
   const [index, setIndex] = useState<number | null>(null);
   const [windowing, setWindow] = useState<"soft" | "bone">("soft");
@@ -116,7 +118,7 @@ export default function ImagePreview({
     <div className={`medical-preview ${compact ? "compact" : ""}`}>
       <div className="preview-toolbar">
         {analysis !== "xray" ? (
-          <div className="control-segment" aria-label="보기 방향">
+          <div className="control-segment" aria-label={t("보기 방향")}>
             {(["axial", "coronal", "sagittal"] as const).map((item) => (
               <button
                 key={item}
@@ -148,11 +150,11 @@ export default function ImagePreview({
         className="medical-image"
         ref={area}
         tabIndex={0}
-        aria-label="영상 preview · 휠 또는 가운데 버튼 드래그로 slice 이동"
+        aria-label={t("영상 preview · 휠 또는 가운데 버튼 드래그로 slice 이동")}
         title={
           analysis === "xray"
             ? undefined
-            : "휠 스크롤 · 가운데 버튼을 누른 채 위아래로 드래그하여 slice 이동"
+            : t("휠 스크롤 · 가운데 버튼을 누른 채 위아래로 드래그하여 slice 이동")
         }
         onPointerDown={(e) => {
           if (e.button !== 1 || !data || data.count < 2) return;
@@ -206,16 +208,16 @@ export default function ImagePreview({
           <img src={data.image} alt={`${data.view} slice ${data.index + 1}`} draggable={false} />
         )}
         {error ? (
-          <p role="alert">{error}</p>
+          <p role="alert">{t(error)}</p>
         ) : !data ? (
-          <span className="preview-placeholder">영상 준비 중</span>
+          <span className="preview-placeholder">{t("영상 준비 중")}</span>
         ) : null}
         {data?.sides.map((side, i) => (
           <span key={i} className={`orientation orientation-${i}`}>
             {side}
           </span>
         ))}
-        {loading && data && <span className="preview-updating">갱신 중</span>}
+        {loading && data && <span className="preview-updating">{t("갱신 중")}</span>}
       </div>
       <div className="preview-footer">
         <span>{data ? `${data.index + 1} / ${data.count}` : "—"}</span>
