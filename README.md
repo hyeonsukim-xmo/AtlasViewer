@@ -25,6 +25,10 @@ in Korean. It is a planning document, not a claim that those features are implem
 [Imaging workflow and three-result comparison review](docs/EXMO_IMAGING_WORKFLOW_REVIEW_2026-09-25.md)
 records the requested Series preview, review grid, analysis and comparison interactions.
 
+[Bulk NRRD import and analysis pipeline notes](docs/EXMO_BULK_IMPORT_2026-09-30.md)
+document the 0.1.11 implementation, review pagination, bounded GPU/CPU processing,
+local NRRD file organization, executed checks and remaining validation limits.
+
 ## Run
 
 Requires Node.js 22.13 or newer.
@@ -56,7 +60,7 @@ available separately as **3D demo**; its 27 colors and interactions are unchange
 
 - CT: coded-mm NIfTI, self-contained NRRD and conventional DICOM series. DICOM
   rescale is applied once; other inputs require bound HU evidence or explicit user
-  confirmation. Original UNETR/MONAI 1.3.2 FP32 CPU recipe, native volume in cm3,
+  confirmation. UNETR/MONAI 1.3.2 FP32 CPU/GPU execution, native volume in cm3,
   HU fat-range fraction. This fraction is not PDFF or a validated clinical FI score.
 - MRI: Water-only 3D images, with explicit sequence confirmation unless the input
   matches a delivered sample. Original full6 FP32 model and two-pass TTA; raw and
@@ -114,10 +118,12 @@ values, creates four pinned environments under ignored `work/modality-integratio
 and verifies dependency imports and actual CPU/CUDA execution. The app stores the engine directory in
 `%APPDATA%/EXMO Atlas/engine.json`; `EXMO_ENGINE_ROOT` can override it for tests.
 Keep that directory, including its `python` folder, installed. GPU MRI/X-ray need a
-compatible NVIDIA driver; explicit CPU execution is also exposed. Only one analysis
-job runs at a time. Cancellation terminates its owned process tree and does not
-publish partial results. CT uses a disk-backed probability inverse with the same
-classwise resampling, normalization and native argmax.
+compatible NVIDIA driver; explicit CPU execution is also exposed. One analysis batch
+runs at a time. GPU mode overlaps stages for up to three items, with one GPU inference,
+one CPU postprocessing task and one separate result-preparation task at a time;
+memory admission can reduce concurrency. CPU mode processes one item at a time.
+Cancellation terminates owned analysis processes and does not publish partial results.
+CT restores class probabilities in native-grid blocks before normalization and argmax.
 
 The installer contains the UI and private adapter scripts. The multi-GB model/runtime
 store is installed separately; the installer alone is not a portable inference package.
@@ -134,7 +140,8 @@ npm run desktop:dist
 ```
 
 Outputs: `release/win-unpacked/EXMO Atlas.exe` and
-`release/EXMO-Atlas-Setup-0.1.0.exe`. This internal development build is unsigned.
+`release/EXMO-Atlas-Setup-<version>.exe` using the version in `package.json`.
+This internal development build is unsigned.
 Application updates do not replace the private engine store. The web-only build is
 still `npm run build` -> `dist/`; Desktop builds to `dist-desktop/`.
 
