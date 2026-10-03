@@ -1,0 +1,30 @@
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync(require('node:path').join(__dirname, '../desktop/imaging.cjs'), 'utf8');
+const start = source.indexOf('  async function prepareInput(');
+const end = source.indexOf('  async function execute(', start);
+assert.ok(start > 0 && end > start);
+const fn = source.slice(start, end) + '\nconst execute = prepareInput;';
+(async () => {
+  const original = {id:'one',analysis:'ct',input:'original.nrrd',deferredValidation:true};
+  const prepared = {...original,input:'validated-input.nii.gz',deferredValidation:false};
+  let saves = 0, reject = false;
+  const files = new Map([[original.id,original]]);
+  const context = {files, request:async (_op, {record, confirmed}) => {
+    assert.equal(confirmed, true);
+    if (reject) throw Error('validation failed');
+    return record.deferredValidation ? prepared : record;
+  },saveCatalog:async()=>{saves++}};
+  vm.runInNewContext(fn, context);
+  await vm.runInNewContext('prepareInput', context)(original,true);
+  assert.equal(files.get('one').input, prepared.input);
+  assert.equal(original.input, 'original.nrrd');
+  assert.equal(saves,1);
+  await context.prepareInput(files.get('one'),true);
+  assert.equal(saves,1);
+  reject=true;
+  await assert.rejects(context.prepareInput(original,true));
+  assert.equal(saves,1);
+  console.log('PASS: validated input cached once; originals retained; failed validation never persisted');
+})().catch(error=>{console.error(error);process.exitCode=1});

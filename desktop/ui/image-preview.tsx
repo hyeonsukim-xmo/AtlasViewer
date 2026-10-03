@@ -1,4 +1,5 @@
 import { t, useLanguage } from "./language";
+import { schedulePreview } from "./preview-queue";
 import { useEffect, useRef, useState } from "react";
 import { type Analysis, type Preview, type PreviewOptions, unwrap } from "./imaging";
 
@@ -82,11 +83,14 @@ export default function ImagePreview({
         const request = pending.current;
         pending.current = null;
         try {
-          const value = unwrap(
-            await (request.result
+          const reply = await schedulePreview(
+            () => request.result
               ? window.exmoDesktop.resultPreview(request.id, request.options)
-              : window.exmoDesktop.preview(request.analysis, request.id, request.options)),
+              : window.exmoDesktop.preview(request.analysis, request.id, request.options),
+            () => !disposed.current && request.identity === latestIdentity.current,
           );
+          if (!reply) continue;
+          const value = unwrap(reply);
           if (!disposed.current && request.identity === latestIdentity.current) {
             setData(value);
             setError("");

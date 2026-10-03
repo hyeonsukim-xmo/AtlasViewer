@@ -678,6 +678,7 @@
 }
 .review-grid {
   display: grid;
+  grid-auto-rows: max-content;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
   overflow: auto;
@@ -686,6 +687,8 @@
   align-content: start;
 }
 .review-case {
+  min-height: 440px;
+  height: max-content;
   border: 1px solid #ffffff19;
   border-radius: 12px;
   background: var(--glass);
@@ -696,6 +699,36 @@
 .review-case .medical-preview {
   height: 330px;
   flex: none;
+}
+.review-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  color: #b7bdd3;
+  font-size: 12px;
+}
+.review-batch-summary {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border: 1px solid #ffffff19;
+  border-radius: 10px;
+  color: #b7bdd3;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.review-batch-summary p { margin: 0; }
+.review-batch-summary .input-confirmation { margin-top: 6px; }
+.import-status {
+  flex-wrap: wrap;
+}
+.import-status > div {
+  min-width: 0;
+  flex: 1;
+}
+.import-status span {
+  overflow-wrap: anywhere;
 }
 .review-case .panel-title {
   align-items: flex-start;
@@ -740,6 +773,8 @@
   flex-shrink: 0;
 }
 .job-status > div {
+  max-width: 70%;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 5px;
   min-width: 180px;
@@ -747,6 +782,11 @@
 .job-status strong {
   font-size: 12px;
   font-weight: 500;
+}
+.job-status .job-task {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .job-status span {
   color: #8e96b1;
@@ -757,6 +797,20 @@
   height: 4px;
   accent-color: #aaa1bd;
 }
+.analysis-status > div { flex: 1; min-width: 0; max-width: none; gap: 8px; }
+.analysis-status .job-task-progress { display: grid; gap: 7px; min-width: 0; padding: 8px 10px; background: #080c1670; border-radius: 6px; }
+.analysis-status .job-task { color: #dce8e2; }
+.analysis-status progress { appearance: none; width: 100%; border: 0; border-radius: 4px; overflow: hidden; background: #ffffff15; }
+.analysis-status progress::-webkit-progress-bar { background: #ffffff15; border-radius: 4px; }
+.analysis-status progress::-webkit-progress-value { background: #4ade80; border-radius: 4px; }
+.analysis-status progress::-moz-progress-bar { background: #4ade80; border-radius: 4px; }
+.analysis-status .batch-total-progress { height: 4px; opacity: .65; }
+.analysis-status .task-stage-progress { height: 9px; accent-color: #4ade80; }
+.analysis-status .job-waiting { color: #c6b78d; }
+.task-stage-indeterminate { height: 9px; background: #ffffff15; overflow: hidden; border-radius: 4px; }
+.task-stage-indeterminate > span { display: block; width: 32%; height: 100%; border-radius: 4px; background: #4ade80; animation: analysis-working 1.5s ease-in-out infinite alternate; }
+@keyframes analysis-working { from { transform: translateX(0); } to { transform: translateX(212%); } }
+@media (prefers-reduced-motion: reduce) { .task-stage-indeterminate > span { animation: none; } }
 .inline-error {
   font-size: 12px;
   line-height: 1.6;

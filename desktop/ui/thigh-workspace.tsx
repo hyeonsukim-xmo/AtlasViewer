@@ -8,6 +8,7 @@ import {
   type Analysis,
   type AnalysisResult,
   type ImagingFile,
+  type ImportProgress,
   type Job,
   type ModelStatus,
 } from "./imaging";
@@ -39,6 +40,16 @@ export default function ThighWorkspace({
   const [compared, setCompared] = useState<string[]>([]);
   const [job, setJob] = useState<Job | null>(null);
   const [changing, setChanging] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  useEffect(() => window.exmoDesktop.onImportProgress(progress => {
+    if (progress.analysis !== analysis) return;
+    setImportProgress(progress);
+    if (progress.rows?.length) {
+      setFiles(old => [...new Map([...old, ...progress.rows!].map(file => [file.id, file])).values()]);
+      setActive(old => old || progress.rows![0].id);
+    }
+  }), [analysis]);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [device, setDevice] = useState("cuda:0");
@@ -47,9 +58,14 @@ export default function ThighWorkspace({
   const busy = changing || running;
   const current = files.find((file) => file.id === (hovered || active));
   const chosen = files.filter((file) => selected.includes(file.id));
-  const canRun =
-    chosen.length > 0 &&
-    chosen.every((file) => file.ready && (!file.confirmation || confirmed.includes(file.id)));
+  const [reviewPage, setReviewPage] = useState(0);
+  const reviewPages = Math.max(1, Math.ceil(chosen.length / 4));
+  const visibleReviewPage = Math.min(reviewPage, reviewPages - 1);
+  const reviewFiles = chosen.slice(visibleReviewPage * 4, visibleReviewPage * 4 + 4);
+  const confirmationRequired = chosen.filter(file => file.confirmation);
+  const allConfirmed = confirmationRequired.length > 0 && confirmationRequired.every(file => confirmed.includes(file.id));
+  const runnable = chosen.filter(file => file.ready && (!file.confirmation || confirmed.includes(file.id)));
+  const canRun = runnable.length > 0;
   const filtered = files.filter((file) =>
     [
       file.name,
@@ -102,7 +118,9 @@ export default function ThighWorkspace({
           previous.state === next.state &&
           previous.current === next.current &&
           previous.stage === next.stage &&
+          previous.deviceLabel === next.deviceLabel &&
           previous.progress === next.progress &&
+          JSON.stringify(previous.active) === JSON.stringify(next.active) &&
           previous.completed.length === next.completed.length &&
           previous.failed.length === next.failed.length
             ? previous
@@ -111,7 +129,7 @@ export default function ThighWorkspace({
         const key = next ? `${next.id}:${next.state}:${next.completed.length}` : "";
         if (
           next?.analysis === analysis &&
-          next.state !== "running" &&
+          (next.state !== "running" || next.completed.length > 0) &&
           receivedCompletion.current !== key
         ) {
           receivedCompletion.current = key;
@@ -151,11 +169,16 @@ export default function ThighWorkspace({
     );
   }
   async function add(folder = false) {
+    setStep("input");
+    setQuery("");
+    setReviewPage(0);
     setChanging(true);
+    setImporting(true);
+    setImportProgress(null);
     setError("");
     try {
       const added = unwrap(await window.exmoDesktop.chooseFiles(analysis, folder, language));
-      setFiles((old) => [...old, ...added]);
+      setFiles((old) => [...new Map([...old, ...added].map(file => [file.id, file])).values()]);
       if (added.length) {
         setActive(added[0].id);
         setSelected((old) => [
@@ -168,13 +191,16 @@ export default function ThighWorkspace({
       setError((e as Error).message);
     } finally {
       setChanging(false);
+      setImporting(false);
+      setImportProgress(null);
     }
   }
   async function run() {
+    if (busy || !canRun) return;
     setChanging(true);
     setError("");
     try {
-      setJob(unwrap(await window.exmoDesktop.run(analysis, selected, confirmed, device)));
+      setJob(unwrap(await window.exmoDesktop.run(analysis, runnable.map(file => file.id), confirmed, device)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -245,7 +271,7 @@ export default function ThighWorkspace({
         </div>
         <span className="engine-state">
           {model?.estimationAvailable
-            ? t("엔진 연결됨 · {{value0}}", { value0: model.device })
+            ? t("엔진 연결됨 · {{value0}}", { value0: busy && job?.deviceLabel ? job.deviceLabel : `${device === "cpu" ? "CPU" : "GPU"}${analysis === "xray" ? "" : " · FP32"}` })
             : t("엔진 확인 중")}
         </span>
       </header>
@@ -263,22 +289,49 @@ export default function ThighWorkspace({
         ))}
         <span className="workflow-context">{name} / Lower extremity</span>
       </div>
+      {importing && importProgress && (
+        <div role="status" className="job-status import-status">
+          <div>
+            <strong>{t("영상 가져오기 {{value0}} / {{value1}}", { value0: importProgress.completed, value1: importProgress.total })}</strong>
+            <span>{t(importProgress.phase === "copy" ? "파일 복사 중" : importProgress.phase === "inspect" ? "영상 확인 중" : "등록 완료")} · {importProgress.current}</span>
+            {importProgress.failed > 0 && <span>{t("실패 {{value0}}개", { value0: importProgress.failed })}</span>}
+          </div>
+          <progress max={importProgress.total || 1} value={importProgress.completed} />
+        </div>
+      )}
       {error && (
         <p className="inline-error" role="alert">
-          {t(error)}
+            {t(error)}
         </p>
       )}
       {running && (
-        <div className="job-status" role="status">
+        <div className="job-status analysis-status" role="status">
           <div>
             <strong>
-              {job.analysis.toUpperCase()} · {t(job.stage)}
+              {job.analysis.toUpperCase()} · {t(job.active?.length ? "배치 분석" : job.stage)}
             </strong>
-            <span>
-              {job.current} · {job.completed.length + job.failed.length} / {job.total}
-            </span>
+            {!job.active?.length && <span>
+              {job.current}
+            </span>}
+            <span>{t("전체 처리 {{value0}} / {{value1}} · 성공 {{value2}} · 실패 {{value3}}", { value0: job.completed.length + job.failed.length, value1: job.total, value2: job.completed.length, value3: job.failed.length })}</span>
+            <progress aria-label={t("전체 배치 진행률")} max={job.total || 1} value={job.completed.length + job.failed.length} className="batch-total-progress" />
+            {!job.active?.length && <span>{job.progress == null ? t("현재 단계 처리 중 · 전체 완료 아님") : t("현재 단계 {{value0}}% · 전체 완료 아님", { value0: job.progress })}</span>}
+            {job.active?.map(task => (
+              <div className="job-task-progress" key={task.id} data-waiting={task.lane === "waiting"}>
+              <span className="job-task" title={task.name}>
+                {task.lane === "gpu" ? "GPU" : task.lane === "cpu" ? "CPU" : "…"} · {t(task.stage)}{task.progress == null ? "" : ` ${task.progress}%`} · {task.name}
+              </span>
+              {task.lane === "waiting" ? (
+                <span className="job-waiting">{t("대기 중 · 아직 시작하지 않았습니다")}</span>
+              ) : task.progress != null && Number.isFinite(task.progress) ? (
+                <progress className="task-stage-progress" aria-label={t("{{value0}} · 현재 단계 진행률", { value0: task.name })} max={100} value={Math.max(0, Math.min(100, task.progress))} />
+              ) : (
+                <div className="task-stage-indeterminate" role="progressbar" aria-label={t("{{value0}} · 현재 단계 진행률", { value0: task.name })} aria-valuetext={t("처리 중 · 이 단계는 퍼센트를 제공하지 않습니다")}><span /></div>
+              )}
+              </div>
+            ))}
+            {!!job.active?.length && <span>{t("현재 단계 처리 중 · 전체 완료 아님")}</span>}
           </div>
-          <progress max={100} value={job.progress ?? undefined} />
           <button className="clinical-button" disabled={changing} onClick={() => void cancel()}>
             {t("실행 취소")}
           </button>
@@ -401,7 +454,7 @@ export default function ThighWorkspace({
                         <td>
                           <span className={file.ready ? "status-ready" : "status-review"}>
                             {file.classification?.predicted_label ||
-                              (file.ready ? t("입력 확인됨") : t("검토 필요"))}
+                              (file.deferredValidation ? t("헤더 확인됨") : file.ready ? t("입력 확인됨") : t("검토 필요"))}
                           </span>
                           {file.confirmation && (
                             <small>
@@ -489,10 +542,41 @@ export default function ThighWorkspace({
       )}
       {step === "review" && (
         <>
-          <div className="review-grid">
-            {chosen.map((file) => (
+          <nav className="review-pagination" aria-label={t("검토 페이지")}>
+            <span>{t("{{value0}}–{{value1}} / {{value2}}개 영상", {
+              value0: chosen.length ? visibleReviewPage * 4 + 1 : 0,
+              value1: Math.min((visibleReviewPage + 1) * 4, chosen.length), value2: chosen.length,
+            })}</span>
+            <button className="clinical-button" disabled={visibleReviewPage === 0}
+              onClick={() => setReviewPage(visibleReviewPage - 1)}>{t("이전 페이지")}</button>
+            <span>{visibleReviewPage + 1} / {reviewPages}</span>
+            <button className="clinical-button" disabled={visibleReviewPage + 1 >= reviewPages}
+              onClick={() => setReviewPage(visibleReviewPage + 1)}>{t("다음 페이지")}</button>
+            <button className="clinical-button" disabled={busy || !files.some(file => file.ready)}
+              onClick={() => { setSelected(files.filter(file => file.ready).map(file => file.id)); setReviewPage(0); }}>
+              {t("분석 가능한 영상 전체 선택")}
+            </button>
+          </nav>
+          <div className="review-batch-summary">
+            <p>{t("검토 대상 {{value0}}개 · 지금 실행 가능한 영상 {{value1}}개. 4개씩 표시는 분석 개수 제한이 아닙니다.", { value0: chosen.length, value1: runnable.length })}</p>
+            {runnable.length < chosen.length && <p>{t("확인이 끝난 영상만 실행합니다. 나머지 {{value0}}개는 이번 실행에서 제외되며 목록에 유지됩니다.", { value0: chosen.length - runnable.length })}</p>}
+            {confirmationRequired.length > 0 && (
+              <label className="input-confirmation">
+                <input type="checkbox" disabled={busy} checked={allConfirmed}
+                  onChange={event => setConfirmed(old => event.target.checked
+                    ? [...new Set([...old, ...confirmationRequired.map(file => file.id)])]
+                    : old.filter(id => !confirmationRequired.some(file => file.id === id)))} />
+                {analysis === "ct"
+                  ? t("선택한 {{value0}}개 영상의 HU 단위를 모두 확인했습니다.", { value0: confirmationRequired.length })
+                  : t("선택한 {{value0}}개 영상이 모두 Water sequence임을 확인했습니다.", { value0: confirmationRequired.length })}
+              </label>
+            )}
+          </div>
+          <div className="review-grid" key={visibleReviewPage}>
+            {reviewFiles.map((file) => (
               <article
                 className="review-case"
+                data-input-id={file.id}
                 key={file.id}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -555,7 +639,7 @@ export default function ThighWorkspace({
               {chosen.length}
               {t("개 검사 · 우클릭으로 분석 선택 해제")}
             </span>
-            {analysis !== "ct" && (
+            {(
               <select
                 aria-label={t("추론 장치")}
                 value={device}
@@ -571,7 +655,7 @@ export default function ThighWorkspace({
               disabled={busy || !canRun || !model?.estimationAvailable}
               onClick={() => void run()}
             >
-              {t("Segmentation 실행")}
+              {t("Segmentation 실행 ({{value0}}개)", { value0: runnable.length })}
             </button>
           </footer>
         </>

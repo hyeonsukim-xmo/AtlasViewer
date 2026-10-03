@@ -21,7 +21,7 @@ IMPORTS = {
 }
 
 
-def probe(name, device):
+def probe(name, device, engine_root):
     if struct.calcsize("P") != 8 or sys.version_info[:3] != (3, 12, 8):
         raise RuntimeError("The tested runtime is CPython 3.12.8 x64")
     versions = {}
@@ -34,11 +34,16 @@ def probe(name, device):
         if (actual if "+" in expected else actual.split("+")[0]) != expected:
             raise RuntimeError(f"{package}: expected {expected}, found {actual}")
         versions[package] = actual
+    if name == "ct" and device != "cpu":
+        spec = importlib.util.spec_from_file_location("desktop_runner", ROOT / "desktop/model-runner.py")
+        adapter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(adapter)
+        adapter.ct_torch(engine_root / "packages/EXMO_CT", "cuda:0")
     for package in IMPORTS[name]:
         importlib.import_module(package)
     import torch
     torch.set_num_threads(2)
-    target = "cpu" if name == "ct" or device == "cpu" else "cuda:0"
+    target = "cpu" if device == "cpu" else "cuda:0"
     if target != "cpu" and not torch.cuda.is_available():
         raise RuntimeError(f"{name}: CUDA is unavailable; check the NVIDIA driver for Torch {torch.__version__}")
     with torch.inference_mode():
@@ -50,7 +55,7 @@ def probe(name, device):
             torch.cuda.synchronize()
     return {"environment": name, "python": platform.python_version(), "device": target,
             "gpu": torch.cuda.get_device_name(0) if target != "cpu" else None,
-            "cudaRuntime": torch.version.cuda, "versions": versions, "passed": True}
+            "cudaRuntime": torch.version.cuda, "runtimeTorch": torch.__version__, "versions": versions, "passed": True}
 
 
 def main():
@@ -58,9 +63,10 @@ def main():
     parser.add_argument("--engine-root", type=Path, required=True)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument("--probe", choices=tuple(IMPORTS))
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     if args.probe:
-        print(json.dumps(probe(args.probe, args.device)))
+        print(json.dumps(probe(args.probe, args.device, args.engine_root)))
         return
     root = args.engine_root.resolve()
     expected = json.loads((root/"verified-packages.json").read_text(encoding="utf8"))
@@ -87,7 +93,7 @@ def main():
             report["passed"] = False
         report["environments"].append(entry)
         print(json.dumps({k: v for k, v in entry.items() if k != "versions"}), flush=True)
-    destination = root/"runtime-check.json"
+    destination = args.report or root/"runtime-check.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf8")
     print(f"Runtime report: {destination}")
     if not report["passed"]:

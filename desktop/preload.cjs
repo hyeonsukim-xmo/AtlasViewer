@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld(
   "exmoDesktop",
   Object.freeze({
     status: (analysis) => ipcRenderer.invoke("exmo:imaging:status", analysis),
+    onImportProgress: (callback) => {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on("exmo:imaging:importProgress", listener);
+      return () => ipcRenderer.removeListener("exmo:imaging:importProgress", listener);
+    },
     list: (analysis) => ipcRenderer.invoke("exmo:imaging:list", analysis),
     results: (analysis) => ipcRenderer.invoke("exmo:imaging:results", analysis),
     chooseFiles: (analysis, folder, language) =>

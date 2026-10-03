@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { schedulePreview } from '../desktop/ui/preview-queue.ts';
+let finish;
+let wanted = true;
+const sent = [];
+const first = schedulePreview(() => { sent.push('first'); return new Promise(resolve => { finish = resolve; }); }, () => true);
+await Promise.resolve();
+const old = schedulePreview(async () => { sent.push('old-page'); return 2; }, () => wanted);
+const next = schedulePreview(async () => { sent.push('new-page'); return 3; }, () => true);
+wanted = false;
+finish(1);
+assert.equal(await first, 1);
+assert.equal(await old, null);
+assert.equal(await next, 3);
+assert.deepEqual(sent, ['first', 'new-page']);
+await assert.rejects(schedulePreview(async () => { throw new Error('fixture failure'); }, () => true));
+assert.equal(await schedulePreview(async () => 4, () => true), 4);
+console.log('PASS: obsolete page requests skipped, requests serialized, failure does not block next preview');

@@ -1,10 +1,12 @@
-const { dialog, ipcMain } = require("electron");
+const { dialog, ipcMain, powerSaveBlocker } = require("electron");
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const readline = require("node:readline");
+const { resources, estimateMemory, runPipeline, aborted } = require("./analysis-pipeline.cjs");
+const { AnalysisWorker } = require("./analysis-worker.cjs");
 
 function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette }) {
   fs.mkdirSync(storageRoot, { recursive: true });
@@ -12,15 +14,43 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     files = new Map(),
     results = new Map();
   let worker,
+    workerShutdown = Promise.resolve(),
     pending,
     disposed = false,
     selecting = false,
+    importProgress = null,
     queue = Promise.resolve(),
     catalogQueue = Promise.resolve();
-  let child,
-    batch = null,
+  let batch = null,
     runPromise,
     cancelled = false;
+  let pipelineController, pipelineResources, finalizer;
+  const modelWorkers = new Map();
+  function modelWorker(engine) {
+    if (!modelWorkers.has(engine) || modelWorkers.get(engine).closed) modelWorkers.set(engine, new AnalysisWorker({
+      python: python(engine),
+      args: ["-X", "utf8", path.join(scriptsRoot, "model-service.py"), "--engine-root", engineRoot],
+      env: workerEnv(), logPath: path.join(storageRoot, `model-${engine}-private.log`),
+    }));
+    return modelWorkers.get(engine);
+  }
+  function resultWorker() {
+    if (!finalizer || finalizer.closed) finalizer = new AnalysisWorker({
+      python: python("ct"),
+      args: ["-X", "utf8", path.join(scriptsRoot, "imaging-worker.py"), "--engine-root", engineRoot, "--palette", palette],
+      env: workerEnv(), logPath: path.join(storageRoot, "finalize-private.log"),
+    });
+    return finalizer;
+  }
+  async function closeAnalysisWorkers(force = false) {
+    const workers = [...modelWorkers.values(), ...(finalizer ? [finalizer] : [])];
+    await Promise.allSettled(workers.map(item => force ? item.stop() : item.close()));
+    modelWorkers.clear(); finalizer = undefined;
+  }
+  function taskState(task, changes) {
+    Object.assign(task, changes);
+    batch.current = task.name; batch.stage = task.stage; batch.progress = task.progress;
+  }
   const inside = (file) => {
     const rel = path.relative(storageRoot, file);
     return rel && !rel.startsWith("..") && !path.isAbsolute(rel);
@@ -39,9 +69,16 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     classification,
     confirmation,
     ready,
+    deferredValidation,
     warnings,
     error,
-  }) => ({ id, name, analysis, metadata, classification, confirmation, ready, warnings, error });
+  }) => ({ id, name, analysis, metadata, classification, confirmation, ready, deferredValidation, warnings, error });
+  function publishImport(rows = []) {
+    if (!disposed && importProgress)
+      window.webContents.send("exmo:imaging:importProgress", {
+        ...importProgress, rows: rows.map(publicFile),
+      });
+  }
   const catalog = path.join(storageRoot, "library.json");
   // Apply the same semantic palette to saved results and newly generated results.
   const colors = new Map(JSON.parse(fs.readFileSync(palette, "utf8")).map((row) => [row.id, row]));
@@ -128,8 +165,15 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     pending = undefined;
     if (old) {
       old.stdin.destroy();
-      old.kill();
+      if (process.platform === "win32" && old.pid && old.exitCode === null) {
+        workerShutdown = new Promise(resolve => {
+          const killer = spawn("taskkill", ["/PID", String(old.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+          killer.once("error", () => { old.kill(); resolve(); });
+          killer.once("exit", code => { if (code) old.kill(); resolve(); });
+        });
+      } else old.kill();
     }
+    return workerShutdown;
   }
   function workerEnv() {
     return {
@@ -188,8 +232,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     });
     return process;
   }
-  function request(operation, values = {}) {
-    const task = queue.then(() => {
+  function request(operation, values = {}, signal) {
+    const task = queue.then(async () => {
+      await workerShutdown;
+      if (signal?.aborted) throw aborted();
       if (disposed) throw new Error("앱이 종료되었습니다.");
       const process = startWorker();
       return new Promise((resolve, reject) => {
@@ -247,8 +293,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     return {
       reviewAvailable: available(analysis),
       estimationAvailable: available(analysis),
-      device: analysis === "ct" ? "CPU · FP32" : "GPU",
+      device: analysis === "xray" ? "GPU" : "GPU · FP32",
       release: "20260927",
+      importProgress: importProgress?.analysis === analysis ? importProgress : null,
     };
   });
   handle("list", (analysis) => {
@@ -300,33 +347,63 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       if (folder) await collect(selection.filePaths[0]);
       else sources.push(...selection.filePaths);
       if (!sources.length) throw new Error("선택한 폴더에 영상 파일이 없습니다.");
+      importProgress = { analysis, completed: 0, total: sources.length, current: "", phase: "copy", failed: 0 };
+      publishImport();
       importRoot = path.join(storageRoot, "imports", randomUUID());
       const snapshots = path.join(importRoot, "snapshots");
       await fsp.mkdir(snapshots, { recursive: true });
-      const copied = [],
-        names = {};
       let total = 0;
       for (const source of sources) {
         const stat = await fsp.stat(source);
         total += stat.size;
         if (!stat.isFile() || stat.size > 2 * 1024 ** 3 || total > 20 * 1024 ** 3)
           throw new Error("파일당 2 GB, 한 번에 20 GB 이하의 영상을 선택하세요.");
-        const ext = source.toLowerCase().endsWith(".nii.gz") ? ".nii.gz" : path.extname(source);
-        const snapshot = path.join(snapshots, randomUUID() + ext);
-        await fsp.copyFile(source, snapshot, fs.constants.COPYFILE_EXCL);
-        copied.push(snapshot);
-        names[snapshot] = path.basename(source);
       }
-      const imported = await request("inspect", {
-        analysis,
-        paths: copied,
-        names,
-        destination: path.join(importRoot, "prepared"),
-      });
-      if (disposed) return [];
-      for (const row of imported) files.set(row.id, row);
-      await saveCatalog();
-      if (inside(snapshots)) await fsp.rm(snapshots, { recursive: true, force: true });
+      const standalone = sources.filter(p => /\.(nrrd|nii|nii\.gz)$/i.test(p));
+      const dicom = sources.filter(p => !standalone.includes(p));
+      const groups = standalone.map(p => [p]);
+      if (dicom.length) groups.push(dicom); // Never split a DICOM series into slices.
+      const imported = [];
+      for (const sourcePaths of groups) {
+        if (disposed) break;
+        const paths = [], names = {};
+        let rows;
+        try {
+          for (const source of sourcePaths) {
+            importProgress.current = path.basename(source);
+            importProgress.phase = "copy";
+            publishImport();
+            const ext = source.toLowerCase().endsWith(".nii.gz") ? ".nii.gz" : path.extname(source);
+            const snapshot = path.join(snapshots, randomUUID() + ext);
+            await fsp.copyFile(source, snapshot, fs.constants.COPYFILE_EXCL);
+            paths.push(snapshot);
+            names[snapshot] = path.basename(source);
+          }
+          importProgress.phase = "inspect";
+          publishImport();
+          rows = await request("inspect", {
+            analysis, paths, names, consumeSnapshots: true,
+            destination: path.join(importRoot, randomUUID().replaceAll("-", "").slice(0, 16)),
+          });
+        } catch (error) {
+          if (disposed) break;
+          rows = [{ id: randomUUID(), analysis, name: path.basename(sourcePaths[0]),
+            ready: false, warnings: [], error: error.message }];
+        }
+        for (const row of rows) files.set(row.id, row);
+        await saveCatalog();
+        imported.push(...rows);
+        importProgress.completed += sourcePaths.length;
+        importProgress.failed += rows.filter(row => !row.ready).length;
+        importProgress.phase = "saved";
+        publishImport(rows);
+        for (const snapshot of paths) await fsp.rm(snapshot, { force: true }).catch(() => {});
+      }
+      // A terminated worker/virus scanner may briefly retain a snapshot handle.
+      // Cleanup must never turn already-persisted imports into an apparent failure.
+      if (inside(snapshots)) await fsp.rm(snapshots, {
+        recursive: true, force: true, maxRetries: 10, retryDelay: 100,
+      }).catch(() => {});
       return imported.map(publicFile);
     } catch (error) {
       if (
@@ -338,6 +415,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       throw error;
     } finally {
       selecting = false;
+      importProgress = null;
     }
   });
   function options(value = {}) {
@@ -426,105 +504,106 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
   });
   const stageText = {
     model_loading: "모델 준비",
+    model_reused: "로드된 모델 재사용",
+    native_prepare: "좌표 복원 입력 준비",
+    native_blocks: "원본 복원·정규화·라벨 계산",
     inference_start: "Segmentation",
     inference_progress: "Segmentation",
     native_inverse_start: "원본 좌표 복원",
     native_inverse: "원본 좌표 복원",
+    native_normalization: "복원 확률 정규화·라벨 확정",
+    result_export_start: "결과 측정·저장·검증",
+    result_save: "분할 결과 파일 저장",
+    result_measurement: "클래스별 부피·HU 측정",
+    result_verification: "저장 결과 다시 읽기·검증",
   };
+  async function prepareInput(file, confirmed, signal) {
+    const original = file;
+    file = await request("prepare", { record: file, confirmed }, signal);
+    if (original.deferredValidation && !file.deferredValidation && files.has(file.id)) {
+      files.set(file.id, file);
+      await saveCatalog();
+    }
+    return file;
+  }
   async function execute(file, confirmed, device) {
-    await request("prepare", { record: file, confirmed });
-    if (cancelled) return;
-    const id = randomUUID(),
-      directory = path.join(runs, id);
-    await fsp.mkdir(directory);
-    const route = file.classification?.route_to_segmentation;
-    const engine = file.analysis === "xray" ? (route === "AP" ? "ap" : "lat") : file.analysis;
-    const job = {
-      id: file.id,
-      input: file.input,
-      analysis: file.analysis,
-      route,
-      device,
-      output: path.join(directory, "output"),
-    };
-    const jobPath = path.join(directory, "job.json");
-    await fsp.writeFile(jobPath, JSON.stringify(job));
-    const resultPath = await new Promise((resolve, reject) => {
-      let complete;
-      child = spawn(
-        python(engine),
-        [
-          "-X",
-          "utf8",
-          path.join(scriptsRoot, "model-runner.py"),
-          "--engine-root",
-          engineRoot,
-          "--job",
-          jobPath,
-        ],
-        { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: workerEnv() },
-      );
-      const process = child;
-      const log = fs.createWriteStream(path.join(directory, "engine-private.log"));
-      process.stderr.pipe(log, { end: false });
-      readline.createInterface({ input: process.stdout }).on("line", (line) => {
-        log.write(line + "\n");
-        try {
-          const event = JSON.parse(line);
-          if (!event.exmo) return;
-          if (event.stage === "complete") complete = event.result;
-          if (!cancelled && batch?.state === "running") {
-            batch.stage = stageText[event.stage] || batch.stage;
-            if (event.patches_total)
-              batch.progress = Math.min(
-                100,
-                Math.round((event.patches_done / event.patches_total) * 100),
-              );
-            if (event.stage === "native_inverse")
-              batch.progress = Math.round((event.current / event.total) * 100);
+    const task = { id: file.id, name: file.name, stage: "메모리 확보 대기", progress: null, lane: "waiting" };
+    batch.active.push(task);
+    const controller = new AbortController();
+    const abortTask = () => controller.abort();
+    pipelineController.signal.addEventListener("abort", abortTask, { once: true });
+    if (pipelineController.signal.aborted) controller.abort();
+    const signal = controller.signal;
+    let memory, modelSlot, gpu, cpu, finalize;
+    const estimate = estimateMemory(file);
+    try {
+      memory = await pipelineResources.memory.acquire(estimate.gpu, signal);
+      if (signal.aborted) throw aborted();
+      taskState(task, { stage: "입력 확인", lane: "prepare" });
+      file = await prepareInput(file, confirmed, signal);
+      if (signal.aborted) throw aborted();
+      taskState(task, { stage: device === "cpu" ? "모델 준비" : "GPU 차례 대기", lane: "waiting" });
+      modelSlot = await pipelineResources.model.acquire(1, signal);
+      gpu = await pipelineResources.gpu.acquire(1, signal);
+      if (signal.aborted) throw aborted();
+      const id = randomUUID(), directory = path.join(runs, id);
+      await fsp.mkdir(directory);
+      const route = file.classification?.route_to_segmentation;
+      const engine = file.analysis === "xray" ? (route === "AP" ? "ap" : "lat") : file.analysis;
+      const job = { id: file.id, input: file.input, analysis: file.analysis, route, device, output: path.join(directory, "output") };
+      await fsp.writeFile(path.join(directory, "job.json"), JSON.stringify(job));
+      if (signal.aborted) throw aborted();
+      const model = modelWorker(engine);
+      taskState(task, { stage: "모델 준비", lane: device === "cpu" ? "cpu" : "gpu", progress: null });
+      const complete = await model.request({ operation: "run", job }, {
+        id, logPath: path.join(directory, "engine-private.log"),
+        onEvent: async event => {
+          if (signal.aborted) return;
+          if (event.gpu) batch.deviceLabel = `${event.gpu} · ${event.precision === "mixed_float16" ? "AMP" : "FP32"}`;
+          if (event.stage === "cpu_ready") {
+            gpu?.release(); gpu = undefined;
+            memory.resize(estimate.cpu);
+            taskState(task, { stage: "CPU 후처리 차례 대기", lane: "waiting", progress: null });
+            cpu = await pipelineResources.cpu.acquire(1, signal);
+            if (signal.aborted) { cpu.release(); throw aborted(); }
+            taskState(task, { stage: "CPU 후처리", lane: "cpu" });
+            model.send({ operation: "resume_cpu", id });
+            return;
           }
-        } catch {
-          /* Vendor output stays private. */
-        }
+          const stage = stageText[event.stage];
+          if (stage && task.stage !== stage) taskState(task, { stage, progress: null });
+          if (event.patches_total) taskState(task, { progress: Math.min(100, Math.round(event.patches_done / event.patches_total * 100)) });
+          if (["native_inverse", "native_normalization", "native_prepare", "native_blocks"].includes(event.stage)) taskState(task, { progress: Math.round(event.current / event.total * 100) });
+        },
       });
-      process.once("error", () => {
-        log.end();
-        reject(new Error("분석 엔진을 시작하지 못했습니다. 로컬 실행 환경을 확인하세요."));
-      });
-      process.once("exit", (code) => {
-        log.end();
-        if (child === process) child = undefined;
-        if (cancelled) resolve(null);
-        else if (
-          code === 0 &&
-          complete &&
-          inside(complete) &&
-          complete.startsWith(directory + path.sep)
-        )
-          resolve(complete);
-        else
-          reject(
-            new Error(
-              "모델 실행에 실패했습니다. 입력 조건과 GPU/메모리 여유를 확인하세요. CPU 실행으로 다시 시도할 수 있습니다.",
-            ),
-          );
-      });
-    });
-    if (cancelled || !resultPath) return;
-    batch.stage = "측정·Overlay·3D 준비";
-    batch.progress = null;
-    const result = await request("finalize", {
-      record: file,
-      result: resultPath,
-      id,
-      createdAt: new Date().toISOString(),
-    });
-    if (cancelled) return;
-    const temp = path.join(directory, "published.tmp");
-    await fsp.writeFile(temp, JSON.stringify(result));
-    await fsp.rename(temp, path.join(directory, "published.json"));
-    results.set(id, result);
-    batch.completed.push(result.summary);
+      gpu?.release(); gpu = undefined;
+      modelSlot?.release(); modelSlot = undefined;
+      if (signal.aborted) throw aborted();
+      const resultPath = complete.result;
+      if (!complete.complete || !inside(resultPath) || !resultPath.startsWith(directory + path.sep))
+        throw new Error("모델 결과 경로를 확인하지 못했습니다.");
+      cpu?.release(); cpu = undefined;
+      if (estimate.finalize) memory.resize(Math.min(estimate.cpu, estimate.finalize));
+      taskState(task, { stage: "결과 준비 차례 대기", lane: "waiting", progress: null });
+      finalize = await pipelineResources.finalize.acquire(1, signal);
+      if (signal.aborted) throw aborted();
+      taskState(task, { stage: "측정·Overlay·3D 준비", lane: "cpu", progress: null });
+      const result = await resultWorker().request({
+        operation: "finalize", record: file, result: resultPath, id, createdAt: new Date().toISOString(),
+      }, { id, timeout: 20 * 60000 });
+      if (signal.aborted) throw aborted();
+      const temp = path.join(directory, "published.tmp");
+      await fsp.writeFile(temp, JSON.stringify(result));
+      if (signal.aborted) throw aborted();
+      await fsp.rename(temp, path.join(directory, "published.json"));
+      results.set(id, result);
+      batch.completed.push(result.summary);
+    } finally {
+      controller.abort();
+      pipelineController.signal.removeEventListener("abort", abortTask);
+      modelSlot?.release(); gpu?.release(); cpu?.release(); finalize?.release(); memory?.release();
+      batch.active = batch.active.filter(item => item !== task);
+    }
   }
   handle("run", (analysis, ids, confirmedIds = [], device = "cuda:0") => {
     validateAnalysis(analysis);
@@ -533,16 +612,19 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     if (
       !Array.isArray(ids) ||
       ids.length < 1 ||
-      ids.length > 12 ||
+      ids.length > files.size ||
       new Set(ids).size !== ids.length ||
       !Array.isArray(confirmedIds) ||
       !["cuda:0", "cpu"].includes(device)
     )
-      throw new Error("한 번에 1~12개의 검토된 영상을 선택하세요.");
+      throw new Error("등록된 영상 중 분석할 대상을 선택하세요.");
     const targets = ids.map((id) => getFile(analysis, id));
     if (targets.some((f) => !f.ready || (f.confirmation && !confirmedIds.includes(f.id))))
       throw new Error("분석 조건과 입력 단위/sequence를 확인하세요.");
+    const powerBlocker = powerSaveBlocker.start("prevent-app-suspension");
     cancelled = false;
+    pipelineController = new AbortController();
+    pipelineResources = resources();
     batch = {
       id: randomUUID(),
       analysis,
@@ -552,19 +634,21 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       progress: null,
       completed: [],
       failed: [],
+      active: [],
+      concurrency: device === "cpu" ? 1 : 3,
       total: targets.length,
+      deviceLabel: `${device === "cpu" ? "CPU" : "GPU"}${analysis === "xray" ? "" : " · FP32"}`,
     };
     runPromise = (async () => {
-      for (const file of targets) {
-        if (cancelled || disposed) break;
-        batch.current = file.name;
-        batch.stage = "입력 확인";
-        batch.progress = null;
-        try {
-          await execute(file, confirmedIds.includes(file.id), device);
-        } catch (error) {
-          if (!cancelled) batch.failed.push({ id: file.id, name: file.name, error: error.message });
-        }
+      try {
+        await runPipeline(targets, {
+          signal: pipelineController.signal, concurrency: batch.concurrency,
+          execute: file => execute(file, confirmedIds.includes(file.id), device),
+          failed: (file, error) => batch.failed.push({ id: file.id, name: file.name, error: error.message }),
+        });
+      } finally {
+        await closeAnalysisWorkers(cancelled);
+        powerSaveBlocker.stop(powerBlocker);
       }
       batch.state = cancelled ? "cancelled" : batch.failed.length ? "failed" : "complete";
       batch.stage = cancelled ? "취소됨" : "완료";
@@ -576,23 +660,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     validateAnalysis(analysis);
     if (batch?.analysis !== analysis || batch.state !== "running") return;
     cancelled = true;
-    if (child) {
-      const owned = child;
-      if (process.platform === "win32")
-        await new Promise((resolve) => {
-          const killer = spawn("taskkill", ["/PID", String(owned.pid), "/T", "/F"], {
-            windowsHide: true,
-            stdio: "ignore",
-          });
-          killer.once("error", () => {
-            owned.kill();
-            resolve();
-          });
-          killer.once("exit", resolve);
-        });
-      else owned.kill();
-    }
-    if (pending) stopWorker("작업을 취소했습니다.");
+    pipelineController?.abort();
+    await closeAnalysisWorkers(true);
+    if (pending) await stopWorker("작업을 취소했습니다.");
     await runPromise;
   }
   handle("cancel", cancel);
@@ -606,7 +676,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       files.delete(id);
       if (
         file.input &&
-        ![...results.values()].some((result) => result.record.input === file.input)
+        ![...results.values()].some((result) => path.dirname(result.record.input) === path.dirname(file.input))
       ) {
         const directory = path.dirname(file.input);
         if (inside(directory)) await fsp.rm(directory, { recursive: true, force: true });
@@ -624,7 +694,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       if (batch?.state === "running") await cancel(batch.analysis);
       disposed = true;
       channels.forEach((channel) => ipcMain.removeHandler(channel));
-      stopWorker();
+      await stopWorker();
     },
   };
 }

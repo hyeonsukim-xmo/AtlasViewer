@@ -57,7 +57,7 @@ def valid_geometry(image):
         raise InputError("Shear가 포함된 geometry는 현재 모델 입력으로 지원하지 않습니다.")
 
 
-def load_image(path, volume=True):
+def load_image(path, volume=True, metadata_only=False):
     path = Path(path)
     if path.name.lower().endswith((".nii", ".nii.gz")):
         ni = nib.load(path)
@@ -83,6 +83,15 @@ def load_image(path, volume=True):
     reader.ReadImageInformation()
     if reader.GetDimension() != 3 or math.prod(reader.GetSize()) > MAX_VOXELS:
         raise InputError("지원하는 3D 영상 형식과 크기를 확인하세요.")
+    if metadata_only:
+        if reader.GetNumberOfComponents() != 1 or min(reader.GetSize()) < 2:
+            raise InputError("CT/MRI 분석에는 3D volume이 필요합니다.")
+        geometry = sitk.Image([1, 1, 1], sitk.sitkUInt8)
+        geometry.SetSpacing(reader.GetSpacing())
+        geometry.SetOrigin(reader.GetOrigin())
+        geometry.SetDirection(reader.GetDirection())
+        valid_geometry(geometry)
+        return reader
     image = reader.Execute()
     valid_geometry(image)
     data = sitk.GetArrayViewFromImage(image)
@@ -215,12 +224,22 @@ def inspect(message, root, classifier):
                 image, fields = read_dicom(paths, analysis)
                 metadata.update(fields)
             else:
-                image = load_image(paths[0], volume=analysis != "xray")
+                deferred = analysis == "ct" and paths[0].suffix.lower() == ".nrrd"
+                image = load_image(paths[0], volume=analysis != "xray", metadata_only=deferred)
             size, spacing = image.GetSize(), image.GetSpacing()
             if analysis == "xray" and size[2] != 1:
                 raise InputError("X-ray는 Z=1인 projection만 지원합니다.")
-            source = directory / ("input.nii.gz" if analysis == "ct" else "input.nrrd")
-            if not is_dicom and ((analysis == "ct" and paths[0].name.lower().endswith((".nii", ".nii.gz"))) or paths[0].suffix.lower() == ".nrrd" and analysis != "ct"):
+            deferred = not is_dicom and analysis == "ct" and paths[0].suffix.lower() == ".nrrd"
+            source = directory / ("input.nii.gz" if analysis == "ct" and not deferred else "input.nrrd")
+            if deferred:
+                # Only main's private snapshots may be moved; standalone callers keep originals.
+                if message.get("consumeSnapshots"):
+                    shutil.move(str(paths[0]), str(source))
+                else:
+                    shutil.copyfile(paths[0], source)
+                record["deferredValidation"] = True
+                record["warnings"].append("영상 전체 검증은 분석 실행 전에 수행됩니다.")
+            elif not is_dicom and ((analysis == "ct" and paths[0].name.lower().endswith((".nii", ".nii.gz"))) or paths[0].suffix.lower() == ".nrrd" and analysis != "ct"):
                 source = directory / ("input.nii" if paths[0].suffix.lower() == ".nii" else source.name)
                 shutil.copyfile(paths[0], source)
             else:
@@ -229,7 +248,9 @@ def inspect(message, root, classifier):
                             studyDescription=metadata.get("studyDescription") or "", caseName=metadata.get("caseName") or name)
             record.update(input=str(source), metadata=metadata, ready=True)
             record["sourceProof"] = metadata.pop("_sourceProof", None)
-            if analysis == "ct":
+            if deferred:
+                record.update(confirmation="hu", evidence=None)
+            elif analysis == "ct":
                 source_sha = digest(source)
                 known = next((c for c in read_json(root / "packages/EXMO_CT/samples/manifest.json")["cases"] if c["input_sha256"] == source_sha), None)
                 evidence = "DICOM_RESCALE_HU" if is_dicom else "BOUND_DELIVERY_SAMPLE" if known else None
@@ -687,6 +708,15 @@ def prepare(message):
         raise InputError("입력 단위/sequence 확인 후 실행하세요.")
     if record["analysis"] == "ct":
         source = Path(record["input"])
+        if record.get("deferredValidation"):
+            # Full validation and model-format conversion happen before inference.
+            image = load_image(source)
+            converted = source.parent / "validated-input.nii.gz"
+            temporary = source.parent / "validated-input.tmp.nii.gz"
+            sitk.WriteImage(image, str(temporary), True)
+            temporary.replace(converted)
+            source = converted
+            record = {**record, "input": str(source), "deferredValidation": False}
         hu = source.parent / "hu_evidence.json"
         if not hu.exists():
             evidence = record.get("evidence") or "USER_CONFIRMED_HU"
@@ -695,7 +725,7 @@ def prepare(message):
             write_json(source.parent / "source_proof.json", {"source": evidence, "user_confirmation": bool(message.get("confirmed")),
                        "dicom": record.get("sourceProof"),
                        "note": "User confirmation is an input assertion, not independent HU validation."})
-    return True
+    return record
 
 
 def main():

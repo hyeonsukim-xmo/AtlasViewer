@@ -2,6 +2,7 @@ import type { Group } from "../../app/anatomy";
 export type Analysis = "ct" | "mri" | "xray";
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: string };
 export type ModelStatus = {
+  importProgress?: ImportProgress | null;
   reviewAvailable: boolean;
   estimationAvailable: boolean;
   device: string;
@@ -22,7 +23,17 @@ export type Classification = {
   confidence: number;
   probabilities: Record<string, number>;
 };
+export type ImportProgress = {
+  analysis: Analysis;
+  completed: number;
+  total: number;
+  current: string;
+  phase: "copy" | "inspect" | "saved";
+  failed: number;
+  rows?: ImagingFile[];
+};
 export type ImagingFile = {
+  deferredValidation?: boolean;
   id: string;
   name: string;
   analysis: Analysis;
@@ -117,6 +128,9 @@ export type AnalysisResult = {
   createdAt: string;
 };
 export type Job = {
+  active?: { id: string; name: string; stage: string; progress: number | null; lane: "waiting" | "prepare" | "gpu" | "cpu" }[];
+  concurrency?: number;
+  deviceLabel?: string;
   id: string;
   analysis: Analysis;
   state: "running" | "complete" | "failed" | "cancelled";
@@ -130,6 +144,7 @@ export type Job = {
 declare global {
   interface Window {
     exmoDesktop: {
+      onImportProgress(callback: (progress: ImportProgress) => void): () => void;
       status(analysis: Analysis): Promise<Reply<ModelStatus>>;
       list(analysis: Analysis): Promise<Reply<ImagingFile[]>>;
       results(analysis: Analysis): Promise<Reply<AnalysisResult[]>>;
