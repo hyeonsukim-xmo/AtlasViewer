@@ -1,5 +1,31 @@
 # CT NRRD 대량 가져오기 및 분석 처리 변경 기록
 
+## 2026-10-13 ZIP 입력 추가 (로컬 변경)
+
+Desktop의 **영상 추가**에서 ZIP을 직접 선택할 수 있다. DICOM 폴더 안의 ZIP도 처리한다.
+CT·MRI·X-ray가 같은 압축 해제 경로를 쓰며, 하위 폴더·한글 파일명·중복 basename을
+보존하면서 고유한 내부 파일명으로 등록한다. Study/Series/환자 식별은 파일명이 아닌
+DICOM metadata로 수행한다. 확장자가 없는 DICOM과 .IMA도 X-ray 분류기에 연결한다.
+
+원본 ZIP은 수정하지 않는다. 암호 ZIP, 중첩 ZIP, 잘못된 내부 경로, 링크·특수 파일과
+손상된 ZIP/CRC는 거절한다. 입력은 파일당 2 GB·합계 20 GB, 압축 해제된 영상은
+최대 6,000개·파일당 2 GB·합계 20 GB로 제한한다. 해제 중 상태를 표시하며, 실패해도
+기존 library를 보존하고 성공 시 임시 ZIP·해제 파일을 정리한다.
+
+실행한 검사:
+
+- scripts/validate-zip-import.py: 합성 ZIP 경계 조건과 CT/MRI DICOM series 복원,
+  X-ray 환자·촬영일 식별 정보. 추론하지 않는다.
+- scripts/validate-zip-import.cjs: 실제 imaging backend/Python worker로 CT·MRI·X-ray
+  ZIP 등록과 카탈로그 저장, 오류 후 기존 목록 보존, 원본 SHA256, 임시 파일 정리.
+  파일 선택 창과 Electron IPC 전송만 대체했다.
+- scripts/validate-classifier.py: 기존 .dcm/NRRD 분류 결과와 .IMA·확장자 없는 동일
+  DICOM의 결과·점수 일치, 잘못된 입력 거절과 프로세스 생존.
+
+이 검사는 ZIP 등록 경로 검증이다. 새 segmentation 추론이나 실제 GUI 클릭 검증을
+통과했다는 의미가 아니다. X-ray DICOM의 segmentation 전처리·원본 격자 복원은
+제공 NRRD recipe와의 통합 검증이 남아 있어 기존 분석 제한을 유지한다.
+
 ## 2026-10-03 문서화 기준
 
 이 문서는 GitHub에 반영한 `48419f4` (`0.1.11`)의 구현을 기준으로 한다.
@@ -33,7 +59,7 @@
 | 메모리 예약 | 영상 크기·간격에 따른 추정량으로 FIFO 입장을 제어. 예약 예산 초과 항목은 단독 입장 가능. 실제 메모리 사용량의 강제 제한이나 OOM 방지 보장은 아님 | `desktop/analysis-pipeline.cjs` |
 | 모델 서비스 | 배치 동안 모델 프로세스와 가중치를 재사용. 가중치 파일의 서명 변경 시 캐시를 무효화하고 배치 종료 시 작업 프로세스를 정리 | `desktop/model-service.py`, `desktop/model-runner.py` |
 | 프로세스 통신 | 작업 ID별 응답·진행 이벤트 연결, 프로세스 종료 처리, 취소 및 중복 종료 처리 | `desktop/analysis-worker.cjs` |
-| 결과 게시 | 측정·Overlay·3D 준비가 끝난 뒤 `published.tmp`를 `published.json`으로 바꾸어 게시 | `desktop/imaging.cjs` |
+| 결과 게시 | 측정·Overlay 준비 후 먼저 원자적으로 게시하고, 3D는 큐에서 생성하여 같은 결과를 갱신 (2026-10-04 변경) | `desktop/imaging.cjs` |
 | 절전 방지 | 실행 중 `prevent-app-suspension`을 사용하고 배치 종료 시 해제 | `desktop/imaging.cjs` |
 
 CT는 UNETR/MONAI 1.3.2 FP32 경로에서 GPU 추론을 지원하며, predictor

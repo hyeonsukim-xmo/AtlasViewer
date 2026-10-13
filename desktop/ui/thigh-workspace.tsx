@@ -2,6 +2,7 @@ import { t, useLanguage, localeTag } from "./language";
 import { useEffect, useRef, useState } from "react";
 import ImagePreview from "./image-preview";
 import ResultView from "./result-view";
+import XrayWorkspace from "./xray-workspace";
 import {
   number,
   unwrap,
@@ -55,6 +56,8 @@ export default function ThighWorkspace({
   const [device, setDevice] = useState("cuda:0");
   const receivedCompletion = useRef("");
   const running = job?.state === "running";
+  const pendingMeshes = results.filter(result => result.meshState === "pending")
+    .map(result => `${result.id}:${result.variant}`).join(",");
   const busy = changing || running;
   const current = files.find((file) => file.id === (hovered || active));
   const chosen = files.filter((file) => selected.includes(file.id));
@@ -105,8 +108,9 @@ export default function ThighWorkspace({
     };
   }, [analysis, visible, initialResult]);
   useEffect(() => {
-    if (!visible && !running) return;
+    if (!visible && !running && !pendingMeshes) return;
     let stale = false;
+    let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const next = unwrap(await window.exmoDesktop.job());
@@ -120,33 +124,36 @@ export default function ThighWorkspace({
           previous.stage === next.stage &&
           previous.deviceLabel === next.deviceLabel &&
           previous.progress === next.progress &&
+          Math.floor(previous.elapsedSeconds || 0) === Math.floor(next.elapsedSeconds || 0) &&
           JSON.stringify(previous.active) === JSON.stringify(next.active) &&
           previous.completed.length === next.completed.length &&
           previous.failed.length === next.failed.length
             ? previous
             : next,
         );
-        const key = next ? `${next.id}:${next.state}:${next.completed.length}` : "";
+        const key = next ? `${next.id}:${next.state}:${next.completed.length}:${next.resultRevision || 0}` : "";
         if (
-          next?.analysis === analysis &&
+          pendingMeshes || (next?.analysis === analysis &&
           (next.state !== "running" || next.completed.length > 0) &&
-          receivedCompletion.current !== key
+          receivedCompletion.current !== key)
         ) {
-          receivedCompletion.current = key;
           const completed = unwrap(await window.exmoDesktop.results(analysis));
-          if (!stale) setResults(completed);
+          if (!stale) {
+            receivedCompletion.current = key;
+            setResults(completed);
+          }
         }
       } catch (e) {
         if (!stale) setError((e as Error).message);
       }
+      if (!stale) timer = setTimeout(() => void refresh(), 1200);
     };
     void refresh();
-    const timer = setInterval(() => void refresh(), 1200);
     return () => {
       stale = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
-  }, [analysis, visible, running]);
+  }, [analysis, visible, running, pendingMeshes]);
   function include(id: string, value: boolean) {
     setSelected((old) => (value ? [...new Set([...old, id])] : old.filter((key) => key !== id)));
   }
@@ -195,12 +202,12 @@ export default function ThighWorkspace({
       setImportProgress(null);
     }
   }
-  async function run() {
-    if (busy || !canRun) return;
+  async function run(ids = runnable.map(file => file.id)) {
+    if (busy || !ids.length) return;
     setChanging(true);
     setError("");
     try {
-      setJob(unwrap(await window.exmoDesktop.run(analysis, runnable.map(file => file.id), confirmed, device)));
+      setJob(unwrap(await window.exmoDesktop.run(analysis, ids, confirmed, device)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -237,11 +244,24 @@ export default function ThighWorkspace({
   const displayResults = opened
     .map((id) => results.find((result) => result.id === id))
     .filter((result): result is AnalysisResult => !!result);
+  const xrayWorkspace = analysis === "xray" ? <XrayWorkspace
+    files={files} results={results} job={job} model={model} busy={busy} importing={importing}
+    importProgress={importProgress} error={error} visible={visible} initialResult={initialResult} device={device} setDevice={setDevice}
+    onAdd={folder => void add(folder)} onRun={ids => void run(ids)} onCancel={() => void cancel()}
+    onClear={() => void clear()} onBack={onBack}
+    onReload={async () => {
+      const [inputs, saved] = await Promise.all([window.exmoDesktop.list(analysis).then(unwrap), window.exmoDesktop.results(analysis).then(unwrap)]);
+      setFiles(inputs); setResults(saved);
+    }}
+    onUpdate={result => setResults(old => old.map(row => row.id === result.id ? result : row))}
+  /> : null;
+  if (xrayWorkspace) return xrayWorkspace;
   if (displayResults.length)
     return (
       <ResultView
         key={opened.join()}
         results={displayResults}
+        workspaceError={error}
         onClose={() => {
           setOpened([]);
           setStep("results");
@@ -293,7 +313,7 @@ export default function ThighWorkspace({
         <div role="status" className="job-status import-status">
           <div>
             <strong>{t("영상 가져오기 {{value0}} / {{value1}}", { value0: importProgress.completed, value1: importProgress.total })}</strong>
-            <span>{t(importProgress.phase === "copy" ? "파일 복사 중" : importProgress.phase === "inspect" ? "영상 확인 중" : "등록 완료")} · {importProgress.current}</span>
+            <span>{t(importProgress.phase === "extract" ? "ZIP 압축 해제 중" : importProgress.phase === "copy" ? "파일 복사 중" : importProgress.phase === "inspect" ? "영상 확인 중" : "등록 완료")} · {importProgress.current}</span>
             {importProgress.failed > 0 && <span>{t("실패 {{value0}}개", { value0: importProgress.failed })}</span>}
           </div>
           <progress max={importProgress.total || 1} value={importProgress.completed} />
@@ -313,7 +333,8 @@ export default function ThighWorkspace({
             {!job.active?.length && <span>
               {job.current}
             </span>}
-            <span>{t("전체 처리 {{value0}} / {{value1}} · 성공 {{value2}} · 실패 {{value3}}", { value0: job.completed.length + job.failed.length, value1: job.total, value2: job.completed.length, value3: job.failed.length })}</span>
+            <span>{t("전체 처리 {{value0}} / {{value1}} · 성공 {{value2}} · 실패 {{value3}}", { value0: job.completed.length + job.failed.length, value1: job.total, value2: job.completed.length, value3: job.failed.length })}
+              {job.elapsedSeconds != null && ` · ${Math.floor(job.elapsedSeconds)} s`}</span>
             <progress aria-label={t("전체 배치 진행률")} max={job.total || 1} value={job.completed.length + job.failed.length} className="batch-total-progress" />
             {!job.active?.length && <span>{job.progress == null ? t("현재 단계 처리 중 · 전체 완료 아님") : t("현재 단계 {{value0}}% · 전체 완료 아님", { value0: job.progress })}</span>}
             {job.active?.map(task => (

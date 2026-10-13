@@ -44,7 +44,7 @@ function estimateMemory(file) {
 }
 
 function resources({ totalMemory = os.totalmem(), freeMemory = os.freemem() } = {}) {
-  return { model: new Capacity(2), gpu: new Capacity(1), cpu: new Capacity(1), finalize: new Capacity(1), memory: new Capacity(Math.max(2 * GiB, Math.min(totalMemory * .7, freeMemory - 2 * GiB))) };
+  return { model: new Capacity(2), gpu: new Capacity(1), cpu: new Capacity(1), memory: new Capacity(Math.max(2 * GiB, Math.min(totalMemory * .7, freeMemory - 2 * GiB))) };
 }
 
 async function runPipeline(targets, { execute, failed, signal, concurrency = 2 }) {

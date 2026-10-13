@@ -5,7 +5,8 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const readline = require("node:readline");
-const { resources, estimateMemory, runPipeline, aborted } = require("./analysis-pipeline.cjs");
+const { performance } = require("node:perf_hooks");
+const { Capacity, resources, estimateMemory, runPipeline, aborted } = require("./analysis-pipeline.cjs");
 const { AnalysisWorker } = require("./analysis-worker.cjs");
 
 function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette }) {
@@ -25,6 +26,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     runPromise,
     cancelled = false;
   let pipelineController, pipelineResources, finalizer;
+  const resultLane = new Capacity(1);
+  let meshQueue = Promise.resolve(), publicationQueue = Promise.resolve();
+  let resultRevision = 0;
+  let batchStarted = 0;
   const modelWorkers = new Map();
   function modelWorker(engine) {
     if (!modelWorkers.has(engine) || modelWorkers.get(engine).closed) modelWorkers.set(engine, new AnalysisWorker({
@@ -61,6 +66,13 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     (analysis === "xray" ? ["ct", "ap", "lat"] : ["ct", analysis]).every((name) =>
       fs.existsSync(python(name)),
     );
+  const studyAssignmentsPath = path.join(storageRoot, "xray-studies.json");
+  let studyAssignments = {};
+  if (fs.existsSync(studyAssignmentsPath))
+    studyAssignments = JSON.parse(fs.readFileSync(studyAssignmentsPath, "utf8"));
+  const withStudy = (record) => record.analysis === "xray" && studyAssignments[record.inputId || record.id]
+    ? { ...record, metadata: { ...record.metadata, studyAssignment: studyAssignments[record.inputId || record.id] } }
+    : record;
   const publicFile = ({
     id,
     name,
@@ -72,7 +84,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     deferredValidation,
     warnings,
     error,
-  }) => ({ id, name, analysis, metadata, classification, confirmation, ready, deferredValidation, warnings, error });
+  }) => withStudy({ id, name, analysis, metadata, classification, confirmation, ready, deferredValidation, warnings, error });
   function publishImport(rows = []) {
     if (!disposed && importProgress)
       window.webContents.send("exmo:imaging:importProgress", {
@@ -132,6 +144,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
             changedVoxels: count,
           };
         }
+        if (result.summary.meshState === "pending") result.summary.meshState = "interrupted";
         results.set(result.summary.id, result);
       }
     } catch {
@@ -148,6 +161,58 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     catalogQueue = task.catch(() => {});
     return task;
   }
+  function publishResult(result, expected) {
+    const task = publicationQueue.then(async () => {
+      const id = result.summary.id;
+      // A late mesh for a previous variant must never replace the current result.
+      if (expected && results.get(id) !== expected) return false;
+      const publication = path.join(runs, id, "published.json");
+      const temporary = publication + "." + randomUUID() + ".tmp";
+      await fsp.writeFile(temporary, JSON.stringify(result));
+      await fsp.rename(temporary, publication);
+      results.set(id, result);
+      resultRevision++;
+      if (batch) {
+        batch.resultRevision = resultRevision;
+        const index = batch.completed.findIndex(row => row.id === id);
+        if (index >= 0) batch.completed[index] = result.summary;
+      }
+      return true;
+    });
+    publicationQueue = task.catch(() => {});
+    return task;
+  }
+  function queueMesh(result, signal, memoryBudget) {
+    if (result.summary.meshState !== "pending") return;
+    const queued = performance.now();
+    meshQueue = meshQueue.then(async () => {
+      let slot, memory;
+      try {
+        if (disposed || signal?.aborted) throw aborted();
+        if (results.get(result.summary.id) !== result) return;
+        if (memoryBudget) {
+          const estimate = estimateMemory(result.record);
+          memory = await memoryBudget.acquire(estimate.finalize || estimate.cpu, signal);
+        }
+        slot = await resultLane.acquire(1, signal);
+        if (results.get(result.summary.id) !== result) return;
+        const meshWait = (performance.now() - queued) / 1000;
+        const updated = await resultWorker().request({ operation: "mesh", publication: result }, { timeout: 20 * 60000 });
+        if (signal?.aborted || disposed) throw aborted();
+        updated.summary.timings.meshWait = meshWait;
+        await publishResult(updated, result);
+      } catch (error) {
+        const updated = { ...result, summary: { ...result.summary,
+          meshState: signal?.aborted || disposed ? "interrupted" : "failed" } };
+        await publishResult(updated, result);
+      } finally {
+        slot?.release(); memory?.release();
+      }
+    }).catch(error => {
+      // Retain the early publication even if persisting mesh status fails.
+      console.error("Mesh publication failed", error);
+    });
+  }
   function validateAnalysis(value) {
     if (!["ct", "mri", "xray"].includes(value)) throw new Error("분석 작업을 먼저 선택하세요.");
   }
@@ -156,7 +221,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     const file = files.get(id);
     if (!file || file.analysis !== analysis || !file.input)
       throw new Error("이 분석 작업에 영상을 다시 추가하세요.");
-    return file;
+    return withStudy(file);
   }
   function stopWorker(message = "영상 확인 작업이 중단되었습니다. 다시 시도하세요.") {
     const old = worker;
@@ -305,9 +370,36 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
   handle("results", (analysis) => {
     validateAnalysis(analysis);
     return [...results.values()]
-      .map((r) => r.summary)
+      .map((r) => withStudy(r.summary))
       .filter((r) => r.analysis === analysis)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+  handle("assignXrayStudy", async (ids, study) => {
+    if (selecting || batch?.state === "running") throw new Error("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
+    if (!Array.isArray(ids) || !ids.length || ids.length > 6000 ||
+        ids.some(id => typeof id !== "string") || !study || typeof study !== "object")
+      throw new Error("촬영 정보와 선택 영상을 확인하세요.");
+    const fields = ["patientId", "patientIssuer", "studyDate"];
+    if (fields.some(key => typeof study[key] !== "string" || !study[key].trim() || study[key].length > 120))
+      throw new Error("환자번호·촬영일·기관을 입력하세요.");
+    const date = study.studyDate.replaceAll("-", "");
+    const parsed = new Date(date.slice(0, 4) + "-" + date.slice(4, 6) + "-" + date.slice(6, 8) + "T00:00:00Z");
+    if (!/^[0-9]{8}$/.test(date) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10).replaceAll("-", "") !== date)
+      throw new Error("유효한 촬영일을 입력하세요.");
+    for (const id of ids) {
+      const record = files.get(id) || [...results.values()].find(r => r.record.id === id)?.record;
+      if (record?.analysis !== "xray" || !record.metadata) throw new Error("촬영 정보와 선택 영상을 확인하세요.");
+    }
+    const value = { patientId: study.patientId.trim(), patientIssuer: study.patientIssuer.trim(), studyDate: date };
+    const task = catalogQueue.then(async () => {
+      const next = { ...studyAssignments, ...Object.fromEntries(ids.map(id => [id, value])) };
+      const temporary = studyAssignmentsPath + "." + randomUUID() + ".tmp";
+      await fsp.writeFile(temporary, JSON.stringify(next));
+      await fsp.rename(temporary, studyAssignmentsPath);
+      studyAssignments = next;
+    });
+    catalogQueue = task.catch(() => {});
+    await task;
   });
   handle("choose", async (analysis, folder = false, language = "ko") => {
     validateAnalysis(analysis);
@@ -328,17 +420,17 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
         properties: folder ? ["openDirectory"] : ["openFile", "multiSelections"],
         ...(folder
           ? {}
-          : { filters: [{ name: "Medical images", extensions: ["dcm", "nrrd", "nii", "gz"] }] }),
+          : { filters: [{ name: "Medical images", extensions: ["dcm", "nrrd", "nii", "gz", "zip"] }] }),
       });
       if (selection.canceled || disposed) return [];
-      const sources = [];
+      let sources = [];
       async function collect(directory, depth = 0) {
         if (depth > 12) throw new Error("폴더 깊이가 너무 큽니다. DICOM series 폴더를 선택하세요.");
         for (const item of await fsp.readdir(directory, { withFileTypes: true })) {
           if (item.isSymbolicLink()) continue;
           const full = path.join(directory, item.name);
           if (item.isDirectory()) await collect(full, depth + 1);
-          else if (item.isFile() && !/\.(json|txt|md|csv|png|jpe?g|zip|exe|py)$/i.test(item.name))
+          else if (item.isFile() && !/\.(json|txt|md|csv|png|jpe?g|exe|py)$/i.test(item.name))
             sources.push(full);
           if (sources.length > 6000)
             throw new Error("한 번에 6,000개 이하의 DICOM 파일을 선택하세요.");
@@ -359,6 +451,34 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
         if (!stat.isFile() || stat.size > 2 * 1024 ** 3 || total > 20 * 1024 ** 3)
           throw new Error("파일당 2 GB, 한 번에 20 GB 이하의 영상을 선택하세요.");
       }
+      const archives = sources.filter(source => /\.zip$/i.test(source));
+      const extractedNames = new Map();
+      if (archives.length) {
+        sources = sources.filter(source => !/\.zip$/i.test(source));
+        let imageBytes = 0;
+        for (const source of sources) imageBytes += (await fsp.stat(source)).size;
+        for (const archive of archives) {
+          importProgress.current = path.basename(archive);
+          importProgress.phase = "extract";
+          publishImport();
+          const snapshot = path.join(snapshots, randomUUID() + ".zip");
+          await fsp.copyFile(archive, snapshot, fs.constants.COPYFILE_EXCL);
+          const destination = path.join(importRoot, "extracted", randomUUID());
+          const entries = await request("extract", {
+            archive: snapshot, destination,
+            maxFiles: 6000 - sources.length, maxBytes: 20 * 1024 ** 3 - imageBytes,
+          });
+          for (const entry of entries) {
+            if (!inside(entry.path) || path.dirname(entry.path) !== destination)
+              throw new Error("ZIP 내부 경로가 올바르지 않습니다.");
+            sources.push(entry.path);
+            extractedNames.set(entry.path, entry.name);
+            imageBytes += entry.bytes;
+          }
+          await fsp.rm(snapshot, { force: true });
+        }
+        importProgress.total = sources.length;
+      }
       const standalone = sources.filter(p => /\.(nrrd|nii|nii\.gz)$/i.test(p));
       const dicom = sources.filter(p => !standalone.includes(p));
       const groups = standalone.map(p => [p]);
@@ -370,14 +490,15 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
         let rows;
         try {
           for (const source of sourcePaths) {
-            importProgress.current = path.basename(source);
+            importProgress.current = extractedNames.get(source) || path.basename(source);
             importProgress.phase = "copy";
             publishImport();
             const ext = source.toLowerCase().endsWith(".nii.gz") ? ".nii.gz" : path.extname(source);
             const snapshot = path.join(snapshots, randomUUID() + ext);
-            await fsp.copyFile(source, snapshot, fs.constants.COPYFILE_EXCL);
+            if (extractedNames.has(source)) await fsp.rename(source, snapshot);
+            else await fsp.copyFile(source, snapshot, fs.constants.COPYFILE_EXCL);
             paths.push(snapshot);
-            names[snapshot] = path.basename(source);
+            names[snapshot] = extractedNames.get(source) || path.basename(source);
           }
           importProgress.phase = "inspect";
           publishImport();
@@ -387,7 +508,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
           });
         } catch (error) {
           if (disposed) break;
-          rows = [{ id: randomUUID(), analysis, name: path.basename(sourcePaths[0]),
+          rows = [{ id: randomUUID(), analysis, name: extractedNames.get(sourcePaths[0]) || path.basename(sourcePaths[0]),
             ready: false, warnings: [], error: error.message }];
         }
         for (const row of rows) files.set(row.id, row);
@@ -401,7 +522,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       }
       // A terminated worker/virus scanner may briefly retain a snapshot handle.
       // Cleanup must never turn already-persisted imports into an apparent failure.
-      if (inside(snapshots)) await fsp.rm(snapshots, {
+      for (const temporary of [snapshots, path.join(importRoot, "extracted")])
+        if (inside(temporary)) await fsp.rm(temporary, {
         recursive: true, force: true, maxRetries: 10, retryDelay: 100,
       }).catch(() => {});
       return imported.map(publicFile);
@@ -478,8 +600,15 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     if (
       variant === prior.summary.variant &&
       prior.summary.laterality?.method === "femur_components_lps_v1"
-    )
+    ) {
+      if (["failed", "interrupted"].includes(prior.summary.meshState)) {
+        const retry = { ...prior, summary: { ...prior.summary, meshState: "pending" } };
+        await publishResult(retry, prior);
+        queueMesh(retry);
+        return retry.summary;
+      }
       return prior.summary;
+    }
     const task = (async () => {
       const result = await request("finalize", {
         id,
@@ -487,12 +616,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
         record: prior.record,
         result: prior.result,
         createdAt: prior.summary.createdAt,
+        deferMesh: true,
       });
-      const publication = path.join(runs, id, "published.json");
-      const temporary = publication + "." + randomUUID() + ".tmp";
-      await fsp.writeFile(temporary, JSON.stringify(result));
-      await fsp.rename(temporary, publication);
-      results.set(id, result);
+      await publishResult(result);
+      queueMesh(result);
       return result.summary;
     })();
     preparingResults.set(id, task);
@@ -527,6 +654,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     return file;
   }
   async function execute(file, confirmed, device) {
+    const started = performance.now();
+    const timings = {};
     const task = { id: file.id, name: file.name, stage: "메모리 확보 대기", progress: null, lane: "waiting" };
     batch.active.push(task);
     const controller = new AbortController();
@@ -538,13 +667,18 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     const estimate = estimateMemory(file);
     try {
       memory = await pipelineResources.memory.acquire(estimate.gpu, signal);
+      timings.admissionWait = (performance.now() - started) / 1000;
       if (signal.aborted) throw aborted();
       taskState(task, { stage: "입력 확인", lane: "prepare" });
+      let phase = performance.now();
       file = await prepareInput(file, confirmed, signal);
+      timings.input = (performance.now() - phase) / 1000;
       if (signal.aborted) throw aborted();
       taskState(task, { stage: device === "cpu" ? "모델 준비" : "GPU 차례 대기", lane: "waiting" });
+      phase = performance.now();
       modelSlot = await pipelineResources.model.acquire(1, signal);
       gpu = await pipelineResources.gpu.acquire(1, signal);
+      timings.gpuWait = (performance.now() - phase) / 1000;
       if (signal.aborted) throw aborted();
       const id = randomUUID(), directory = path.join(runs, id);
       await fsp.mkdir(directory);
@@ -555,6 +689,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       if (signal.aborted) throw aborted();
       const model = modelWorker(engine);
       taskState(task, { stage: "모델 준비", lane: device === "cpu" ? "cpu" : "gpu", progress: null });
+      phase = performance.now();
       const complete = await model.request({ operation: "run", job }, {
         id, logPath: path.join(directory, "engine-private.log"),
         onEvent: async event => {
@@ -576,6 +711,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
           if (["native_inverse", "native_normalization", "native_prepare", "native_blocks"].includes(event.stage)) taskState(task, { progress: Math.round(event.current / event.total * 100) });
         },
       });
+      timings.modelProcess = (performance.now() - phase) / 1000;
       gpu?.release(); gpu = undefined;
       modelSlot?.release(); modelSlot = undefined;
       if (signal.aborted) throw aborted();
@@ -585,19 +721,24 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       cpu?.release(); cpu = undefined;
       if (estimate.finalize) memory.resize(Math.min(estimate.cpu, estimate.finalize));
       taskState(task, { stage: "결과 준비 차례 대기", lane: "waiting", progress: null });
-      finalize = await pipelineResources.finalize.acquire(1, signal);
+      phase = performance.now();
+      finalize = await resultLane.acquire(1, signal);
+      timings.resultWait = (performance.now() - phase) / 1000;
       if (signal.aborted) throw aborted();
-      taskState(task, { stage: "측정·Overlay·3D 준비", lane: "cpu", progress: null });
+      taskState(task, { stage: "측정·Overlay 준비", lane: "cpu", progress: null });
+      phase = performance.now();
       const result = await resultWorker().request({
-        operation: "finalize", record: file, result: resultPath, id, createdAt: new Date().toISOString(),
+        operation: "finalize", record: file, result: resultPath, id, createdAt: new Date().toISOString(), deferMesh: true,
       }, { id, timeout: 20 * 60000 });
       if (signal.aborted) throw aborted();
-      const temp = path.join(directory, "published.tmp");
-      await fsp.writeFile(temp, JSON.stringify(result));
-      if (signal.aborted) throw aborted();
-      await fsp.rename(temp, path.join(directory, "published.json"));
-      results.set(id, result);
+      timings.resultPreparation = (performance.now() - phase) / 1000;
+      timings.ready = (performance.now() - started) / 1000;
+      result.summary.timings = { ...result.summary.timings, ...timings };
+      await publishResult(result);
       batch.completed.push(result.summary);
+      finalize.release(); finalize = undefined;
+      memory.release(); memory = undefined;
+      queueMesh(result, pipelineController.signal, pipelineResources.memory);
     } finally {
       controller.abort();
       pipelineController.signal.removeEventListener("abort", abortTask);
@@ -622,6 +763,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     if (targets.some((f) => !f.ready || (f.confirmation && !confirmedIds.includes(f.id))))
       throw new Error("분석 조건과 입력 단위/sequence를 확인하세요.");
     const powerBlocker = powerSaveBlocker.start("prevent-app-suspension");
+    batchStarted = performance.now();
     cancelled = false;
     pipelineController = new AbortController();
     pipelineResources = resources();
@@ -638,6 +780,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       concurrency: device === "cpu" ? 1 : 3,
       total: targets.length,
       deviceLabel: `${device === "cpu" ? "CPU" : "GPU"}${analysis === "xray" ? "" : " · FP32"}`,
+      resultRevision,
     };
     runPromise = (async () => {
       try {
@@ -646,16 +789,26 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
           execute: file => execute(file, confirmedIds.includes(file.id), device),
           failed: (file, error) => batch.failed.push({ id: file.id, name: file.name, error: error.message }),
         });
+        if (!cancelled) batch.stage = "3D 준비";
+        await meshQueue;
       } finally {
         await closeAnalysisWorkers(cancelled);
         powerSaveBlocker.stop(powerBlocker);
       }
       batch.state = cancelled ? "cancelled" : batch.failed.length ? "failed" : "complete";
+      batch.elapsedSeconds = (performance.now() - batchStarted) / 1000;
       batch.stage = cancelled ? "취소됨" : "완료";
+      await fsp.writeFile(path.join(storageRoot, `batch-${batch.id}.timings.json`), JSON.stringify({
+        id: batch.id, analysis: batch.analysis, state: batch.state, total: batch.total,
+        elapsedSeconds: batch.elapsedSeconds,
+        results: batch.completed.map(row => ({ id: row.id, meshState: row.meshState, timings: row.timings })),
+        failed: batch.failed,
+      })).catch(error => console.error("Batch timing report could not be saved", error));
     })();
     return { ...batch };
   });
-  handle("job", () => batch);
+  handle("job", () => batch && { ...batch,
+    elapsedSeconds: batch.state === "running" ? (performance.now() - batchStarted) / 1000 : batch.elapsedSeconds });
   async function cancel(analysis) {
     validateAnalysis(analysis);
     if (batch?.analysis !== analysis || batch.state !== "running") return;
@@ -692,7 +845,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     async dispose() {
       if (disposed) return;
       if (batch?.state === "running") await cancel(batch.analysis);
+      await runPromise;
       disposed = true;
+      await closeAnalysisWorkers(true);
+      await meshQueue;
       channels.forEach((channel) => ipcMain.removeHandler(channel));
       await stopWorker();
     },

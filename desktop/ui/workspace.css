@@ -4,7 +4,7 @@
   flex-direction: column;
   background: #09091c;
   color: #e5e5ef;
-  font-size: 13px;
+  font-size: 15px;
 }
 .desktop-nav {
   height: 62px;
@@ -27,12 +27,12 @@
 }
 .desktop-nav-label {
   color: #9193ad;
-  font-size: 12px;
+  font-size: 14px;
 }
 .desktop-demo-link {
   margin-left: auto;
   color: #b0b2c8;
-  font-size: 12px;
+  font-size: 14px;
   border: 1px solid #ffffff18;
   padding: 7px 14px;
   border-radius: 9px;
@@ -47,7 +47,7 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: #b0b2c8;
 }
 .language-select select {
@@ -106,23 +106,23 @@
 }
 .catalog-heading > span {
   color: #85889f;
-  font-size: 11px;
+  font-size: 13px;
 }
 .catalog-heading h1 {
-  font-size: 25px;
+  font-size: 27px;
   font-weight: 550;
   letter-spacing: -0.04em;
   margin: 0;
 }
 .catalog-heading p:not(.analysis-eyebrow) {
   color: #a0a2b8;
-  font-size: 13px;
+  font-size: 15px;
   margin: 8px 0 0;
 }
 .analysis-eyebrow {
   color: #a8a2ba;
   letter-spacing: 0.12em;
-  font-size: 10px;
+  font-size: 12px;
   margin: 0 0 10px;
 }
 .catalog-section {
@@ -145,12 +145,12 @@
   border-bottom: 1px solid #ffffff0b;
 }
 .panel-title strong {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 550;
 }
 .panel-title span {
   color: #9698b1;
-  font-size: 11px;
+  font-size: 13px;
 }
 .panel-title > div {
   display: grid;
@@ -166,10 +166,10 @@
   justify-content: space-between;
   margin: 20px 2px;
   color: #767991;
-  font-size: 11px;
+  font-size: 13px;
 }
 .modality-label {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -194,12 +194,12 @@
   border-collapse: collapse;
   width: 100%;
   text-align: left;
-  font-size: 12px;
+  font-size: 14px;
 }
 .clinical-table th {
   font-weight: 450;
   color: #8b8ea8;
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
   background: #0b0b201f;
   padding: 11px 18px;
@@ -220,7 +220,7 @@
 .clinical-table small {
   display: block;
   color: #8589a4;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
   margin-top: 5px;
 }
@@ -238,7 +238,7 @@
   color: #dedeea;
   border-radius: 9px;
   padding: 8px 14px;
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
   box-shadow: inset 0 1px 0 #ffffff07;
   transition:
@@ -264,7 +264,7 @@
   border: 0;
   padding: 5px 0;
   color: #a7abc4;
-  font-size: 12px;
+  font-size: 14px;
 }
 .text-button:hover:not(:disabled) {
   color: #f1edf7;
@@ -301,15 +301,15 @@
 }
 .status-ready {
   color: #aaaeca !important;
-  font-size: 11px;
+  font-size: 13px;
 }
 .status-review {
   color: #c2ac85 !important;
-  font-size: 11px;
+  font-size: 13px;
 }
 .engine-state {
   color: #8e91aa;
-  font-size: 11px;
+  font-size: 13px;
 }
 .clinical-empty {
   min-height: 165px;
@@ -324,11 +324,11 @@
 }
 .clinical-empty strong {
   color: #b4b7ce;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 .clinical-empty p {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   max-width: 400px;
   margin: 0;
@@ -353,18 +353,18 @@
   flex-shrink: 0;
 }
 .workspace-heading .text-button {
-  font-size: 11px;
+  font-size: 13px;
   padding: 0 0 8px;
 }
 .workspace-heading h1 {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 550;
   margin: 0;
   line-height: 1.25;
   letter-spacing: -0.03em;
 }
 .workspace-heading h1 > span {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 450;
   color: #c1c1d3;
   margin-left: 9px;
@@ -372,7 +372,7 @@
 }
 .workspace-heading p {
   color: #898da8;
-  font-size: 11px;
+  font-size: 13px;
   margin: 7px 0 0;
 }
 .workflow-tabs {
@@ -388,7 +388,7 @@
   background: none;
   color: #888da9;
   padding: 12px 16px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .workflow-tabs > button[aria-selected="true"] {
   color: #f0eef8;
@@ -398,12 +398,12 @@
 .workflow-tabs button > span {
   margin-left: 8px;
   color: #9091af;
-  font-size: 10px;
+  font-size: 12px;
 }
 .workflow-context {
   margin-left: auto;
   color: #696f8d;
-  font-size: 11px;
+  font-size: 13px;
   padding-right: 8px;
 }
 .workspace-actions {
@@ -442,7 +442,7 @@
   padding-top: 5px;
 }
 .workspace-bottom > span {
-  font-size: 11px;
+  font-size: 13px;
   color: #898fa9;
   margin-right: auto;
 }
@@ -488,7 +488,7 @@
 .series-table td:nth-child(3),
 .series-table td:nth-child(4) {
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 13px;
 }
 .series-name {
   display: block;
@@ -501,24 +501,24 @@
   min-width: 0;
 }
 .series-name strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 .series-name span {
-  font-size: 11px;
+  font-size: 13px;
   color: #b1b4cb;
   display: block;
   margin-top: 5px;
   overflow-wrap: anywhere;
 }
 .series-name small {
-  font-size: 10px;
+  font-size: 12px;
 }
 .series-preview-panel {
   display: flex;
   flex-direction: column;
 }
 .series-preview-panel > .panel-title strong {
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .series-preview-panel > .panel-title > span {
@@ -532,13 +532,13 @@
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 10px;
+  font-size: 12px;
   color: #8389a6;
   padding: 10px 14px;
 }
 .muted-note {
   color: #aa9c83;
-  font-size: 11px;
+  font-size: 13px;
   margin: 5px 14px;
 }
 .medical-preview {
@@ -555,7 +555,7 @@
   gap: 10px;
   padding: 9px 12px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 13px;
   color: #9298b5;
 }
 .control-segment {
@@ -572,7 +572,7 @@
   border: 1px solid transparent;
   color: #989cb7;
   padding: 6px 10px;
-  font-size: 11px;
+  font-size: 13px;
   border-radius: 7px;
   white-space: nowrap;
 }
@@ -605,7 +605,7 @@
 }
 .medical-image p {
   position: relative;
-  font-size: 12px;
+  font-size: 14px;
   color: #c9ab93;
   max-width: 360px;
   text-align: center;
@@ -614,12 +614,12 @@
 }
 .preview-placeholder {
   color: #797e98;
-  font-size: 12px;
+  font-size: 14px;
 }
 .orientation {
   position: absolute;
   color: #e1dfec;
-  font: 11px monospace;
+  font: 13px monospace;
   z-index: 1;
   text-shadow: 0 1px 3px #000;
 }
@@ -643,7 +643,7 @@
   position: absolute;
   right: 9px;
   bottom: 9px;
-  font-size: 10px;
+  font-size: 12px;
   color: #bbbcd0;
   background: #101025b0;
   border-radius: 4px;
@@ -654,7 +654,7 @@
   align-items: center;
   gap: 13px;
   padding: 10px 14px;
-  font-size: 10px;
+  font-size: 12px;
   color: #858ca8;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
@@ -670,7 +670,7 @@
   gap: 12px;
   align-items: center;
   color: #979fbb;
-  font-size: 11px;
+  font-size: 13px;
   padding: 8px 14px;
 }
 .overlay-opacity input {
@@ -707,7 +707,7 @@
   gap: 12px;
   flex-shrink: 0;
   color: #b7bdd3;
-  font-size: 12px;
+  font-size: 14px;
 }
 .review-batch-summary {
   flex-shrink: 0;
@@ -715,7 +715,7 @@
   border: 1px solid #ffffff19;
   border-radius: 10px;
   color: #b7bdd3;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 .review-batch-summary p { margin: 0; }
@@ -734,14 +734,14 @@
   align-items: flex-start;
 }
 .review-case .panel-title > div > span {
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .review-case-details {
   padding: 12px 15px;
-  font-size: 11px;
+  font-size: 13px;
   color: #aaaec6;
   overflow-wrap: anywhere;
 }
@@ -754,7 +754,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 13px;
   color: #c5b69e;
   line-height: 1.6;
   margin-top: 12px;
@@ -780,7 +780,7 @@
   min-width: 180px;
 }
 .job-status strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 .job-status .job-task {
@@ -790,7 +790,7 @@
 }
 .job-status span {
   color: #8e96b1;
-  font-size: 11px;
+  font-size: 13px;
 }
 .job-status progress {
   flex: 1;
@@ -812,7 +812,7 @@
 @keyframes analysis-working { from { transform: translateX(0); } to { transform: translateX(212%); } }
 @media (prefers-reduced-motion: reduce) { .task-stage-indeterminate > span { animation: none; } }
 .inline-error {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   color: #d0ad96;
   background: #58433820;
@@ -936,7 +936,7 @@
   min-width: 0;
   max-width: 140px;
   margin-top: 8px;
-  font-size: 10px;
+  font-size: 12px;
   padding: 6px;
 }
 .metric-table th:first-child {
@@ -975,7 +975,7 @@
 }
 .qc-table .clinical-button {
   white-space: normal;
-  font-size: 10px;
+  font-size: 12px;
   padding: 6px;
   margin-top: 6px;
 }
@@ -984,7 +984,7 @@
   color: #d5b999;
   background: none;
   border: 0;
-  font-size: 10px;
+  font-size: 12px;
   padding: 3px 0;
   margin-left: auto;
 }
@@ -993,7 +993,7 @@
   align-items: center;
   gap: 8px;
   padding: 0 16px 10px;
-  font-size: 11px;
+  font-size: 13px;
   color: #a5a7bd;
 }
 .qc-threshold input {
@@ -1008,7 +1008,7 @@
   margin: 10px 14px;
 }
 .metric-note {
-  font-size: 10px;
+  font-size: 12px;
   color: #8b92ae;
   padding: 11px 16px;
 }
@@ -1022,11 +1022,11 @@
   top: 0;
   background: #16152b;
   padding: 16px 12px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .metric-table td {
   padding: 16px 12px;
-  font-size: 13px;
+  font-size: 15px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -1035,7 +1035,7 @@
   vertical-align: middle;
 }
 .metric-table small {
-  font-size: 11px;
+  font-size: 13px;
 }
 .metric-table th:not(:first-child),
 .metric-table td:not(:first-child) {
@@ -1052,7 +1052,7 @@
   border: 0;
   text-align: left;
   color: #bec3d9;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   padding: 0;
   cursor: pointer;
@@ -1060,7 +1060,7 @@
 }
 .bilateral-values {
   margin-top: 6px;
-  font-size: 10px;
+  font-size: 12px;
   color: #b6b9ce;
   white-space: normal;
   font-variant-numeric: tabular-nums;
@@ -1085,7 +1085,7 @@
 .bilateral-values .bilateral-difference {
   display: block;
   margin-top: 5px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .bilateral-values .side-unassigned {
   display: block;
@@ -1096,12 +1096,12 @@
   width: 230px;
 }
 .actual-laterality > p {
-  font-size: 11px;
+  font-size: 13px;
   color: #aeb4ca;
   margin: 0 0 8px;
 }
 .actual-laterality .bilateral-values {
-  font-size: 12px;
+  font-size: 14px;
 }
 .actual-laterality .bilateral-values > div {
   padding: 6px;
@@ -1125,7 +1125,7 @@
   padding: 12px 15px;
   border-top: 1px solid #ffffff0f;
   color: #8993af;
-  font-size: 11px;
+  font-size: 13px;
   max-height: 210px;
   overflow: auto;
   line-height: 1.7;
@@ -1139,7 +1139,7 @@
   display: grid;
   grid-template-columns: auto auto;
   gap: 6px 15px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .qc-details dd,
 .actual-measurement dd {
@@ -1171,7 +1171,7 @@
   flex-wrap: wrap;
 }
 .render-toolbar select {
-  font-size: 11px;
+  font-size: 13px;
   max-width: 155px;
 }
 .render-toolbar > .text-button {
@@ -1217,14 +1217,14 @@
   flex-shrink: 0;
 }
 .case-title strong {
-  font-size: 12px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .case-title span {
   color: #7882a0;
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1245,7 +1245,7 @@
   place-content: center;
   color: #acb4cf;
   background: #08081895;
-  font-size: 12px;
+  font-size: 14px;
   pointer-events: none;
 }
 .render-hint {
@@ -1253,7 +1253,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 15px;
-  font-size: 10px;
+  font-size: 12px;
   color: #747f9e;
   flex-wrap: wrap;
 }
@@ -1300,7 +1300,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .count-3 .control-segment button {
-    font-size: 9px;
+    font-size: 11px;
     padding: 4px;
   }
   .count-3 .preview-toolbar {
@@ -1308,7 +1308,7 @@
     gap: 2px;
   }
   .workspace-heading h1 > span {
-    font-size: 14px;
+    font-size: 16px;
   }
   .engine-state {
     max-width: 135px;
@@ -1338,7 +1338,7 @@
     gap: 10px;
   }
   .workspace-heading h1 {
-    font-size: 20px;
+    font-size: 22px;
   }
   .workspace-heading p {
     margin-top: 5px;
@@ -1355,3 +1355,29 @@
     transition: none;
   }
 }
+
+/* X-ray studies share existing glass panels; only their grouping/layout differs. */
+.xray-result-workspace { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.xray-result-workspace > .result-workspace { flex: 1; height: auto; }
+.xray-result-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 16px 28px 0; }
+.xray-result-slot { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+.xray-result-slot span { color: var(--text-muted, #979fbb); }
+.xray-result-slot select { max-width: 240px; }
+.xray-view-status { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 13px; color: #a5acc3; }
+.xray-view-status b { color: #e0e4f3; font-weight: 600; }
+.xray-file-row { background: #ffffff03; }
+.xray-file-row td { font-size: 12px; }
+.xray-study-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px; border: 1px solid #ffffff19; border-radius: 12px; background: var(--glass); }
+.xray-study-form p { width: 100%; margin: 0; font-size: 13px; color: #a5acc3; }
+.xray-study-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.xray-study-form input { padding: 8px 10px; border: 1px solid #ffffff24; border-radius: 7px; background: #17162d; color: #edf0ff; color-scheme: dark; }
+.xray-review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; flex: 1; min-height: 0; overflow: auto; }
+.xray-review-grid .review-case { display: flex; flex-direction: column; height: 100%; min-height: 380px; }
+.xray-review-grid .review-case .medical-preview { flex: 1; height: auto; min-height: 240px; }
+.xray-review-grid select { margin: 8px 12px; max-width: calc(100% - 24px); }
+.xray-study-list { min-height: 140px; }
+
+.xray-input-layout { display: grid; grid-template-columns: minmax(440px, 1.3fr) minmax(280px, 1fr); gap: 16px; flex: 1; min-height: 0; }
+.xray-input-layout .series-preview-panel { min-height: 0; overflow: auto; }
+.xray-input-layout .results-list { overflow: auto; }
+@media (max-width: 850px) { .xray-input-layout { grid-template-columns: 1fr; overflow: auto; } .xray-input-layout .series-preview-panel { min-height: 420px; } }

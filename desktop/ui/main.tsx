@@ -7,6 +7,7 @@ import ThighWorkspace, { type Analysis } from "./thigh-workspace";
 import { unwrap, type AnalysisResult, type ModelStatus } from "./imaging";
 import "../../app/globals.css";
 import "./workspace.css";
+import { groupXrays, studyIdentity, xrayView, viewLabel } from "./xray-studies";
 
 const analyses = [
   {
@@ -59,8 +60,7 @@ function Desktop() {
         setRecent(
           values
             .flatMap((value) => value.results)
-            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-            .slice(0, 8),
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
         );
       })
       .catch(() => {});
@@ -68,6 +68,13 @@ function Desktop() {
       stale = true;
     };
   }, [view]);
+  const recentStudies = [
+    ...recent.filter(result => result.analysis !== "xray").map(result => ({ key: result.id, items: [result] })),
+    ...groupXrays(recent.filter(result => result.analysis === "xray")),
+  ].sort((a, b) => {
+    const latest = (items: AnalysisResult[]) => items.reduce((date, item) => item.createdAt > date ? item.createdAt : date, "");
+    return latest(b.items).localeCompare(latest(a.items));
+  }).slice(0, 8);
   return (
     <div className="desktop-shell dark">
       {view !== "demo" && (
@@ -129,7 +136,7 @@ function Desktop() {
                         <td>
                           <strong>Thigh muscle estimation</strong>
                           <span>{analysis.protocol}</span>
-                          <small>{t(analysis.input)}</small>
+                          <small>{t(analysis.input)} / ZIP</small>
                         </td>
                         <td>{analysis.output}</td>
                         <td>
@@ -175,9 +182,11 @@ function Desktop() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recent.map((result) => (
+                    {recentStudies.map((group) => {
+                      const result = group.items[0];
+                      return (
                       <tr
-                        key={result.id}
+                        key={group.key}
                         className="openable-row"
                         onClick={() => {
                           setInitialResult(result.id);
@@ -185,12 +194,13 @@ function Desktop() {
                         }}
                       >
                         <td>
-                          <strong>{result.metadata.caseName}</strong>
+                          <strong>{studyIdentity(result.metadata)?.patientId || result.metadata.caseName}</strong>
+                          {result.analysis === "xray" && <small>{studyIdentity(result.metadata)?.studyDate}</small>}
                           <small>{result.metadata.studyDescription || "—"}</small>
                         </td>
                         <td>{result.analysis.toUpperCase()}</td>
-                        <td>{result.metadata.seriesDescription}</td>
-                        <td>{new Date(result.createdAt).toLocaleString(localeTag())}</td>
+                        <td>{result.analysis === "xray" ? [...new Set(group.items.map(item => xrayView(item)).filter(view => view != null).map(viewLabel))].join(" / ") : result.metadata.seriesDescription}</td>
+                        <td>{new Date(group.items.reduce((date, item) => item.createdAt > date ? item.createdAt : date, "")).toLocaleString(localeTag())}</td>
                         <td>
                           <button
                             className="text-button"
@@ -202,7 +212,7 @@ function Desktop() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
                 {!recent.length && (

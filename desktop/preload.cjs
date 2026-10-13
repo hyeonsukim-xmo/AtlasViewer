@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld(
     run: (analysis, ids, confirmedIds, device) =>
       ipcRenderer.invoke("exmo:imaging:run", analysis, ids, confirmedIds, device),
     job: () => ipcRenderer.invoke("exmo:imaging:job"),
+    assignXrayStudy: (ids, study) => ipcRenderer.invoke("exmo:imaging:assignXrayStudy", ids, study),
     variant: (id, variant) => ipcRenderer.invoke("exmo:imaging:variant", id, variant),
     cancel: (analysis) => ipcRenderer.invoke("exmo:imaging:cancel", analysis),
     clear: (analysis) => ipcRenderer.invoke("exmo:imaging:clear", analysis),

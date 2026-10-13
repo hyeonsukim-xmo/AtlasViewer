@@ -54,6 +54,14 @@ def main():
         expected[suffix] = pipeline.predict(file)
         for operation in ("preview", "classify"):
             requests.append({"id": f"{suffix}-{operation}", "operation": operation, "path": str(file)})
+    for suffix in ("noext", "ima"):
+        file = OUTPUT / ("extensionless" if suffix == "noext" else "image.IMA")
+        file.write_bytes((OUTPUT / "synthetic-integration-check.dcm").read_bytes())
+        expected[suffix] = expected["dcm"]
+        for operation in ("preview", "classify"):
+            requests.append({"id": f"{suffix}-{operation}", "operation": operation, "path": str(file)})
+    (OUTPUT / "invalid-extensionless").write_bytes(b"not DICOM")
+    requests.append({"id": "invalid-extensionless", "operation": "classify", "path": str(OUTPUT / "invalid-extensionless")})
     pipeline.models.clear()
     for name in ("unsupported-ct.dcm", "unsupported-volume.nrrd", "blank.nrrd", "corrupt.nrrd", "detached.nrrd"):
         requests.append({"id": name, "operation": "classify", "path": str(OUTPUT / name)})

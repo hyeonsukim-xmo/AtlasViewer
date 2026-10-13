@@ -13,6 +13,14 @@ export type Metadata = {
   studyDescription: string;
   seriesDescription: string;
   studyDate?: string;
+  patientId?: string;
+  patientIssuer?: string;
+  institutionName?: string;
+  studyUid?: string;
+  seriesUid?: string;
+  sopUid?: string;
+  acquisitionTime?: string;
+  studyAssignment?: { patientId: string; studyDate: string; patientIssuer: string };
   size: number[];
   spacing: number[];
   slices: number;
@@ -28,7 +36,7 @@ export type ImportProgress = {
   completed: number;
   total: number;
   current: string;
-  phase: "copy" | "inspect" | "saved";
+  phase: "copy" | "extract" | "inspect" | "saved";
   failed: number;
   rows?: ImagingFile[];
 };
@@ -83,6 +91,7 @@ export type MetricRow = {
   entropy: number | null;
   components: number | null;
   present: boolean;
+  applicable?: boolean;
   sides?: Record<AnatomicalSide, SideMetric> & {
     differenceCm3: number | null;
     differencePercent: number | null;
@@ -100,6 +109,21 @@ export type AnalysisResult = {
   variant: string;
   route: string | null;
   meshBytes: number | null;
+  meshState?: "pending" | "ready" | "empty" | "failed" | "interrupted";
+  compute?: { device: string; accumulation: string; input_resident: string | null; accumulation_reason: string | null } | null;
+  timings?: {
+    model?: Record<string, number>;
+    admissionWait?: number;
+    input?: number;
+    gpuWait?: number;
+    modelProcess?: number;
+    resultWait?: number;
+    resultPreparation?: number;
+    metricsOverlay?: number;
+    ready?: number;
+    meshWait?: number;
+    mesh?: number;
+  };
   laterality: {
     method: string;
     status: "estimated" | "partial" | "unavailable";
@@ -128,6 +152,8 @@ export type AnalysisResult = {
   createdAt: string;
 };
 export type Job = {
+  elapsedSeconds?: number;
+  resultRevision?: number;
   active?: { id: string; name: string; stage: string; progress: number | null; lane: "waiting" | "prepare" | "gpu" | "cpu" }[];
   concurrency?: number;
   deviceLabel?: string;
@@ -162,6 +188,7 @@ declare global {
         device: string,
       ): Promise<Reply<Job>>;
       job(): Promise<Reply<Job | null>>;
+      assignXrayStudy(inputIds: string[], study: { patientId: string; studyDate: string; patientIssuer: string }): Promise<Reply<void>>;
       variant(id: string, variant: string): Promise<Reply<AnalysisResult>>;
       cancel(analysis: Analysis): Promise<Reply<void>>;
       clear(analysis: Analysis): Promise<Reply<void>>;

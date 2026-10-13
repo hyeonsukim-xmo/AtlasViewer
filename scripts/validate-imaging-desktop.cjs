@@ -136,8 +136,10 @@ const deadline = setTimeout(() => {
       };
     });
     assert.ok(
-      !tableLayout.extraControls && tableLayout.rows.every((row) => row.height < 85),
-      "Metrics stay compact: " + JSON.stringify(tableLayout),
+      // The approved table spacing uses 16 px vertical padding and 13 px values.
+      // Keep comparison rows bounded without restoring the old cramped spacing.
+      !tableLayout.extraControls && tableLayout.rows.every((row) => row.height >= 56 && row.height < 105),
+      "Metrics keep readable spacing without extra controls: " + JSON.stringify(tableLayout),
     );
   }
   // This regression suite uses Korean labels regardless of the saved UI preference.
@@ -685,7 +687,7 @@ const deadline = setTimeout(() => {
     (await run(async (id) => window.exmoDesktop.run("mri", [id], [], "cpu"), last.id)).ok,
     false,
   );
-  await click("Segmentation 실행");
+  await click("미완료 영상 분석 (1개)");
   await wait(async () => (await window.exmoDesktop.job()).value?.stage === "모델 준비", 120);
   assert.equal(
     (await run(async (id) => window.exmoDesktop.run("xray", [id], [], "cuda:0"), last.id)).ok,
@@ -697,10 +699,10 @@ const deadline = setTimeout(() => {
   await wait(
     () =>
       ![...document.querySelectorAll("button")].find(
-        (b) => b.textContent === "Segmentation 실행" && b.getClientRects().length,
+        (b) => b.textContent === "미완료 영상 분석 (1개)" && b.getClientRects().length,
       )?.disabled,
   );
-  await click("Segmentation 실행");
+  await click("미완료 영상 분석 (1개)");
   await wait(async () => {
     const job = (await window.exmoDesktop.job()).value;
     return job && job.state !== "running";
@@ -779,15 +781,15 @@ const deadline = setTimeout(() => {
   assert.ok(await run(() => {
     const rows = [...document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list tbody tr")];
     const lateral = rows.filter((row) => /^LAT_(LT|RT)_01$/.test(row.querySelector("strong").textContent));
-    return lateral.length === 2 && lateral.every((row) => row.querySelector("input").disabled);
-  }), "AP and LAT comparison must be blocked");
+    return lateral.length === 2 && lateral.every((row) => !row.querySelector("input").disabled);
+  }), "Different study views can be selected; the viewer compares matching directions");
   await run(() => {
     const rows = [...document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list tbody tr")];
     rows.find((row) => row.querySelector("strong").textContent === "LAT_LT_01").click();
   });
   await sleep(200);
-  assert.equal(await run(() => document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list input:checked").length), 1,
-    "Whole-row click cannot bypass AP/LAT comparison restriction");
+  assert.equal(await run(() => document.querySelectorAll(".desktop-workspace:not([hidden]) .results-list input:checked").length), 2,
+    "Whole-row click selects another study without opening its result");
   const access = await run(async () => {
     const paths = [
       "/../desktop/imaging-worker.py",
@@ -873,7 +875,7 @@ const deadline = setTimeout(() => {
           "X-ray multi-class overlay",
           "explicit back navigation",
           "AP routing",
-          "AP/LAT mixed comparison rejection",
+          "study selection across projections with matching-view comparison",
           "cancel/retry",
           "single inference",
           "input immutability",

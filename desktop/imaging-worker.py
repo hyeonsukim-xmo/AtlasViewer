@@ -11,10 +11,13 @@ import io
 import itertools
 import json
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import sys
 import uuid
+import stat
+import zipfile
+import zlib
 
 import nibabel as nib
 import nrrd
@@ -146,6 +149,16 @@ def dicom_series(paths, analysis):
     return list(groups.values()) + other
 
 
+def xray_study_metadata(header):
+    fields = {"patientId": "PatientID", "patientIssuer": "IssuerOfPatientID",
+              "institutionName": "InstitutionName", "studyUid": "StudyInstanceUID",
+              "seriesUid": "SeriesInstanceUID", "sopUid": "SOPInstanceUID",
+              "studyDate": "StudyDate", "acquisitionTime": "AcquisitionTime"}
+    # Preserve exact identifiers (including leading zeros); never infer them from filenames.
+    return {key: str(header.get(tag, "")).strip()[:300] for key, tag in fields.items()
+            if header.get(tag) is not None}
+
+
 def read_dicom(paths, analysis):
     headers = [pydicom.dcmread(path, stop_before_pixels=True) for path in paths]
     first = headers[0]
@@ -162,6 +175,7 @@ def read_dicom(paths, analysis):
                 "seriesDescription": str(getattr(first, "SeriesDescription", ""))[:300],
                 "studyDate": str(getattr(first, "StudyDate", ""))[:20], "format": "DICOM"}
     if analysis == "xray":
+        metadata.update(xray_study_metadata(first))
         if len(paths) != 1:
             raise InputError("X-ray는 단일 projection만 지원합니다.")
         image = sitk.ReadImage(str(paths[0]))
@@ -205,6 +219,64 @@ def read_dicom(paths, analysis):
     return image, metadata
 
 
+def extract_zip(message):
+    destination = Path(message["destination"]).resolve()
+    max_files = min(int(message.get("maxFiles", 6000)), 6000)
+    max_bytes = min(int(message.get("maxBytes", 20 * 1024 ** 3)), 20 * 1024 ** 3)
+    if max_files < 0 or max_bytes < 0:
+        raise InputError("ZIP 압축 해제 한도를 초과했습니다.")
+    destination.mkdir(parents=True, exist_ok=False)
+    try:
+        with zipfile.ZipFile(message["archive"]) as archive:
+            entries = archive.infolist()
+            if len(entries) > 12000:
+                raise InputError("ZIP에 항목이 너무 많습니다. 영상 6,000개 이하로 나눠주세요.")
+            selected, total = [], 0
+            for entry in entries:
+                name = entry.filename.replace("\\", "/")
+                relative = PurePosixPath(name)
+                if (not name or name.startswith("/") or ":" in name or ".." in relative.parts
+                        or "\x00" in entry.orig_filename or len(relative.parts) > 13):
+                    raise InputError("ZIP 내부 경로가 올바르지 않습니다.")
+                mode = stat.S_IFMT(entry.external_attr >> 16)
+                if mode not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    raise InputError("ZIP의 링크·특수 파일은 지원하지 않습니다.")
+                if entry.flag_bits & 1:
+                    raise InputError("암호가 설정된 ZIP은 지원하지 않습니다. 암호를 해제한 ZIP을 사용하세요.")
+                if entry.is_dir() or mode == stat.S_IFDIR:
+                    continue
+                if relative.suffix.lower() == ".zip":
+                    raise InputError("ZIP 안의 중첩 ZIP은 지원하지 않습니다. DICOM 파일이 담긴 ZIP을 선택하세요.")
+                if ("__MACOSX" in relative.parts or relative.name.lower() in (".ds_store", "dicomdir")
+                        or relative.suffix.lower() in (".json", ".txt", ".md", ".csv", ".png", ".jpg", ".jpeg", ".exe", ".py")):
+                    continue
+                total += entry.file_size
+                selected.append((entry, relative.name))
+                if len(selected) > max_files or entry.file_size > 2 * 1024 ** 3 or total > max_bytes:
+                    raise InputError("압축 해제 후 영상 6,000개, 파일당 2 GB, 전체 20 GB 한도를 초과했습니다.")
+            if not selected:
+                raise InputError("ZIP에 지원하는 영상 파일이 없습니다.")
+            files, written = [], 0
+            for entry, name in selected:
+                # Flatten into unique private files: archive paths never become filesystem paths.
+                suffix = ".nii.gz" if name.lower().endswith(".nii.gz") else Path(name).suffix
+                target = destination / (uuid.uuid4().hex + suffix)
+                size = 0
+                with archive.open(entry) as source, target.open("xb") as output:
+                    while chunk := source.read(1024 * 1024):
+                        size += len(chunk)
+                        written += len(chunk)
+                        if size > 2 * 1024 ** 3 or written > max_bytes:
+                            raise InputError("압축 해제 후 영상 6,000개, 파일당 2 GB, 전체 20 GB 한도를 초과했습니다.")
+                        output.write(chunk)
+                if size != entry.file_size:
+                    raise InputError("ZIP이 손상되었거나 지원하지 않는 압축 방식입니다.")
+                files.append({"path": str(target), "name": name, "bytes": size})
+            return files
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, NotImplementedError, EOFError, zlib.error) as error:
+        raise InputError("ZIP이 손상되었거나 지원하지 않는 압축 방식입니다.") from error
+
+
 def inspect(message, root, classifier):
     analysis = message["analysis"]
     destination = Path(message["destination"])
@@ -226,6 +298,8 @@ def inspect(message, root, classifier):
             else:
                 deferred = analysis == "ct" and paths[0].suffix.lower() == ".nrrd"
                 image = load_image(paths[0], volume=analysis != "xray", metadata_only=deferred)
+                if analysis == "xray" and paths[0].suffix.lower() == ".nrrd":
+                    metadata.update(xray_study_metadata(nrrd.read_header(str(paths[0]))))
             size, spacing = image.GetSize(), image.GetSpacing()
             if analysis == "xray" and size[2] != 1:
                 raise InputError("X-ray는 Z=1인 projection만 지원합니다.")
@@ -473,7 +547,7 @@ def split_laterality(mask, rows, reference, image=None, entropy=None):
     return result, measurements
 
 
-def prepare_laterality(mask, rows, result, variant, analysis, image):
+def prepare_laterality(mask, rows, result, variant, analysis, image, defer_mesh=False):
     """Private, versioned derived assets. Source mask/ontology and model outputs remain immutable."""
     mask_path = result / variant / "mask.nrrd" if analysis == "mri" else result / "mask.nii.gz"
     raw_path = result / "raw/mask.nrrd" if analysis == "mri" else mask_path
@@ -482,7 +556,8 @@ def prepare_laterality(mask, rows, result, variant, analysis, image):
     manifest = folder / "metrics.json"
     if manifest.exists() and (folder / "mask.nrrd").exists():
         saved = read_json(manifest)
-        if saved.get("signature") == signature and (not saved["parts"] or (folder / "surface.glb").exists()):
+        if saved.get("signature") == signature and (defer_mesh or not saved["parts"] or (folder / "surface.glb").exists()):
+            if not (folder / "surface.glb").exists(): saved["meshBytes"] = None
             for row in rows: row["sides"] = saved["rows"][row["id"]]
             return folder, saved
     raw = mask if raw_path == mask_path else sitk.ReadImage(str(raw_path))
@@ -503,7 +578,7 @@ def prepare_laterality(mask, rows, result, variant, analysis, image):
                               "faceBudget": max(500, round(35000 * row["sides"][side]["count"] / row["count"]))})
     folder.mkdir(exist_ok=True)
     temporary = folder / "mask.tmp.nrrd"; sitk.WriteImage(separated, str(temporary), True); temporary.replace(folder / "mask.nrrd")
-    mesh_bytes = make_mesh(separated, parts, folder / "surface.glb")
+    mesh_bytes = None if defer_mesh else make_mesh(separated, parts, folder / "surface.glb")
     unassigned = sum(m["unassigned"]["count"] for m in measurements.values())
     saved = {"signature": signature, "reference": reference, "rows": measurements, "parts": parts, "meshBytes": mesh_bytes,
              "info": {"method": LATERALITY_METHOD, "status": "unavailable" if reference["status"] == "unavailable" else "partial" if unassigned else "estimated",
@@ -619,6 +694,8 @@ def strong_candidate(result, root):
 
 
 def finalize(message, root, palette):
+    import time
+    started = time.monotonic()
     result = Path(message["result"])
     if not read_json(result / "desktop-complete.json").get("complete"):
         raise InputError("완료되지 않은 결과입니다.")
@@ -642,7 +719,8 @@ def finalize(message, root, palette):
         ontology_path = root / ("packages/EXMO_CT/configs/ontology.json" if analysis == "ct" else "packages/EXMO_MRI/configs/dataset/mri_thigh_29class_v001.json")
         ontology = read_json(ontology_path)["labels"]
     else:
-        names = read_json(root / "packages/EXMO_XRAY/label_mapping.json")[route]["labels"]
+        mapping = read_json(root / "packages/EXMO_XRAY/label_mapping.json")[route]
+        names = mapping["labels"]
         # Read the delivered literal palette without loading Torch/MONAI into the preview worker.
         tree = ast.parse((root / "packages/EXMO_XRAY/code/InferenceLOWEX_slicer_nrrd.py").read_text(encoding="utf-8"))
         colors = next(ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "SLICER_SEGMENT_COLORS_BY_NAME" for target in node.targets))
@@ -674,10 +752,11 @@ def finalize(message, root, palette):
                      **({"rawValue": raw_metrics[cid]["volume_ml"]} if analysis == "mri" else {}),
                      "fat": None if raw_metric.get("fat_range_voxel_fraction") is None else 100 * raw_metric["fat_range_voxel_fraction"],
                      "hu": (raw_metric.get("hu") or {}).get("mean"), "entropy": raw_metric.get("mean_entropy"),
-                     "components": raw_metric.get("large_components_over_1ml"), "present": count > 0})
+                     "components": raw_metric.get("large_components_over_1ml"), "present": count > 0,
+                      **({"applicable": cid in mapping["active_foreground_ids"]} if analysis == "xray" else {})})
     mesh_path, mesh_bytes, side_path, lateral = None, None, None, None
     if analysis != "xray":
-        side_folder, lateral = prepare_laterality(mask, rows, result, variant, analysis, image)
+        side_folder, lateral = prepare_laterality(mask, rows, result, variant, analysis, image, message.get("deferMesh", False))
         mesh_path, mesh_bytes = side_folder / "surface.glb", lateral["meshBytes"]
         side_path = side_folder / "mask.nrrd"
     qc = read_json(result / "qc.json") if (result / "qc.json").exists() else {}
@@ -687,16 +766,49 @@ def finalize(message, root, palette):
         removed = sum(row["rawValue"] - row["value"] for row in rows)
         postprocessing = {"postprocessing": {"removedCm3": removed, "removedPercent": removed / raw_total * 100 if raw_total else 0,
                                               "changedVoxels": sum(raw_metrics[row["label"]]["voxel_count"] - row["count"] for row in rows)}}
+    completed = read_json(result / "desktop-complete.json")
+    execution = completed.get("execution", {})
     summary = {"id": message["id"], "inputId": record["id"], "analysis": analysis, "name": record["name"], "metadata": record["metadata"],
                "rows": rows, "unit": ("cm²" if record.get("areaAvailable", True) else "pixel") if analysis == "xray" else "cm³", "variant": variant, "route": route,
-               "meshBytes": mesh_bytes, "laterality": lateral["info"] if lateral else None,
+               "meshBytes": mesh_bytes, "meshState": "ready" if mesh_bytes else "pending" if lateral and lateral["parts"] else "empty",
+               "laterality": lateral["info"] if lateral else None,
                "parts": lateral["parts"] if lateral else [],
                "qc": {**postprocessing, "flags": metric.get("qc_flags", []), "entropy": metric.get("foreground_mean_entropy"),
                       "ttaDisagreement": qc.get("identity_tta_disagreement_fraction"), "missing": qc.get("missing_active_class_ids", []),
                       "unexpected": qc.get("unexpected_class_ids", []), "tta": "identity + L/R flip" if analysis == "mri" else "5 folds + mirroring" if route and route.startswith("LAT") else "None"},
-               "seconds": read_json(result / "desktop-complete.json")["seconds"], "createdAt": message["createdAt"]}
+               "compute": {key: execution.get(key) for key in ("device", "accumulation", "input_resident", "accumulation_reason")}
+                          if analysis == "ct" and execution.get("accumulation") else None,
+               "seconds": completed["seconds"], "createdAt": message["createdAt"],
+               "timings": {"model": completed.get("timings", {}),
+                           "metricsOverlay": time.monotonic() - started}}
     publication = {"summary": summary, "record": record, "mask": str(mask_path), "sideMask": str(side_path) if side_path else None, "mesh": str(mesh_path) if mesh_bytes else None, "result": str(result)}
     write_json(result / ("desktop-result-" + variant + ".json"), publication)
+    return publication
+
+
+def finish_mesh(publication):
+    """Only derived geometry changes; measurements and source masks stay immutable."""
+    import time
+    started = time.monotonic()
+    folder = Path(publication["sideMask"]).parent
+    saved = read_json(folder / "metrics.json")
+    target = folder / "surface.glb"
+    if saved.get("meshBytes") and target.exists():
+        mesh_bytes = target.stat().st_size
+    else:
+        temporary = folder / "surface.tmp.glb"
+        try:
+            mesh_bytes = make_mesh(sitk.ReadImage(publication["sideMask"]), saved["parts"], temporary)
+            if mesh_bytes:
+                temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        saved["meshBytes"] = mesh_bytes
+        write_json(folder / "metrics.tmp.json", saved)
+        (folder / "metrics.tmp.json").replace(folder / "metrics.json")
+    publication["mesh"] = str(target) if mesh_bytes else None
+    publication["summary"].update(meshBytes=mesh_bytes, meshState="ready" if mesh_bytes else "empty")
+    publication["summary"].setdefault("timings", {})["mesh"] = time.monotonic() - started
     return publication
 
 
@@ -749,6 +861,8 @@ def main():
             operation = message["operation"]
             if operation == "inspect":
                 result = inspect(message, args.engine_root, classifier)
+            elif operation == "extract":
+                result = extract_zip(message)
             elif operation == "preview":
                 result = preview(message)
             elif operation == "prepare":
@@ -756,6 +870,10 @@ def main():
             elif operation == "finalize":
                 clear_image_cache()
                 result = finalize(message, args.engine_root, palette)
+                clear_image_cache()
+            elif operation == "mesh":
+                clear_image_cache()
+                result = finish_mesh(message["publication"])
             elif operation == "clear":
                 clear_image_cache()
                 result = None

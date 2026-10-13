@@ -26,7 +26,8 @@ class InputError(ValueError):
 
 def read_image(path):
     """Gate 2D X-ray inputs before invoking the bundle's original pixel reader."""
-    kind = engine.infer_modality(path, "auto")
+    # DICOM exports commonly omit extensions; validate the header instead of the suffix.
+    kind = "nrrd" if path.suffix.lower() == ".nrrd" else "dicom"
     warnings = []
     metadata = {"format": "DICOM" if kind == "dicom" else "NRRD"}
     if kind == "dicom":

@@ -7,11 +7,15 @@ import hashlib
 import importlib.util
 import itertools
 import json
+import math
 import os
 from pathlib import Path
 import sys
 import time
 import threading
+from contextlib import contextmanager
+from functools import partial
+from types import FunctionType, MethodType
 
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 sys.dont_write_bytecode = True
@@ -19,6 +23,59 @@ _context = threading.local()
 _emit_lock = threading.Lock()
 _stdout = sys.stdout
 _model_cache = {}
+
+
+@contextmanager
+def measured(stage):
+    """Exclusive wall time per job; nested stages are never counted twice."""
+    timing = getattr(_context, "timing", None)
+    if timing is None:
+        yield
+        return
+    frame = [time.monotonic(), 0.0]
+    timing["stack"].append(frame)
+    try:
+        yield
+    finally:
+        elapsed = time.monotonic() - frame[0]
+        timing["stack"].pop()
+        timing["seconds"][stage] = timing["seconds"].get(stage, 0.0) + max(0, elapsed - frame[1])
+        if timing["stack"]:
+            timing["stack"][-1][1] += elapsed
+
+
+def timed(stage, function):
+    def call(*args, **kwargs):
+        with measured(stage):
+            return function(*args, **kwargs)
+    return call
+
+
+def observed(stage, function, **event_values):
+    """Private start/end evidence even when a call stalls or raises."""
+    def call(*args, **kwargs):
+        emit("operation_start", operation=stage, **event_values)
+        start, cpu = time.perf_counter(), time.thread_time()
+        succeeded = False
+        try:
+            with measured(stage):
+                value = function(*args, **kwargs)
+            succeeded = True
+            return value
+        finally:
+            emit("operation_end", operation=stage, seconds=time.perf_counter() - start,
+                 thread_cpu_seconds=time.thread_time() - cpu, succeeded=succeeded, **event_values)
+    return call
+
+
+def with_globals(function, **overrides):
+    """Job-local instrumentation; never mutate a vendor module shared by jobs."""
+    original = getattr(function, "__func__", function)
+    wrapped = FunctionType(original.__code__, {**original.__globals__, **overrides},
+                           original.__name__, original.__defaults__, original.__closure__)
+    wrapped.__kwdefaults__ = original.__kwdefaults__
+    owner = getattr(function, "__self__", None)
+    return MethodType(wrapped, owner) if owner is not None else wrapped
 
 
 def emit(stage, **values):
@@ -50,7 +107,8 @@ def cached_model(key, paths, loader):
 def cpu_phase(job, torch):
     control = getattr(_context, "control", None)
     if control is not None and job.get("device", "cuda:0") != "cpu":
-        control.cpu_phase(job, torch)
+        with measured("cpu_wait"):
+            control.cpu_phase(job, torch)
 
 
 def read(path):
@@ -241,6 +299,51 @@ def ct_torch(root, device):
     return torch
 
 
+def ct_gpu_bytes(shape, roi_size):
+    padded_voxels = shape[0] * math.prod(max(n, r) for n, r in zip(shape[2:], roi_size))
+    # FP32: 33 output channels, count map, input and possible padding copy.
+    # Reserve 3 GiB for current UNETR batch <= 4 workspace; this is not an OOM guarantee.
+    return padded_voxels * 36 * 4 + 3 * 1024 ** 3
+
+
+def ct_sliding_window(infer, inputs, roi_size, *args, execution=None, retry=None, **kwargs):
+    import torch
+    execution = execution if execution is not None else {}
+    device = str(kwargs["sw_device"])
+    accumulation = device
+    reason = None
+    if device.startswith("cuda"):
+        free, _ = torch.cuda.mem_get_info(device)
+        reusable = max(0, torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device))
+        required = ct_gpu_bytes(inputs.shape, roi_size)
+        execution["memory_gate"] = {"available_bytes": free + reusable, "required_bytes": required}
+        if required > free + reusable:
+            accumulation, reason = "cpu", "gpu_memory_budget"
+
+    def attempt(target):
+        execution.update(accumulation=target, input_resident=target, accumulation_reason=reason)
+        emit("ct_memory_plan", **execution)
+        prepared = inputs
+        if target.startswith("cuda"):
+            with measured("input_upload"):
+                prepared = inputs.to(target)
+                torch.cuda.synchronize(target)
+        # Keep GPU forward, CPU softmax/native inverse and all numerical settings unchanged.
+        return infer(prepared, roi_size, *args, **{**kwargs, "device": target}).cpu()
+
+    if accumulation == "cpu":
+        return attempt("cpu")
+    try:
+        return attempt(accumulation)
+    except torch.OutOfMemoryError:
+        reason = "cuda_oom"
+    # Leave the exception scope first: its traceback retains the failed CUDA tensors.
+    torch.cuda.empty_cache()
+    if retry is not None:
+        retry()
+    return attempt("cpu")
+
+
 def run_ct(root, job):
     device = job.get("device", "cuda:0")
     emit("model_loading", device=device)
@@ -249,6 +352,10 @@ def run_ct(root, job):
     import SimpleITK as sitk
     control = getattr(_context, "control", None)
     runtime = load_module("exmo_ct_vendor_" + (control.ident if control else "single"), root / "run.py")
+    runtime.sha256_file = timed("verification", runtime.sha256_file)
+    exporter = runtime.export_segmentation
+    runtime.export_segmentation = with_globals(exporter,
+        read_segmentation=timed("verification", exporter.__globals__["read_segmentation"]))
     from thigh_muscle_seg_ct.core import atomic
     from thigh_muscle_seg_ct.core.artifacts import identifier
     windows_transactions(atomic)
@@ -268,12 +375,13 @@ def run_ct(root, job):
         case[name + "_sha256"] = runtime.sha256_file(source.parent / (name + ".json"))
     (model, model_hash), reused = cached_model(("ct", str(root), device),
         [root / "model/trial_230704_4_best.pth", root / "configs/inference.json"],
-        lambda: runtime.model_for(cfg, device))
+        lambda: timed("model_loading", runtime.model_for)(cfg, device))
     microbatch = int(job.get("ct_microbatch", 4))
     if microbatch not in (1, 2, 4):
         raise ValueError("Unsupported CT predictor microbatch")
     execution = {"device": device, "torch": torch.__version__, "precision": "float32",
                  "tf32": False, "amp": False, "model_reused": reused,
+                 "accumulation": device,
                  "predictor_microbatch": microbatch if device != "cpu" else None}
     job["execution"] = execution
     progress = {"done": 0, "total": 0, "last": 0.0}
@@ -302,12 +410,22 @@ def run_ct(root, job):
     inverse = ct_inverse(runtime, output)
     def pipelined_inverse(probability, native):
         cpu_phase(job, torch)
-        return inverse(probability, native)
+        return timed("native_restore", inverse)(probability, native)
     runtime.inverse = pipelined_inverse
+    def restart_progress():
+        progress.update(done=0, last=0.0)
+        emit("inference_start", device=device, patches=progress["total"],
+             patches_done=0, patches_total=progress["total"], retry="cpu_accumulation")
+    runtime.sliding_window_inference = partial(ct_sliding_window, runtime.sliding_window_inference,
+                                               execution=execution, retry=restart_progress)
+    for name, stage in [("preprocess", "preprocessing"), ("load_ct", "preprocessing"),
+                        ("sliding_window_inference", "inference")]:
+        setattr(runtime, name, timed(stage, getattr(runtime, name)))
     def traced(stage, function):
         def call(*args, **kwargs):
             emit(stage)
-            return function(*args, **kwargs)
+            category = {"result_measurement": "measurement", "result_verification": "verification"}.get(stage, "save")
+            return timed(category, function)(*args, **kwargs)
         return call
     runtime.save_nifti = traced("result_save", runtime.save_nifti)
     runtime.export_segmentation = traced("result_save", runtime.export_segmentation)
@@ -320,7 +438,30 @@ def run_ct(root, job):
             return
         emit(event, **value)
     runtime.log = log
-    runtime.run_case(case, cfg, model, model_hash, device, output, 4)
+    # Job-local globals: do not mutate Torch/NumPy or other concurrent jobs.
+    from types import SimpleNamespace
+    environment = runtime.environment_identity
+    platform = environment.__globals__["platform"]
+    metadata = environment.__globals__["importlib"].metadata
+    def package_version(name):
+        return observed("environment_identity", metadata.version, detail="package:" + name)(name)
+    environment = with_globals(environment,
+        platform=SimpleNamespace(**{name: observed("environment_identity", getattr(platform, name), detail="platform." + name)
+                                  for name in ("python_version", "system", "machine")}),
+        importlib=SimpleNamespace(metadata=SimpleNamespace(version=package_version,
+            PackageNotFoundError=metadata.PackageNotFoundError)))
+    details = {name: observed(stage, getattr(runtime, name)) for name, stage in (
+        ("code_identity", "code_identity"),
+        ("ontology_hash", "ontology_identity"), ("ProbabilityVolume", "probability_validation"),
+        ("atomic_write_json", "metadata_write"), ("atomic_write_csv", "metadata_write"),
+        ("payload_hash", "payload_hash"), ("postprocess", "postprocessing"))}
+    details["environment_identity"] = observed("environment_identity", environment)
+    details["torch"] = SimpleNamespace(**{**vars(torch),
+        "softmax": observed("probability_conversion", torch.softmax),
+        "isfinite": observed("logits_validation", torch.isfinite)})
+    details["gc"] = SimpleNamespace(collect=observed("cleanup", runtime.gc.collect))
+    details["np"] = SimpleNamespace(**{**vars(np), "array_equal": observed("label_validation", np.array_equal)})
+    with_globals(runtime.run_case, **details)(case, cfg, model, model_hash, device, output, 4)
     if device != "cpu" and "peak_gpu_memory_bytes" not in execution:
         execution["peak_gpu_memory_bytes"] = torch.cuda.max_memory_allocated()
     job["execution"] = execution
@@ -376,12 +517,40 @@ def run_mri(root, job):
             exec(compile(source, slicer_export.__file__, "exec"), slicer_export.__dict__)
             slicer_export._desktop_windows_export_ready = True
         runtime.export_slicer_segmentation = slicer_export.export_slicer_segmentation
+    # Separate Slicer metadata construction and full readback from serialization.
+    exporter = runtime.export_slicer_segmentation
+    scope = exporter.__globals__
+    runtime.export_slicer_segmentation = with_globals(exporter, **{
+        name: timed(stage, scope[name]) for name, stage in (
+            ("_segment_records", "export_metadata"), ("build_slicer_header", "export_metadata"),
+            ("validate_slicer_readback", "verification"), ("_sha256_file", "verification"),
+            ("_native_grid_sha256", "verification"))})
     torch.set_num_threads(4)
     base_predictor = runtime.TorchModelPredictor
+    # The vendor loads checkpoint weights between build_model and predictor init.
+    # This job-local span includes both, without patching shared package functions.
+    loading = None
+    build_model = runtime.build_model
+    def measured_build(*args, **kwargs):
+        nonlocal loading
+        loading = measured("model_loading")
+        loading.__enter__()
+        return build_model(*args, **kwargs)
+    runtime.build_model = measured_build
     class PipelinePredictor(base_predictor):
         desktop_calls = 0
+        def __init__(self, *args, **kwargs):
+            nonlocal loading
+            try:
+                super().__init__(*args, **kwargs)
+            finally:
+                if loading is not None:
+                    loading.__exit__(None, None, None)
+                    loading = None
         def predict_logits(self, *args, **kwargs):
-            value = super().predict_logits(*args, **kwargs)
+            with measured("inference"):
+                value = super().predict_logits(*args, **kwargs)
+                if device != "cpu": torch.cuda.synchronize()
             self.desktop_calls += 1
             if self.desktop_calls == 2:
                 # Both original FP32 TTA passes are complete; no later model calls.
@@ -390,9 +559,18 @@ def run_mri(root, job):
                 cpu_phase(job, torch)
             return value
     runtime.TorchModelPredictor = PipelinePredictor
+    for name, stage in [("load_scalar_image_with_header_record", "preprocessing"), ("preprocess_image", "preprocessing"),
+                        ("restore_probabilities_to_native_with_qc", "native_restore"), ("apply_postprocessing", "postprocessing"),
+                        ("entropy_chunked", "qc"), ("metrics", "measurement"),
+                        ("export_variant", "save"), ("write_scalar_image", "save"),
+                        ("sha256_file", "verification")]:
+        setattr(runtime, name, timed(stage, getattr(runtime, name)))
     emit("inference_start", device=device)
     # Keep native full6 FP32, both TTA passes, raw + PP500. No hidden fallback.
-    runtime.run([(job["id"], Path(job["input"]))], Path(job["output"]), device)
+    try:
+        runtime.run([(job["id"], Path(job["input"]))], Path(job["output"]), device)
+    finally:
+        if loading is not None: loading.__exit__(None, None, None)
     return Path(job["output"]) / job["id"]
 
 
@@ -409,26 +587,40 @@ def run_ap(root, job):
     def load_ap():
         candidate = legacy.build_model("vnet", len(names), size, "AP").to(device)
         return legacy.load_checkpoint_to_model(candidate, checkpoint, device)[0]
-    model, reused = cached_model(("ap", str(root), str(device)), [checkpoint], load_ap)
+    model, reused = cached_model(("ap", str(root), str(device)), [checkpoint], timed("model_loading", load_ap))
     job["execution"]["model_reused"] = reused
     model.eval()
     output = Path(job["output"])
     output.mkdir(parents=True, exist_ok=False)
     emit("inference_start")
-    # Keep the original function, not a previous job's handoff wrapper.
-    infer = getattr(legacy, "_desktop_original_infer", legacy.infer_mask_from_tensor)
-    legacy._desktop_original_infer = infer
+    class TimedModel(torch.nn.Module):
+        def forward(self, *args, **kwargs):
+            if selected_device != "cpu": torch.cuda.synchronize()
+            with measured("inference"):
+                value = model(*args, **kwargs)
+                if selected_device != "cpu": torch.cuda.synchronize()
+            return value
     def infer_then_handoff(*args, **kwargs):
-        value = infer(*args, **kwargs)
+        # Includes tensor upload, argmax, native-size interpolation and readback;
+        # the nested network forward is excluded from this duration.
+        with measured("native_restore"):
+            value = legacy.infer_mask_from_tensor(*args, **kwargs)
+            if selected_device != "cpu": torch.cuda.synchronize()
         cpu_phase(job, torch)
         return value
-    legacy.infer_mask_from_tensor = infer_then_handoff
-    result = legacy.run_inference_case(Path(job["input"]), "AP", output, model, checkpoint, "vnet", names, len(names), size, device, .55, True, output_prefix="case")
+    run_case = with_globals(legacy.run_inference_case,
+        infer_mask_from_tensor=infer_then_handoff,
+        preprocess_for_view=timed("preprocessing", legacy.preprocess_for_view),
+        measure_area_by_class=timed("measurement", legacy.measure_area_by_class),
+        make_overlay_image=timed("overlay_generation", legacy.make_overlay_image),
+        pred_mask_to_source_image_space=timed("native_restore", legacy.pred_mask_to_source_image_space))
     import shutil
-    shutil.copyfile(result["mask_path"], output / "mask.seg.nrrd")
-    metrics = read(result["json_path"])
-    metrics.update(volume_cm3=None, volume_status="unsupported_2d_projection", tta="none")
-    (output / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+    with measured("save"):
+        result = run_case(Path(job["input"]), "AP", output, TimedModel(), checkpoint, "vnet", names, len(names), size, device, .55, True, output_prefix="case")
+        shutil.copyfile(result["mask_path"], output / "mask.seg.nrrd")
+        metrics = read(result["json_path"])
+        metrics.update(volume_cm3=None, volume_status="unsupported_2d_projection", tta="none")
+        (output / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
     return output
 
 
@@ -457,36 +649,55 @@ def run_lat(root, job):
         predictor.initialize_from_trained_model_folder(str(root / "models" / route), (0, 1, 2, 3, 4), checkpoint_name="checkpoint_final.pth")
         return predictor
     predictor, reused = cached_model(("lat", str(root), route, str(device)),
-        [root / "models" / route / f"fold_{fold}" / "checkpoint_final.pth" for fold in range(5)], load_lat)
+        [root / "models" / route / f"fold_{fold}" / "checkpoint_final.pth" for fold in range(5)], timed("model_loading", load_lat))
     job["execution"]["model_reused"] = reused
     output = Path(job["output"])
     output.mkdir(parents=True, exist_ok=False)
-    image = sitk.ReadImage(str(job["input"]))
-    if image.GetDimension() != 3 or image.GetSize()[2] != 1:
-        raise ValueError("Lateral inference requires a single projection")
-    xyz = sitk.GetArrayFromImage(image).transpose(2, 1, 0).astype(np.float32, copy=False)
-    affine = np.eye(4)
-    affine[:3, :3] = np.array(image.GetDirection()).reshape(3, 3) @ np.diag(image.GetSpacing())
-    affine[:3, 3] = image.GetOrigin()
-    # Frozen legacy intermediate convention is deliberately NOT a registration affine.
-    converted = output / "model_input.nii.gz"
-    nifti = nib.Nifti1Image(xyz, affine)
-    nifti.set_data_dtype(np.float32)
-    nib.save(nifti, converted)
-    data, properties = SimpleITKIO().read_images([str(converted)])
+    with measured("preprocessing"):
+        image = sitk.ReadImage(str(job["input"]))
+        if image.GetDimension() != 3 or image.GetSize()[2] != 1:
+            raise ValueError("Lateral inference requires a single projection")
+        xyz = sitk.GetArrayFromImage(image).transpose(2, 1, 0).astype(np.float32, copy=False)
+        affine = np.eye(4)
+        affine[:3, :3] = np.array(image.GetDirection()).reshape(3, 3) @ np.diag(image.GetSpacing())
+        affine[:3, 3] = image.GetOrigin()
+        # Frozen legacy intermediate convention is deliberately NOT a registration affine.
+        converted = output / "model_input.nii.gz"
+        nifti = nib.Nifti1Image(xyz, affine)
+        nifti.set_data_dtype(np.float32)
+        nib.save(nifti, converted)
+        data, properties = SimpleITKIO().read_images([str(converted)])
+    original_predict = predictor.predict_logits_from_preprocessed_data
+    scope = predictor.predict_single_npy_array.__func__.__globals__
+    def preprocessed(*args, **kwargs):
+        with measured("preprocessing"):
+            value = next(scope["PreprocessAdapterFromNpy"](*args, **kwargs))
+        yield value
+    predict = with_globals(predictor.predict_single_npy_array,
+        PreprocessAdapterFromNpy=preprocessed,
+        convert_predicted_logits_to_segmentation_with_correct_shape=timed("native_restore", scope["convert_predicted_logits_to_segmentation_with_correct_shape"]))
+    predictor.predict_logits_from_preprocessed_data = timed("inference", original_predict)
     emit("inference_start", folds=5, tta=True)
-    mask = predictor.predict_single_npy_array(data, properties, None, None, False)
+    try:
+        mask = predict(data, properties, None, None, False)
+        if selected_device != "cpu": torch.cuda.synchronize()
+    finally:
+        predictor.predict_logits_from_preprocessed_data = original_predict
     cpu_phase(job, torch)
     labels = mask.transpose(2, 1, 0).astype(np.uint8)
     if labels.shape != xyz.shape:
         raise ValueError("Native shape mismatch")
     source_header = nrrd.read_header(job["input"])
     header = {k: v for k, v in source_header.items() if k in ("space", "space directions", "space origin", "space units", "kinds")}
-    nrrd.write(str(output / "mask.nrrd"), labels, header, index_order="F")
-    qc = {str(k): component_qc(mask[0] == k) for k in (1, 2, 3, 6, 7, 10, 11)}
-    (output / "qc.json").write_text(json.dumps({"components": qc, "folds": [0, 1, 2, 3, 4], "test_time_mirroring": True,
-        "accumulation": "cpu", "missing_active_class_ids": [k for k in (1, 2, 3, 6, 7, 10, 11) if not np.any(mask == k)],
-        "unexpected_class_ids": [int(k) for k in np.unique(mask) if k not in (0, 1, 2, 3, 6, 7, 10, 11)]}), encoding="utf-8")
+    with measured("save"):
+        nrrd.write(str(output / "mask.nrrd"), labels, header, index_order="F")
+    with measured("qc"):
+        qc = {str(k): component_qc(mask[0] == k) for k in (1, 2, 3, 6, 7, 10, 11)}
+        report = {"components": qc, "folds": [0, 1, 2, 3, 4], "test_time_mirroring": True,
+            "accumulation": "cpu", "missing_active_class_ids": [k for k in (1, 2, 3, 6, 7, 10, 11) if not np.any(mask == k)],
+            "unexpected_class_ids": [int(k) for k in np.unique(mask) if k not in (0, 1, 2, 3, 6, 7, 10, 11)]}
+    with measured("save"):
+        (output / "qc.json").write_text(json.dumps(report), encoding="utf-8")
     return output
 
 
@@ -507,11 +718,13 @@ def peak_host_process_memory():
 
 def run_job(engine_root, job):
     start = time.monotonic()
+    _context.timing = {"seconds": {}, "stack": []}
     modality = job["analysis"]
     package = {"ct": "EXMO_CT", "mri": "EXMO_MRI", "xray": "EXMO_XRAY"}[modality]
     root = engine_root / "packages" / package
     handler = {"ct": run_ct, "mri": run_mri, "xray": run_ap if job.get("route") == "AP" else run_lat}[modality]
-    result = handler(root, job)
+    with measured("other"):
+        result = handler(root, job)
     if job.get("execution", {}).get("device") == "cuda:0" and "peak_gpu_memory_bytes" not in job["execution"]:
         import torch
         torch.cuda.synchronize()
@@ -521,6 +734,7 @@ def run_job(engine_root, job):
     identity = {"schema": 1, "analysis": modality, "route": job.get("route"), "seconds": time.monotonic() - start,
                 "adapter": "EXMO_WINDOWS_V1", "adapter_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "complete": True,
                 "execution": job.get("execution", {"device": job.get("device", "cuda:0")}),
+                "timings": dict(_context.timing["seconds"]),
                 "peak_host_process_memory_bytes": peak_host_process_memory()}
     (result / "desktop-complete.json").write_text(json.dumps(identity), encoding="utf-8")
     emit("complete", result=str(result), **identity)

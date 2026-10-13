@@ -38,6 +38,7 @@ const tick = () => new Promise(resolve=>setImmediate(resolve));
   });
   assert.equal(starts,1);
   let modelActive=0,finalizing=0,postprocessing=0,postAndFinalOverlap=false;
+  const resultLane=new Capacity(1);
   await runPipeline(Array.from({length:9},(_,id)=>({id})),{
     signal:new AbortController().signal,concurrency:3,failed:(_f,e)=>{throw e},
     execute:async()=>{
@@ -45,12 +46,12 @@ const tick = () => new Promise(resolve=>setImmediate(resolve));
       const g=await lanes.gpu.acquire();await delay();g.release();
       const c=await lanes.cpu.acquire();postprocessing++;postAndFinalOverlap ||= finalizing>0;
       await delay();postprocessing--;c.release();modelActive--;m.release();
-      const f=await lanes.finalize.acquire();finalizing++;postAndFinalOverlap ||= postprocessing>0;
+      const f=await resultLane.acquire();assert.equal(++finalizing,1);postAndFinalOverlap ||= postprocessing>0;
       await delay();finalizing--;f.release();
     },
   });
   assert.ok(postAndFinalOverlap,'Result preparation must not block the next CPU tail');
-  assert.equal(lanes.model.used+lanes.cpu.used+lanes.gpu.used+lanes.finalize.used,0);
+  assert.equal(lanes.model.used+lanes.cpu.used+lanes.gpu.used+resultLane.used,0);
   for(const analysis of ['ct','mri','xray']) {
     const estimate=estimateMemory({analysis,metadata:{size:[512,512,711],spacing:[.85,.85,1]}});
     assert.ok(estimate.gpu>=estimate.cpu && estimate.cpu>0);

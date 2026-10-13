@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import AnatomyScene from "../../app/scene";
 import { GROUPS, INITIAL_STATE, inGroup, type SceneState } from "../../app/anatomy";
 import ImagePreview from "./image-preview";
+import { xrayApplicable, xrayView, viewLabel } from "./xray-studies";
 import {
   number,
   unwrap,
@@ -60,10 +61,16 @@ export default function ResultView({
   results,
   onClose,
   onUpdate,
+  workspaceError = "",
+  heading,
+  description,
 }: {
   results: AnalysisResult[];
   onClose: () => void;
   onUpdate: (result: AnalysisResult) => void;
+  workspaceError?: string;
+  heading?: string;
+  description?: string;
 }) {
   useLanguage();
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
@@ -77,6 +84,7 @@ export default function ResultView({
   const needsPreparation = (result: AnalysisResult) =>
     result.analysis !== "xray" && result.laterality?.method !== "femur_components_lps_v1";
   const [preparing, setPreparing] = useState(() => results.some(needsPreparation));
+  const pendingMeshes = results.some(result => result.meshState === "pending");
   useEffect(() => {
     let disposed = false;
     void (async () => {
@@ -223,14 +231,14 @@ export default function ResultView({
             {t("← 결과 목록으로")}
           </button>
           <h1>
-            {results.length > 1
+            {heading || (results.length > 1
               ? t("{{value0}}개 검사 비교", { value0: results.length })
-              : primary.metadata.caseName}
+              : primary.metadata.caseName)}
           </h1>
           <p>
-            {results.length > 1
+            {description || (results.length > 1
               ? t("{{value0}} · 구조 이름 기준 비교", { value0: primary.analysis.toUpperCase() })
-              : `${primary.metadata.studyDescription || primary.name} · ${primary.analysis.toUpperCase()} · ${primary.variant.toUpperCase()}`}
+              : `${primary.metadata.studyDescription || primary.name} · ${primary.analysis.toUpperCase()} · ${primary.variant.toUpperCase()}`)}
           </p>
         </div>
         <div className="control-segment">
@@ -245,15 +253,22 @@ export default function ResultView({
               setState((s) => (s.explode ? { ...s, selected: s.selected.slice(0, 1) } : s));
             }}
           >
-            3D anatomy
+            {pendingMeshes ? t("3D 준비 중") : "3D anatomy"}
           </button>
         </div>
       </header>
-      {error && (
+      {(error || workspaceError) && (
         <p className="inline-error" role="alert">
-          {t(error)}
+          {t(error || workspaceError)}
         </p>
       )}
+      {results.filter(result => ["failed", "interrupted"].includes(result.meshState || "")).map(result => (
+        <p className="inline-error" role="status" key={result.id}>
+          {result.metadata.caseName} · {t("3D 준비가 완료되지 않았습니다. 측정값과 Overlay는 사용할 수 있습니다.")}{" "}
+          <button className="clinical-button" disabled={changing}
+            onClick={() => void changeVariant(result, result.variant)}>{t("3D 다시 준비")}</button>
+        </p>
+      ))}
       <div
         ref={body}
         className={`result-body ${results.length > 1 ? "comparing" : ""}`}
@@ -334,6 +349,7 @@ export default function ResultView({
                     <th scope="col" key={result.id}>
                       <strong className="metric-case-name" title={result.metadata.caseName}>
                         {result.metadata.caseName}
+                        {result.analysis === "xray" && xrayView(result) && <small>{viewLabel(xrayView(result)!)}</small>}
                       </strong>
                       {result.analysis === "mri" ? (
                         <select
@@ -390,7 +406,7 @@ export default function ResultView({
                         const own = result.rows.find((r) => r.id === row.id);
                         return (
                           <td key={result.id}>
-                            <strong>{number(own?.value)}</strong>
+                            <strong>{result.analysis === "xray" && (!own || !xrayApplicable(result, own)) ? t("해당 없음") : number(own?.value)}</strong>
                             {result.analysis === "ct" && (
                               <small title="Fat-range %">{number(own?.fat)}</small>
                             )}
@@ -455,6 +471,65 @@ export default function ResultView({
                       <td key={r.id}>{number(r.seconds, 0)} s</td>
                     ))}
                   </tr>
+                  {results.some(result => result.compute) && (
+                    <tr>
+                      <td>{t("CT 계산 장치")}</td>
+                      {results.map(result => (
+                        <td key={result.id}>
+                          {result.compute ? t("추론 {{value0}} · 합성 {{value1}}", {
+                            value0: result.compute.device.startsWith("cuda") ? "GPU" : "CPU",
+                            value1: result.compute.accumulation.startsWith("cuda") ? "GPU" : "CPU",
+                          }) : "—"}
+                          {result.compute?.accumulation_reason && <small>{t("GPU 메모리 제한으로 CPU 합성")}</small>}
+                        </td>
+                      ))}
+                    </tr>
+                  )}
+                  {results.some(result => result.timings) && (
+                    <>
+                      {[
+                        [t("측정·Overlay 열람까지"), (r: AnalysisResult) => r.timings?.ready],
+                        [t("입력 확인·변환 (대기 포함)"), (r: AnalysisResult) => r.timings?.input],
+                        [t("엔진 초기화·통신"), (r: AnalysisResult) => r.timings?.modelProcess == null ? undefined : Math.max(0, r.timings.modelProcess - r.seconds)],
+                        [t("모델 로딩"), (r: AnalysisResult) => r.timings?.model?.model_loading],
+                        [t("전처리"), (r: AnalysisResult) => r.timings?.model?.preprocessing],
+                        [t("입력 GPU 전송"), (r: AnalysisResult) => r.timings?.model?.input_upload],
+                        [t("추론"), (r: AnalysisResult) => r.timings?.model?.inference],
+                        [t("추론·리샘플링 (LAT)"), (r: AnalysisResult) => r.timings?.model?.inference_with_resampling],
+                        [t("원본 좌표 복원"), (r: AnalysisResult) => r.timings?.model?.native_restore],
+                        [t("후처리"), (r: AnalysisResult) => r.timings?.model?.postprocessing],
+                        [t("모델 측정"), (r: AnalysisResult) => r.timings?.model?.measurement],
+                        [t("QC·엔트로피 계산"), (r: AnalysisResult) => r.timings?.model?.qc],
+                        [t("Overlay 이미지 생성"), (r: AnalysisResult) => r.timings?.model?.overlay_generation],
+                        [t("Slicer 메타데이터 생성"), (r: AnalysisResult) => r.timings?.model?.export_metadata],
+                        [t("결과 파일 저장·복사"), (r: AnalysisResult) => r.timings?.model?.save],
+                        [t("해시·재읽기 검증"), (r: AnalysisResult) => r.timings?.model?.verification],
+                        [t("결과 저장·검증"), (r: AnalysisResult) => r.timings?.model?.export],
+                        [t("기타 모델 처리"), (r: AnalysisResult) => r.timings?.model?.other],
+                        [t("Logits 유한값 검사"), (r: AnalysisResult) => r.timings?.model?.logits_validation],
+                        [t("확률 변환"), (r: AnalysisResult) => r.timings?.model?.probability_conversion],
+                        [t("확률 검증"), (r: AnalysisResult) => r.timings?.model?.probability_validation],
+                        [t("라벨 동일성 검사"), (r: AnalysisResult) => r.timings?.model?.label_validation],
+                        [t("Ontology 해시"), (r: AnalysisResult) => r.timings?.model?.ontology_identity],
+                        [t("소스 코드 해시"), (r: AnalysisResult) => r.timings?.model?.code_identity],
+                        [t("실행환경 버전 조회"), (r: AnalysisResult) => r.timings?.model?.environment_identity],
+                        [t("JSON·CSV 기록"), (r: AnalysisResult) => r.timings?.model?.metadata_write],
+                        [t("라벨 데이터 해시"), (r: AnalysisResult) => r.timings?.model?.payload_hash],
+                        [t("메모리 정리"), (r: AnalysisResult) => r.timings?.model?.cleanup],
+                        [t("측정·Overlay 준비"), (r: AnalysisResult) => r.timings?.metricsOverlay],
+                        [t("3D 생성"), (r: AnalysisResult) => r.timings?.mesh],
+                        [t("메모리·GPU·CPU·결과 준비 대기"), (r: AnalysisResult) => r.timings?.ready == null ? undefined :
+                          (r.timings.admissionWait || 0) + (r.timings.gpuWait || 0) + (r.timings.resultWait || 0) + (r.timings.model?.cpu_wait || 0)],
+                        [t("3D 대기"), (r: AnalysisResult) => r.timings?.meshWait],
+                      ].map(([label, value]) => {
+                        const read = value as (r: AnalysisResult) => number | undefined;
+                        if (!results.some(r => read(r) != null)) return null;
+                        return <tr key={label as string}><td>{label as string}</td>
+                          {results.map(r => <td key={r.id}>{number(read(r), 2)} s</td>)}
+                        </tr>;
+                      })}
+                    </>
+                  )}
                   {primary.analysis === "mri" && (
                     <>
                       <tr>
@@ -553,7 +628,7 @@ export default function ResultView({
                     {results.map((r) => (
                       <td key={r.id}>
                         {r.rows
-                          .filter((row) => !row.present)
+                          .filter((row) => !row.present && (r.analysis !== "xray" || xrayApplicable(r, row)))
                           .map((row) => row.name)
                           .join(", ") || t("없음")}
                       </td>
@@ -571,6 +646,9 @@ export default function ResultView({
           </div>
           <details className="qc-details">
             <summary>{t("측정·후처리 기준")}</summary>
+            {results.some(result => result.timings) && <p>
+              {t("단계별 벽시계 시간입니다. 3D는 결과 공개 후 처리되며, 동시 작업 시간은 단순 합산하지 않습니다. —는 미측정입니다.")}
+            </p>}
             <p>
               {primary.analysis === "ct"
                 ? t("Fat-range: −190 ~ −30 HU 범위 voxel 비율. 임상 지방침윤율·PDFF와 다릅니다.")
@@ -714,7 +792,7 @@ export default function ResultView({
           )}
           <div className={`case-canvases count-${results.length}`}>
             {results.map((result) => {
-              const chosen = result.rows.filter((r) => selectedIds.includes(r.id));
+              const chosen = result.rows.filter((r) => selectedIds.includes(r.id) && (result.analysis !== "xray" || xrayApplicable(result, r)));
               return (
                 <div
                   className="case-canvas"
@@ -731,14 +809,14 @@ export default function ResultView({
                     </span>
                     {selectedIds.length > 0 && !allSelected && (
                       <span>
-                        {selectedIds.length === 1
+                        {result.analysis === "xray" && !chosen.length ? t("해당 없음") : selectedIds.length === 1
                           ? t("{{value0}} · {{value1}} {{value2}}", {
                               value0: selected?.name || chosen[0]?.name || t("선택 구조"),
                               value1: number(chosen[0]?.value),
                               value2: result.unit,
                             })
                           : t("{{value0}}개 구조 선택", { value0: selectedIds.length })}
-                        {!chosen.some((row) => row.present) && t(" · 미검출 / 판정 보류")}
+                        {!(result.analysis === "xray" && !chosen.length) && !chosen.some((row) => row.present) && t(" · 미검출 / 판정 보류")}
                       </span>
                     )}
                   </button>

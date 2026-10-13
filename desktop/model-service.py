@@ -114,20 +114,24 @@ def main():
                     # Initialize native DLLs before a thread blocks on Windows stdin.
                     # NumPy/OpenBLAS initialization otherwise stalls in create_module.
                     job = message["job"]
+                    def load_dependency(name):
+                        return runner.observed("startup_" + name,
+                            lambda: importlib.import_module(name), job_id=ident)()
                     if job["analysis"] == "ct":
-                        runner.ct_torch(args.engine_root / "packages/EXMO_CT", job.get("device", "cuda:0"))
+                        runner.observed("startup_torch", runner.ct_torch, job_id=ident)(
+                            args.engine_root / "packages/EXMO_CT", job.get("device", "cuda:0"))
                     else:
-                        import torch
-                    import numpy
+                        load_dependency("torch")
+                    load_dependency("numpy")
                     if job["analysis"] != "xray" or job.get("route") != "AP":
-                        import SimpleITK
+                        load_dependency("SimpleITK")
                     if job["analysis"] in ("ct", "mri"):
-                        import monai
+                        load_dependency("monai")
                     elif job.get("route") != "AP":
                         # nnUNet imports additional native SciPy/scikit-image modules.
                         # Warm these before the stdin reader and inference thread overlap.
-                        from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-                        from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
+                        load_dependency("nnunetv2.inference.predict_from_raw_data")
+                        load_dependency("nnunetv2.imageio.simpleitk_reader_writer")
                     initialized = True
                 with guard:
                     if ident in active or sum(not item.finished for item in active.values()) >= 2:

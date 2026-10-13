@@ -29,6 +29,10 @@ records the requested Series preview, review grid, analysis and comparison inter
 document the 0.1.11 implementation, review pagination, bounded GPU/CPU processing,
 local NRRD file organization, executed checks and remaining validation limits.
 
+[Desktop performance checks](docs/DESKTOP_PERFORMANCE.md) cover real CT, MRI and
+X-ray AP/LAT runs, repeated stage timings and numerical regression checks.
+Run `npm run performance:desktop` after preparing the local Desktop engine.
+
 ## Run
 
 Requires Node.js 22.13 or newer.
@@ -74,6 +78,12 @@ available separately as **3D demo**; its 27 colors and interactions are unchange
   mirroring, with CPU accumulation to fit this 8 GB GPU. Projection area is cm2,
   never an invented volume. DICOM preview/classification is available, but DICOM
   segmentation and nonstandard AP orientations remain blocked pending validation.
+
+Desktop **Add images** also accepts ZIP archives (including nested folders of images);
+ZIPs found inside a selected folder use the same importer. Extraction keeps original
+archives untouched, preserves duplicate filenames, and checks paths, CRC, entry count
+and expanded size. Encrypted or nested ZIPs are rejected. ZIP support does not bypass
+modality or X-ray DICOM segmentation validation.
 
 CT/MRI DICOM files are grouped by Study/Series UIDs and checked for spatial ordering,
 orientation, spacing, duplicate/missing slices and rescale. Enhanced/multiframe,
