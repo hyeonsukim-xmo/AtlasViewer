@@ -11,7 +11,7 @@ const compiled = ts.transpileModule(fs.readFileSync("desktop/ui/xray-studies.ts"
 }).outputText;
 const helpers = { exports: {} };
 vm.runInNewContext(compiled, { exports: helpers.exports, require });
-const { groupXrays, studyKey, xrayView, comparisonView, pendingXrayInputs, xrayApplicable } =
+const { groupXrays, studyKey, xrayView, comparisonView, pendingXrayInputs, xrayApplicable, xrayResultFor, xrayHistory } =
   helpers.exports;
 const metadata = {
   format: "NRRD",
@@ -31,7 +31,7 @@ const file = (id, route, extra = {}) => ({
   analysis: "xray",
   ready: true,
   warnings: [],
-  metadata: { ...metadata, ...extra },
+  metadata: { ...metadata, studyUid: "study-" + (extra.studyDate || metadata.studyDate), ...extra },
   classification: {
     route_to_segmentation: route,
     predicted_label: route,
@@ -56,8 +56,7 @@ assert.notEqual(studyKey(three[0]), studyKey(file("other", "AP", { patientIssuer
 assert.notEqual(studyKey(three[0]), studyKey(file("other", "AP", { patientId: "42" })));
 assert.notEqual(studyKey(three[0]), studyKey(file("other", "AP", { studyDate: "20261011" })));
 assert.equal(
-  groupXrays([file("a", "AP", { studyUid: "1" }), file("b", "AP", { studyUid: "2" })])[0].items
-    .length,
+  groupXrays([file("a", "AP", { studyUid: "1" }), file("b", "AP", { studyUid: "2" })]).length,
   2,
   "Same-day repeat images remain distinct",
 );
@@ -80,8 +79,8 @@ assert.deepEqual(
 );
 assert.equal(pendingXrayInputs([{ ...three[0], ready: false }], [], ["ap"]).length, 0);
 assert.notEqual(
-  studyKey(file("bad1", "AP", { studyDate: "20260230" })),
-  studyKey(file("bad2", "LAT_LT", { studyDate: "20260230" })),
+  studyKey(file("bad1", "AP", { studyDate: "20260230", studyUid: "" })),
+  studyKey(file("bad2", "LAT_LT", { studyDate: "20260230", studyUid: "" })),
   "Invalid dates do not merge unrelated inputs",
 );
 assert.equal(xrayApplicable({ route: "LAT_LT" }, { label: 4 }), false);
@@ -95,6 +94,17 @@ assert.equal(
   "AP",
 );
 assert.equal(comparisonView(groupXrays(three)), "AP");
+const assignment = {patientId: "00042", patientIssuer: "Site", studyDate: "20261012"};
+assert.equal(groupXrays([file("a", "AP", {studyUid: "1", studyAssignment: assignment}),
+  file("b", "LAT_RT", {studyUid: "2", studyAssignment: assignment})]).length, 1);
+const original = file("original", "AP", {seriesUid: "series", sopUid: "sop1"});
+const reimport = file("copy", "AP", {seriesUid: "series", sopUid: "sop1"});
+const sibling = file("sibling", "AP", {seriesUid: "series", sopUid: "sop2"});
+const completed = [{...original, inputId: original.id, id: "result"}];
+assert.ok(xrayResultFor(reimport, completed));
+assert.equal(xrayResultFor(sibling, completed), undefined, "Same series with another SOP is still pending");
+assert.deepEqual(Array.from(xrayHistory([reimport, sibling], completed)), ["copy", "sibling"]);
+assert.equal(pendingXrayInputs([file("unknown", null)], [], ["unknown"]).length, 0);
 
 (async () => {
   const directory = await fsp.mkdtemp(path.join(root, "outputs/xray-study-check-"));

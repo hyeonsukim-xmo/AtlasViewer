@@ -1,0 +1,33 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {createPatientAssignments}=require('../desktop/patient-assignments.cjs');
+const {createExportIdentities}=require('../desktop/export-identities.cjs');
+const output=path.resolve(__dirname,'../outputs/patient-groups-check');fs.mkdirSync(output,{recursive:true});
+const root=fs.mkdtempSync(path.join(output,'storage-'));
+const records=[{id:'a',analysis:'ct',metadata:{studyDate:'20251012',studyUid:'study-a'}},
+ {id:'b',analysis:'ct',metadata:{studyDate:'20261006',studyUid:'study-b'}},{id:'c',analysis:'mri',metadata:{}}];
+const original=JSON.stringify(records),recordFor=id=>records.find(r=>r.id===id);
+(async()=>{
+ let store=createPatientAssignments(root);
+ const registry=createExportIdentities(root);
+ const source=()=>({...store.apply(records[0]).metadata,inputId:'a',analysis:'ct'});
+ const prior=await registry.resolve(source());
+ await store.assign('ct',['a','b'],{patientId:'000042',patientIssuer:'HOSPITAL',studyDate:''},recordFor);
+ assert.equal(store.apply(records[0]).metadata.studyDate,'20251012');
+ assert.equal(store.apply(records[1]).metadata.studyDate,'20261006');
+ assert.equal(store.apply({inputId:'a',id:'result',analysis:'ct',metadata:{}}).metadata.patientId,'000042');
+ assert.equal(store.apply(records[0]).metadata.patientAssigned,true);
+ store=createPatientAssignments(root);
+ const mapped=await registry.resolve(source());assert.equal(mapped.uuid,prior.uuid);assert.equal(mapped.patientId,'000042');
+ assert.equal(store.apply(records[1]).metadata.patientId,'000042');
+ await assert.rejects(async()=>store.assign('ct',['a','c'],{patientId:'BAD',patientIssuer:'OTHER'},recordFor));
+ await assert.rejects(async()=>store.assign('ct',['a'],{patientId:'BAD',patientIssuer:'OTHER',studyDate:'2025-02-29'},recordFor));
+ await assert.rejects(async()=>store.assign('ct',['missing'],null,recordFor));
+ assert.equal(store.apply(records[0]).metadata.patientId,'000042');
+ await store.assign('ct',['a'],{patientId:'000042',patientIssuer:'HOSPITAL',studyDate:'2025-10-13'},recordFor);
+ assert.equal(store.apply(records[0]).metadata.studyDate,'20251013');
+ await store.assign('ct',['a'],null,recordFor);
+ assert.equal(store.apply(records[0]).metadata.patientId,undefined);assert.equal(store.apply(records[0]).metadata.studyDate,'20251012');
+ assert.equal(store.apply(records[1]).metadata.patientId,'000042');
+ assert.equal(JSON.stringify(records),original);
+ console.log('PASS: persistent assignments, per-image dates, result projection, identity UUID preservation, modality validation, atomic rejection, date override, restore originals');
+})().catch(e=>{console.error(e);process.exitCode=1;});

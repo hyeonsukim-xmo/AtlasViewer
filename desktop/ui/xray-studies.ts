@@ -34,8 +34,8 @@ export function studyKey(item: StudyItem): string {
     parsedDate &&
     Number.isFinite(parsedDate.getTime()) &&
     parsedDate.toISOString().slice(0, 10).replaceAll("-", "") === date;
-  // A missing issuer is scoped to the DICOM study, never to the whole library.
-  if (patient && validDate && (issuer || m?.studyUid))
+  // Only an explicit assignment merges separate acquisitions on the same day.
+  if (m?.studyAssignment && patient && validDate && issuer)
     return JSON.stringify(["patient-day", issuer || "study:" + m!.studyUid, patient, date]);
   if (m?.studyUid && !m.studyAssignment)
     return JSON.stringify(["study", issuer || "", patient || "", m.studyUid]);
@@ -73,8 +73,15 @@ export function comparisonView(groups: XrayStudy<StudyItem>[]): XrayView {
   );
 }
 export function pendingXrayInputs(files: ImagingFile[], results: AnalysisResult[], ids: string[]) {
-  const complete = new Set(results.map((result) => result.inputId));
-  return files.filter((file) => file.ready && ids.includes(file.id) && !complete.has(file.id));
+  return files.filter((file) => file.ready && xrayView(file) && ids.includes(file.id) && !xrayResultFor(file, results));
+}
+export function xrayResultFor(file: ImagingFile, results: AnalysisResult[]) {
+  return results.find(result => result.inputId === file.id || (file.metadata?.studyUid && file.metadata?.sopUid &&
+    result.metadata?.studyUid === file.metadata.studyUid && result.metadata?.sopUid === file.metadata.sopUid));
+}
+export function xrayHistory(files: ImagingFile[], results: AnalysisResult[]) {
+  const studies = new Set([...results.map(studyKey), ...files.filter(file => xrayResultFor(file, results)).map(studyKey)]);
+  return new Set(files.filter(file => studies.has(studyKey(file))).map(file => file.id));
 }
 export function xrayApplicable(result: AnalysisResult, row: AnalysisResult["rows"][number]) {
   if (row.applicable != null) return row.applicable;

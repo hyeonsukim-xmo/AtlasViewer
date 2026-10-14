@@ -40,6 +40,7 @@ interface Props<Id extends string> {
   };
   renderMeasurement?: (structure: RenderStructure<Id>, side: Side | null) => ReactNode;
   caseOpacity?: number;
+  onImageMenu?: (png: string) => void;
 }
 interface Piece {
   mesh: T.Mesh<T.BufferGeometry, T.MeshPhysicalMaterial>;
@@ -265,6 +266,9 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       }
       controls.enableRotate = state.explode < 0.99;
       controls.mouseButtons.LEFT = controls.enableRotate ? T.MOUSE.ROTATE : T.MOUSE.PAN;
+      // Desktop results reserve assembled right-click for image actions.
+      controls.mouseButtons.MIDDLE = current.current.onImageMenu ? T.MOUSE.PAN : T.MOUSE.DOLLY;
+      controls.mouseButtons.RIGHT = current.current.onImageMenu && state.explode < 0.99 ? null : T.MOUSE.PAN;
       controls.touches.ONE = controls.enableRotate ? T.TOUCH.ROTATE : T.TOUCH.PAN;
       controls.autoRotate = state.rotate && controls.enableRotate;
       if (fitChanged && !bounds.isEmpty()) {
@@ -507,6 +511,23 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         "The graphics context was interrupted. Reload the model to continue.",
       );
     };
+    const imageMenu = (event: MouseEvent) => {
+      if (!current.current.onImageMenu) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Exploded right-drag retains the existing individual-structure rotation.
+      if (current.current.state.explode >= 0.99 || !ready) return;
+      renderer.render(scene, camera);
+      const snapshot = document.createElement('canvas');
+      snapshot.width = canvas.width; snapshot.height = canvas.height;
+      const context = snapshot.getContext('2d');
+      if (!context) return;
+      context.fillStyle = '#0b0b20';
+      context.fillRect(0, 0, snapshot.width, snapshot.height);
+      context.drawImage(canvas, 0, 0);
+      current.current.onImageMenu(snapshot.toDataURL('image/png'));
+    };
+    canvas.addEventListener("contextmenu", imageMenu);
     canvas.addEventListener("pointerdown", down, true);
     canvas.addEventListener("pointermove", move, true);
     canvas.addEventListener("pointerup", up, true);
@@ -748,6 +769,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       document.removeEventListener("visibilitychange", visibilityChanged);
       resize.disconnect();
       controls.dispose();
+      canvas.removeEventListener("contextmenu", imageMenu);
       endSegmentDrag();
       canvas.removeEventListener("pointerdown", down, true);
       canvas.removeEventListener("pointermove", move, true);

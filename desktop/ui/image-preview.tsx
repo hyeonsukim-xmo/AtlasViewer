@@ -20,13 +20,14 @@ export default function ImagePreview({
   revision?: string;
   compact?: boolean;
 }) {
-  useLanguage();
+  const language = useLanguage();
   const [view, setView] = useState<NonNullable<PreviewOptions["view"]>>("axial");
   const [index, setIndex] = useState<number | null>(null);
   const [windowing, setWindow] = useState<"soft" | "bone">("soft");
   const [opacity, setOpacity] = useState(0.45);
   const [data, setData] = useState<Preview>();
   const [error, setError] = useState("");
+  const [exportError, setExportError] = useState("");
   const [loading, setLoading] = useState(false);
   const area = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointer: number; y: number; index: number } | null>(null);
@@ -152,6 +153,18 @@ export default function ImagePreview({
       </div>
       <div
         className="medical-image"
+        onContextMenu={event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!data || error) return;
+          setExportError("");
+          void window.exmoDesktop.imageMenu({
+            image: data.image,
+            filename: `${analysis.toUpperCase()}_${data.metadata.studyDate || "undated"}_${data.view}_${data.index + 1}${result ? "_overlay" : ""}.png`,
+            source: {kind: result ? "result" : "input", id},
+            language,
+          }).then(unwrap).catch(error => setExportError(error.message));
+        }}
         ref={area}
         tabIndex={0}
         aria-label={t("영상 preview · 휠 또는 가운데 버튼 드래그로 slice 이동")}
@@ -237,6 +250,7 @@ export default function ImagePreview({
         )}
         <span>{analysis === "xray" ? "2D" : "mm"}</span>
       </div>
+      {exportError && <p role="alert">{t(exportError)}</p>}
       {result && !compact && (
         <label className="overlay-opacity">
           Overlay

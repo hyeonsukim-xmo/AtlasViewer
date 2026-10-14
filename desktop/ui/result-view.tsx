@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import AnatomyScene from "../../app/scene";
 import { GROUPS, INITIAL_STATE, inGroup, type SceneState } from "../../app/anatomy";
 import ImagePreview from "./image-preview";
+import ResultComparison, { type ComparisonActions } from "./result-comparison";
 import { xrayApplicable, xrayView, viewLabel } from "./xray-studies";
 import {
   number,
@@ -64,6 +65,7 @@ export default function ResultView({
   workspaceError = "",
   heading,
   description,
+  comparison,
 }: {
   results: AnalysisResult[];
   onClose: () => void;
@@ -71,8 +73,9 @@ export default function ResultView({
   workspaceError?: string;
   heading?: string;
   description?: string;
+  comparison?: ComparisonActions;
 }) {
-  useLanguage();
+  const language = useLanguage();
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
   const [requestedMode, setMode] = useState<"overlay" | "3d">("overlay");
   const [state, setState] = useState<SceneState<string>>({ ...INITIAL_STATE, group: "All" });
@@ -85,8 +88,11 @@ export default function ResultView({
     result.analysis !== "xray" && result.laterality?.method !== "femur_components_lps_v1";
   const [preparing, setPreparing] = useState(() => results.some(needsPreparation));
   const pendingMeshes = results.some(result => result.meshState === "pending");
+  const preparationKey = results.map(result => result.id).join(",");
   useEffect(() => {
     let disposed = false;
+    if (results.length > 1) setActive(null);
+    setPreparing(results.some(needsPreparation));
     void (async () => {
       try {
         for (const result of results.filter(needsPreparation)) {
@@ -102,7 +108,7 @@ export default function ResultView({
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [preparationKey]);
   // Overlay visibility starts with all labels; 3D keeps its separate focus/rotation selection.
   const [overlaySelection, setOverlaySelection] = useState<string[] | null>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -241,6 +247,8 @@ export default function ResultView({
               : `${primary.metadata.studyDescription || primary.name} · ${primary.analysis.toUpperCase()} · ${primary.variant.toUpperCase()}`)}
           </p>
         </div>
+        <div className="result-view-actions">
+        {comparison && <ResultComparison results={results} actions={comparison} />}
         <div className="control-segment">
           <button aria-pressed={mode === "overlay"} onClick={() => setMode("overlay")}>
             Overlay &amp; metrics
@@ -255,6 +263,7 @@ export default function ResultView({
           >
             {pendingMeshes ? t("3D 준비 중") : "3D anatomy"}
           </button>
+        </div>
         </div>
       </header>
       {(error || workspaceError) && (
@@ -800,6 +809,10 @@ export default function ResultView({
                   data-result-id={result.id}
                   data-active={active === result.id}
                 >
+                  {comparison && results.length > 1 && <div className="comparison-case-action">{result.id === primary.id
+                    ? <span>{t("기준 영상")}</span> : <button className="text-button comparison-remove"
+                    onClick={() => {comparison.onRemove(result.id); if (active === result.id) setActive(null);}}
+                    aria-label={t("{{value0}} 비교에서 제외", {value0: result.metadata.caseName})}>{t("비교에서 제외")}</button>}</div>}
                   <button className="case-title" onClick={() => setActive(result.id)}>
                     <strong>{result.metadata.caseName}</strong>
                     <span>
@@ -843,6 +856,13 @@ export default function ResultView({
                         onProgress={(value) => setProgress((p) => ({ ...p, [result.id]: value }))}
                         onError={setError}
                         onInteract={() => {}}
+                        onImageMenu={image => {
+                          void window.exmoDesktop.imageMenu({image,
+                            filename: `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${state.view}.png`,
+                            source: {kind:"result",id:result.id},
+                            language,
+                          }).then(unwrap).catch(error => setError(error.message));
+                        }}
                         renderMeasurement={(structure, hoveredSide) => {
                           const row = result.rows.find((r) => r.id === structure.id)!;
                           if (row.sides)
@@ -890,7 +910,7 @@ export default function ResultView({
           {mode === "3d" && (
             <footer className="render-hint">
               <span>
-                {t("좌클릭 선택 · 드래그 회전 · 휠 확대 · Explode 선택 구조 우클릭 회전")}
+                {t("좌클릭 선택 · 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 조립 상태 우클릭 저장 · Explode 선택 구조 우클릭 회전")}
               </span>
               <label>
                 Surrounding opacity

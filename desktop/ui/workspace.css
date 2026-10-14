@@ -469,7 +469,9 @@
 .series-scroll {
   overflow: auto;
   flex: 1;
+  min-width: 0;
 }
+.series-table { table-layout: fixed; width: 100%; }
 .series-table th:first-child,
 .series-table td:first-child {
   width: 35px;
@@ -502,6 +504,11 @@
 }
 .series-name strong {
   font-size: 14px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .series-name span {
   font-size: 13px;
@@ -512,6 +519,10 @@
 }
 .series-name small {
   font-size: 12px;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .series-preview-panel {
   display: flex;
@@ -520,6 +531,9 @@
 .series-preview-panel > .panel-title strong {
   font-size: 14px;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .series-preview-panel > .panel-title > span {
   flex-shrink: 0;
@@ -686,6 +700,48 @@
   min-height: 0;
   align-content: start;
 }
+.grouped-review { flex: 1; min-height: 0; overflow: auto; border: 1px solid #ffffff19; border-radius: 12px; }
+.patient-group-heading { display: flex; align-items: center; gap: 10px; padding: 12px 14px; min-width: 0; }
+.patient-group-heading > input { flex-shrink: 0; width: 16px; height: 16px; accent-color: #a69bff; }
+.patient-level { background: transparent; border-bottom: 1px solid #ffffff0b; }
+.date-level { padding-left: 32px; background: transparent; border-bottom: 0; position: relative; }
+.patient-group-heading[data-selected="true"] { background: #a69bff10; }
+.group-disclosure { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; text-align: left; color: #e0e3f7; border: 0; padding: 0; background: none; cursor: pointer; }
+.group-disclosure strong { font-size: 14px; overflow-wrap: anywhere; }
+.date-level .group-disclosure strong { font-size: 13px; font-weight: 500; color: #b8bed5; }
+.group-disclosure:focus:not(:focus-visible) { outline: none; }
+.group-disclosure:focus-visible { outline: 2px solid #a69bff; outline-offset: 3px; border-radius: 4px; }
+.series-table tr[data-input-id] > td:first-child { padding-left: 54px; padding-right: 0; position: relative; }
+.series-table tr[data-input-id] input { accent-color: #a69bff; }
+.series-table tbody tr[aria-selected="true"] { background: #a69bff18; box-shadow: none; border-radius: 0; }
+.series-name[aria-current="true"] strong { text-decoration: underline; text-decoration-color: #77728f; text-underline-offset: 4px; }
+.analysis-history { background: #141b29; }
+.analysis-history > tr:last-child > td { border-bottom: 1px solid #ffffff16; }
+.clinical-table tr.analysis-history-header > td { padding: 16px; background: #1c2935; border-top: 1px solid #ffffff16; }
+.analysis-history-header .group-disclosure { width: 100%; }
+.analysis-history-header .group-disclosure strong { color: #c4d5db; }
+.analysis-history-header .group-count { color: #a4b8c5; }
+.history-toggle-label { margin-left: auto; padding: 4px 8px; border: 1px solid #ffffff30; border-radius: 5px; color: #cbd9df; font-size: 12px; }
+.history-note { margin: 8px 0 0 18px; color: #9dafbd; font-size: 12px; line-height: 1.5; }
+.analysis-history .patient-level { border-bottom-color: #ffffff0b; }
+.clinical-table tr.pending-studies-header > td { padding: 18px 16px 10px; color: #b6bed6; font-size: 12px; border-top: 8px solid #0d0d23; border-bottom: 0; }
+.clinical-table small.analysis-complete { color: #98c4b2; margin: 0 0 4px; font-size: 11px; }
+.group-count { color: #9ca5c3; font-size: 12px; font-weight: 400; }
+.patient-group-heading > .text-button { font-size: 12px; flex-shrink: 0; }
+.pickable-group { cursor: pointer; user-select: none; }
+.pickable-group > .group-disclosure { flex: 0 1 auto; max-width: 62%; }
+.group-select-area { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; flex: 1; align-self: stretch; min-width: 112px; padding: 4px 0; border: 0; background: transparent; color: #bac4e0; text-align: left; cursor: pointer; }
+.group-select-area:disabled { cursor: default; opacity: .45; }
+.group-select-area:hover:not(:disabled) .group-select-label { color: #e0dcff; text-decoration: underline; }
+.group-select-label { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.series-table tr[data-input-id] { cursor: pointer; }
+.clinical-table tr.patient-header-row > td, .clinical-table tr.date-header-row > td { padding: 0; max-width: none; }
+.review-date-group { padding: 16px; }
+.review-date-group .review-pagination { margin-bottom: 12px; }
+.review-date-group .review-grid { overflow: visible; }
+.patient-assignment label { display: grid; gap: 8px; margin: 18px 0; font-size: 14px; }
+.patient-assignment input { width: 100%; color: #e0e3f7; background: #0b0b20; border: 1px solid #ffffff30; border-radius: 8px; padding: 10px 12px; color-scheme: dark; }
+.patient-assignment footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; }
 .review-case {
   min-height: 440px;
   height: max-content;
@@ -700,6 +756,22 @@
   height: 330px;
   flex: none;
 }
+.selectable-review-case { cursor: pointer; transition: border-color 120ms, box-shadow 120ms; }
+.selectable-review-case.selected-for-run {
+  border-color: #a69bff;
+  box-shadow: 0 0 0 2px #a69bff80;
+}
+.review-run-selection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #ffffff19;
+  color: #c1c5d9;
+  cursor: pointer;
+}
+.selected-for-run .review-run-selection { background: #a69bff24; color: #eeeaff; }
+.review-run-selection input { width: 18px; height: 18px; accent-color: #a69bff; }
 .review-pagination {
   display: flex;
   flex-wrap: wrap;
@@ -833,6 +905,21 @@
   border-radius: 12px;
   background: var(--glass);
 }
+.result-select-all { display: flex; align-items: center; gap: 8px; white-space: nowrap; cursor: pointer; }
+.export-notice { margin: 0 0 12px; font-size: 14px; color: #c4d8c8; }
+.result-view-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+.comparison-dialog { color: #e0e3f7; background: #15152c; border: 1px solid #ffffff30; border-radius: 14px; padding: 24px; width: min(760px, calc(100vw - 60px)); max-height: 80vh; }
+.comparison-dialog::backdrop { background: #0009; }
+.comparison-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.comparison-dialog h2 { margin: 0; font-size: 20px; }
+.comparison-dialog p { font-size: 14px; color: #a5acce; }
+.comparison-search { width: 100%; margin: 12px 0; }
+.comparison-candidates { max-height: 50vh; overflow-y: auto; }
+.comparison-candidates article { display: flex; align-items: center; gap: 20px; padding: 16px 0; border-top: 1px solid #ffffff18; }
+.comparison-candidates article > div { display: grid; gap: 5px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.comparison-candidates span, .comparison-candidates small { color: #a5acce; font-size: 13px; }
+.comparison-case-action { display: flex; justify-content: flex-end; align-items: center; height: 32px; flex-shrink: 0; padding: 0 12px; color: #a5acce; font-size: 12px; }
+.comparison-remove { padding: 4px 0; }
 .results-list .clinical-table td {
   max-width: 340px;
   overflow-wrap: anywhere;
@@ -1365,16 +1452,34 @@
 .xray-result-slot select { max-width: 240px; }
 .xray-view-status { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 13px; color: #a5acc3; }
 .xray-view-status b { color: #e0e4f3; font-weight: 600; }
-.xray-file-row { background: #ffffff03; }
+.xray-file-row { background: transparent; }
 .xray-file-row td { font-size: 12px; }
 .xray-study-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px; border: 1px solid #ffffff19; border-radius: 12px; background: var(--glass); }
 .xray-study-form p { width: 100%; margin: 0; font-size: 13px; color: #a5acc3; }
 .xray-study-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .xray-study-form input { padding: 8px 10px; border: 1px solid #ffffff24; border-radius: 7px; background: #17162d; color: #edf0ff; color-scheme: dark; }
-.xray-review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; flex: 1; min-height: 0; overflow: auto; }
-.xray-review-grid .review-case { display: flex; flex-direction: column; height: 100%; min-height: 380px; }
-.xray-review-grid .review-case .medical-preview { flex: 1; height: auto; min-height: 240px; }
-.xray-review-grid select { margin: 8px 12px; max-width: calc(100% - 24px); }
+.xray-workspace .study-level { padding-left: 50px; background: #101121; }
+.xray-workspace .series-table tr[data-input-id] > td:first-child { padding-left: 72px; }
+.xray-workspace .analysis-history .study-level { background: #141b29; }
+.xray-workspace .study-header-row > td { padding: 0; }
+.xray-study-summary { padding: 0 14px 10px 78px; }
+.xray-study-summary .xray-view-status { font-size: 11px; }
+.xray-study-review { padding: 10px 16px 24px; }
+.xray-study-review > .xray-view-status { margin-bottom: 12px; }
+.xray-projections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.xray-direction-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.xray-projections h3 { margin: 0; font-size: 14px; color: #bbc5e7; }
+.xray-projections .review-case { min-width: 0; display: flex; flex-direction: column; }
+.xray-projections .review-case[data-selected="true"] { border-color: #a69bff; }
+.xray-projections .panel-title { flex-wrap: wrap; }
+.xray-run-pick { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: pointer; }
+.xray-run-pick strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xray-lazy-preview, .xray-lazy-preview > .clinical-empty { min-height: 260px; }
+.xray-lazy-preview .medical-preview { height: 280px; }
+.xray-missing-view { display: grid; place-items: center; min-height: 330px; border: 1px dashed #ffffff20; border-radius: 12px; color: #8293bd; }
+.xray-unconfirmed { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.xray-unconfirmed h3 { grid-column: 1 / -1; }
+.xray-completed-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .xray-study-list { min-height: 140px; }
 
 .xray-input-layout { display: grid; grid-template-columns: minmax(440px, 1.3fr) minmax(280px, 1fr); gap: 16px; flex: 1; min-height: 0; }

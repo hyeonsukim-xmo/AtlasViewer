@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t, useLanguage, localeTag } from "./language";
+import PatientGroupsView from "./patient-groups-view";
+import { seriesLabel } from "./patient-groups";
 import ImagePreview from "./image-preview";
 import ResultView from "./result-view";
 import {
@@ -13,6 +15,8 @@ import {
 } from "./imaging";
 import {
   groupXrays,
+  xrayResultFor,
+  xrayHistory,
   comparisonView,
   pendingXrayInputs,
   studyIdentity,
@@ -77,16 +81,14 @@ export default function XrayWorkspace(p: Props) {
   useLanguage();
   const [step, setStep] = useState<"input" | "review" | "results">("input");
   const [selected, setSelected] = useState<string[]>([]);
-  const seen = useRef(new Set<string>());
+  const [runSelected, setRunSelected] = useState<string[]>([]);
+  const [rerunIds, setRerunIds] = useState<string[]>([]);
+  const [assignmentIds, setAssignmentIds] = useState<string[] | null>(null);
   useEffect(() => {
-    const added = p.files.filter((file) => !seen.current.has(file.id) && !!file.metadata);
-    seen.current = new Set(p.files.map((file) => file.id));
-    setSelected((old) => [
-      ...new Set([
-        ...old.filter((id) => p.files.some((f) => f.id === id)),
-        ...added.map((f) => f.id),
-      ]),
-    ]);
+    const exists = (id: string) => p.files.some(file => file.id === id);
+    setSelected(old => old.filter(exists));
+    setRunSelected(old => old.filter(exists));
+    setRerunIds(old => old.filter(exists));
   }, [p.files]);
   const [query, setQuery] = useState("");
   const [previewId, setPreviewId] = useState("");
@@ -96,41 +98,60 @@ export default function XrayWorkspace(p: Props) {
   const [opened, setOpened] = useState<string[]>([]);
   const [angle, setAngle] = useState<XrayView>("AP");
   const [versions, setVersions] = useState<Record<string, string>>({});
-  const [reviewPage, setReviewPage] = useState(0);
   const [localError, setLocalError] = useState("");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [patientId, setPatientId] = useState("");
   const [patientIssuer, setPatientIssuer] = useState("");
   const [studyDate, setStudyDate] = useState("");
-  const [detail, setDetail] = useState<string[]>([]);
   const busy = p.busy || saving;
-  const groups = groupXrays(p.files);
+  const normalizedFiles = p.files.map(file => file.metadata?.studyAssignment
+    ? {...file, metadata: {...file.metadata, ...file.metadata.studyAssignment}} : file);
+  const history = xrayHistory(normalizedFiles, p.results);
+  const studiesFor = (files: ImagingFile[]) => groupXrays(files).map((group, index) => ({
+    ...group, label: (group.metadata?.studyDescription || t("촬영 정보 미지정")).slice(0, 80) + " · " + (index + 1),
+    summary: <div className="xray-study-summary">{statusStrip(group)}</div>,
+  }));
   const resultGroups = groupXrays(p.results);
   const latestResults = [...p.results].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const resultFor = (file: ImagingFile) =>
-    latestResults.find((result) => result.inputId === file.id);
+    xrayResultFor(file, latestResults);
   const runningJob = p.job?.analysis === "xray" && p.job.state === "running" ? p.job : null;
   const stateOf = (file: ImagingFile) => {
-    if (resultFor(file)) return t("완료");
     const active = runningJob?.active?.find((task) => task.id === file.id);
     if (active) return active.lane === "waiting" ? t("대기") : t("분석 중");
+    if (resultFor(file)) return t("완료");
     if (p.job?.analysis === "xray" && p.job.failed.some((f) => f.id === file.id))
       return t("분석 실패");
     if (!xrayView(file)) return t("방향 확인 필요");
     if (!file.ready) return t("입력 검토 필요");
-    return selected.includes(file.id) ? t("선택됨") : t("선택 제외");
+    return (step === "review" ? runSelected : selected).includes(file.id) ? t("선택됨") : t("분석 대기");
   };
-  const toggle = (ids: string[], value: boolean) =>
-    setSelected((old) =>
-      value ? [...new Set([...old, ...ids])] : old.filter((id) => !ids.includes(id)),
-    );
-  const candidates = pendingXrayInputs(p.files, p.results, selected);
-  const selectableIds = p.files.filter((file) => file.metadata).map((file) => file.id);
-  const reviewGroups = groups.filter((group) =>
-    group.items.some((file) => selected.includes(file.id)),
-  );
-  const currentGroup = reviewGroups[Math.min(reviewPage, Math.max(0, reviewGroups.length - 1))];
+  const toggle = (ids: string[], value: boolean) => {
+    setSelected(old => value ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
+    if (!value) {
+      setRunSelected(old => old.filter(id => !ids.includes(id)));
+      setRerunIds(old => old.filter(id => !ids.includes(id)));
+    }
+  };
+  const toggleRun = (ids: string[], value: boolean) => setRunSelected(old =>
+    value ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
+  const canRun = (file: ImagingFile) => !!(file.ready && xrayView(file) && (!resultFor(file) || rerunIds.includes(file.id)));
+  const reviewFiles = normalizedFiles.filter(file => selected.includes(file.id));
+  const candidates = reviewFiles.filter(file => canRun(file) && runSelected.includes(file.id));
+  const requestAssignment = (files: ImagingFile[]) => {
+    setAssignmentIds(files.map(file => file.id));
+    setEditing(true);
+  };
+  const openResult = (result: AnalysisResult) => {
+    setVersions(old => ({...old, [studyKey(result) + xrayView(result)]: result.id}));
+    setOpened([studyKey(result)]);
+  };
+  const startRun = (ids: string[]) => {
+    p.onRun(ids);
+    setRunSelected(old => old.filter(id => !ids.includes(id)));
+    setRerunIds(old => old.filter(id => !ids.includes(id)));
+  };
   const handledInitial = useRef("");
   useEffect(() => {
     if (!p.visible) {
@@ -182,12 +203,12 @@ export default function XrayWorkspace(p: Props) {
     );
   }
   async function assignStudy() {
-    const ids =
+    const ids = assignmentIds ?? (
       step === "results"
         ? resultGroups
             .filter((g) => compared.includes(g.key))
             .flatMap((g) => g.items.map((r) => r.inputId))
-        : selected;
+        : selected);
     setSaving(true);
     setLocalError("");
     try {
@@ -283,16 +304,11 @@ export default function XrayWorkspace(p: Props) {
       </div>
     );
   }
-  const visibleGroups = groups.filter((group) =>
-    [
-      studyTitle(group),
-      group.metadata?.institutionName,
-      ...group.items.map((item) => item.metadata?.seriesDescription || item.name),
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(query.toLowerCase()),
-  );
+  const visibleFiles = normalizedFiles.filter(file => [
+    file.metadata?.patientId, file.metadata?.patientIssuer, file.metadata?.institutionName,
+    file.metadata?.studyDate, file.metadata?.studyDate?.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3"),
+    file.metadata?.studyDescription, file.metadata?.seriesDescription, file.name,
+  ].join(" ").toLowerCase().includes(query.toLowerCase()));
   return (
     <section className="thigh-workspace xray-workspace">
       <header className="workspace-heading">
@@ -319,7 +335,7 @@ export default function XrayWorkspace(p: Props) {
             }}
           >
             {[t("영상·Series"), t("선택 영상 검토"), t("분석 결과")][index]}
-            <span>{[groups.length, reviewGroups.length, resultGroups.length][index]}</span>
+            <span>{[p.files.length, selected.length, resultGroups.length][index]}</span>
           </button>
         ))}
       </div>
@@ -367,11 +383,7 @@ export default function XrayWorkspace(p: Props) {
             className="clinical-button"
             disabled={
               busy ||
-              !p.job.failed.some(
-                (f) =>
-                  p.files.some((input) => input.id === f.id && input.ready) &&
-                  !p.results.some((r) => r.inputId === f.id),
-              )
+              !pendingXrayInputs(p.files, p.results, p.job.failed.map(file => file.id)).length
             }
             onClick={() =>
               p.onRun(
@@ -420,7 +432,7 @@ export default function XrayWorkspace(p: Props) {
           <button
             className="clinical-button"
             disabled={busy || (step === "results" ? !compared.length : !selected.length)}
-            onClick={() => setEditing(!editing)}
+            onClick={() => {setAssignmentIds(null); setEditing(!editing);}}
           >
             {t("선택 영상의 촬영 정보 지정")}
           </button>
@@ -493,67 +505,32 @@ export default function XrayWorkspace(p: Props) {
       {step === "input" && (
         <div className="xray-input-layout">
           <div className="results-list xray-study-list">
-            <table className="clinical-table series-table">
-              <thead>
-                <tr>
-                  <th>
-                    <input
-                      type="checkbox"
-                      aria-label={t("등록 영상 전체 선택")}
-                      checked={
-                        selectableIds.length > 0 &&
-                        selectableIds.every((id) => selected.includes(id))
-                      }
-                      disabled={busy || !selectableIds.length}
-                      onChange={(e) => toggle(selectableIds, e.target.checked)}
-                    />
-                  </th>
-                  <th>{t("환자 / 촬영일")}</th>
-                  <th>LT / AP / RT</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {visibleGroups.map((group) => {
-                  const ids = group.items.filter((f) => f.metadata).map((f) => f.id);
-                  const all = ids.length > 0 && ids.every((id) => selected.includes(id));
-                  const partial = !all && ids.some((id) => selected.includes(id));
-                  return (
-                    <StudyRows
-                      key={group.key}
-                      group={group}
-                      all={all}
-                      partial={partial}
-                      busy={busy || !ids.length}
-                      selected={selected}
-                      expanded={detail.includes(group.key)}
-                      onToggle={() => toggle(ids, !all)}
-                      onExpand={() =>
-                        setDetail((old) =>
-                          old.includes(group.key)
-                            ? old.filter((k) => k !== group.key)
-                            : [...old, group.key],
-                        )
-                      }
-                      onFileToggle={(file) => toggle([file.id], !selected.includes(file.id))}
-                      stateOf={stateOf}
-                      status={statusStrip(group)}
-                      busyFiles={busy}
-                      onPreview={setPreviewId}
-                    />
-                  );
-                })}
-              </tbody>
-            </table>
-            {!visibleGroups.length && (
-              <div className="clinical-empty">{t("등록된 영상이 없습니다")}</div>
-            )}
+            <PatientGroupsView items={visibleFiles} selected={selected} busy={busy} onSelect={toggle}
+              mode="input" onAssign={requestAssignment} analyzedInputs={history} studiesFor={studiesFor}
+              canSelect={file => !!file.metadata}>
+              {(file, pick) => <tr key={file.id} className="xray-file-row openable-row" data-input-id={file.id}
+                aria-selected={selected.includes(file.id)} tabIndex={busy || !file.metadata ? -1 : 0}
+                onMouseEnter={() => setPreviewId(file.id)} onFocus={() => setPreviewId(file.id)}
+                onClick={event => {if (!busy && file.metadata) pick(!selected.includes(file.id), event.shiftKey);}}
+                onKeyDown={event => {if (event.target === event.currentTarget && ["Enter", " "].includes(event.key)) {
+                  event.preventDefault(); if (!busy && file.metadata) pick(!selected.includes(file.id), event.shiftKey);
+                }}}>
+                <td><input type="checkbox" disabled={busy || !file.metadata} checked={selected.includes(file.id)}
+                  aria-label={t("{{value0}} 분석 선택", {value0: seriesLabel(file)})} onClick={event => event.stopPropagation()}
+                  onChange={event => pick(event.target.checked, !!(event.nativeEvent as MouseEvent).shiftKey)} /></td>
+                <td title={file.name}><strong>{seriesLabel(file)}</strong>
+                  {file.error && <small className="inline-error">{t(file.error)}</small>}</td>
+                <td>{xrayView(file) ? viewLabel(xrayView(file)!) : "—"}</td>
+                <td>{stateOf(file)}</td>
+              </tr>}
+            </PatientGroupsView>
+            {!visibleFiles.length && <div className="clinical-empty">{t("등록된 영상이 없습니다")}</div>}
           </div>
           <aside className="series-preview-panel">
             {preview?.metadata ? (
               <>
                 <div className="panel-title">
-                  <strong>{preview.metadata.seriesDescription}</strong>
+                  <strong title={preview.name}>{seriesLabel(preview)}</strong>
                   <span>
                     {xrayView(preview) ? viewLabel(xrayView(preview)!) : t("방향 확인 필요")}
                   </span>
@@ -582,75 +559,63 @@ export default function XrayWorkspace(p: Props) {
           </aside>
         </div>
       )}
-      {step === "review" && (
-        <>
-          <nav className="review-pagination" aria-label={t("검토 페이지")}>
-            <button
-              className="clinical-button"
-              disabled={reviewPage === 0}
-              onClick={() => setReviewPage(Math.max(0, reviewPage - 1))}
-            >
-              {t("이전 페이지")}
-            </button>
-            <span>
-              {reviewGroups.length ? Math.min(reviewPage + 1, reviewGroups.length) : 0} /{" "}
-              {reviewGroups.length}
-            </span>
-            <button
-              className="clinical-button"
-              disabled={reviewPage + 1 >= reviewGroups.length}
-              onClick={() => setReviewPage(reviewPage + 1)}
-            >
-              {t("다음 페이지")}
-            </button>
-            {currentGroup && <strong>{studyTitle(currentGroup)}</strong>}
-          </nav>
-          {currentGroup && statusStrip(currentGroup)}
-          <div className="xray-review-grid">
-            {currentGroup &&
-              [...XRAY_VIEWS, null].flatMap((view) => {
-                const items = currentGroup.items.filter((item) => xrayView(item) === view);
-                if (!items.length) return [];
-                const key = currentGroup.key + (view || "unknown");
-                const file = choose(items, versions[key])!;
-                return (
-                  <article
-                    className="review-case"
-                    key={key}
-                    data-input-id={file.id}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      if (!busy) toggle([file.id], false);
-                    }}
-                  >
-                    <div className="panel-title">
-                      <strong>{view ? viewLabel(view) : t("방향 확인 필요")}</strong>
-                      <span>{stateOf(file)}</span>
-                      <button
-                        className="text-button"
-                        disabled={busy || !file.metadata}
-                        onClick={() => toggle([file.id], !selected.includes(file.id))}
-                      >
-                        {selected.includes(file.id) ? t("제외") : t("선택")}
-                      </button>
-                    </div>
-                    {selector(key, items)}
-                    {file.metadata ? (
-                      <ImagePreview key={file.id} analysis="xray" id={file.id} compact />
-                    ) : (
-                      <p>{t("입력 검토 필요")}</p>
-                    )}
-                    <div className="review-case-details">
-                      {versionLabel(file)}
-                      {file.error && <p className="inline-error">{t(file.error)}</p>}
-                    </div>
-                  </article>
-                );
+      {step === "review" && <>
+        <div className="review-pagination">
+          <span>{t("검토 {{value0}}개 · 분석 선택 {{value1}}개 · 실행 가능 {{value2}}개", {
+            value0: reviewFiles.length, value1: reviewFiles.filter(file => runSelected.includes(file.id)).length, value2: candidates.length,
+          })}</span>
+          <button className="clinical-button" disabled={busy || !reviewFiles.some(canRun)}
+            onClick={() => toggleRun(reviewFiles.filter(canRun).map(file => file.id), true)}>{t("분석 가능한 영상 전체 선택")}</button>
+          <button className="text-button" disabled={busy || !runSelected.length}
+            onClick={() => setRunSelected([])}>{t("선택 해제")}</button>
+          {reviewFiles.some(file => !xrayView(file)) && <span>{t("방향 확인 필요")} · {reviewFiles.filter(file => !xrayView(file)).length}</span>}
+        </div>
+        <PatientGroupsView key="xray-review" items={reviewFiles} selected={runSelected} busy={busy}
+          onSelect={toggleRun} mode="review" onAssign={requestAssignment} canSelect={canRun} studiesFor={studiesFor}
+          renderStudy={(study, renderFile) => <section className="xray-study-review" key={study.key}>
+            {statusStrip({...study, metadata: study.items[0]?.metadata})}
+            <div className="xray-projections">
+              {XRAY_VIEWS.map(view => {
+                const files = study.items.filter(file => xrayView(file) === view);
+                return <div className="xray-direction-column" key={view} data-view={view}>
+                  <h3>{viewLabel(view)}</h3>
+                  {files.length ? files.map(renderFile) : <div className="xray-missing-view">{t("검토 영상 없음")}</div>}
+                </div>;
               })}
-          </div>
-          {!currentGroup && <div className="clinical-empty">{t("검토할 영상이 없습니다")}</div>}
-        </>
-      )}
+              {study.items.some(file => !xrayView(file)) && <div className="xray-unconfirmed">
+                <h3>{t("방향 확인 필요")}</h3>{study.items.filter(file => !xrayView(file)).map(renderFile)}
+              </div>}
+            </div>
+          </section>}>
+          {(file, pick) => {
+            const result = resultFor(file), checked = runSelected.includes(file.id);
+            return <article className="review-case" key={file.id} data-input-id={file.id} data-selected={checked}
+              onContextMenu={event => {event.preventDefault(); if (!busy) pick(false);}}>
+              <div className="panel-title">
+                <label className="xray-run-pick"><input type="checkbox" disabled={busy || !canRun(file)} checked={checked}
+                  aria-label={t("{{value0}} 분석 선택", {value0: seriesLabel(file)})}
+                  onChange={event => pick(event.target.checked, !!(event.nativeEvent as MouseEvent).shiftKey)} />
+                  <strong title={file.name}>{seriesLabel(file)}</strong></label>
+                <span>{stateOf(file)}</span>
+              </div>
+              {file.metadata ? <LazyXrayPreview id={file.id} /> : <p>{t("입력 검토 필요")}</p>}
+              <div className="review-case-details">
+                {file.error && <p className="inline-error">{t(file.error)}</p>}
+                {file.warnings.map(warning => <p className="muted-note" key={warning}>{t(warning)}</p>)}
+                {result && <div className="xray-completed-actions">
+                  <button className="clinical-button" onClick={() => openResult(result)}>{t("결과 열기")}</button>
+                  <button className="text-button" disabled={busy || !file.ready || !xrayView(file)} onClick={() => {
+                    const armed = rerunIds.includes(file.id);
+                    setRerunIds(old => armed ? old.filter(id => id !== file.id) : [...old, file.id]);
+                    toggleRun([file.id], !armed);
+                  }}>{rerunIds.includes(file.id) ? t("재분석 선택 취소") : t("재분석 선택")}</button>
+                </div>}
+              </div>
+            </article>;
+          }}
+        </PatientGroupsView>
+        {!reviewFiles.length && <div className="clinical-empty">{t("검토할 영상이 없습니다")}</div>}
+      </>}
       {step === "results" && (
         <div className="results-list">
           <table className="clinical-table">
@@ -763,17 +728,14 @@ export default function XrayWorkspace(p: Props) {
       {step !== "results" && (
         <footer className="workspace-bottom">
           <span>
-            {t("선택 {{value0}}개 · 미완료 {{value1}}개", {
-              value0: selected.length,
-              value1: candidates.length,
-            })}
+            {step === "input" ? t("{{value0}}개 영상 선택", {value0: selected.length}) :
+              t("검토 {{value0}}개 · 실행 가능 {{value1}}개", {value0: reviewFiles.length, value1: candidates.length})}
           </span>
           {step === "input" ? (
             <button
               className="clinical-button primary"
               disabled={!selected.length || busy}
               onClick={() => {
-                setReviewPage(0);
                 setStep("review");
               }}
             >
@@ -793,9 +755,9 @@ export default function XrayWorkspace(p: Props) {
               <button
                 className="clinical-button primary"
                 disabled={busy || !candidates.length || !p.model?.estimationAvailable}
-                onClick={() => p.onRun(candidates.map((file) => file.id))}
+                onClick={() => startRun(candidates.map((file) => file.id))}
               >
-                {t("미완료 영상 분석 ({{value0}}개)", { value0: candidates.length })}
+                {t("선택 영상 분석 ({{value0}}개)", { value0: candidates.length })}
               </button>
             </>
           )}
@@ -804,129 +766,20 @@ export default function XrayWorkspace(p: Props) {
     </section>
   );
 }
-function StudyRows({
-  group,
-  all,
-  partial,
-  busy,
-  selected,
-  expanded,
-  onToggle,
-  onExpand,
-  onFileToggle,
-  stateOf,
-  status,
-  busyFiles,
-  onPreview,
-}: {
-  group: XrayStudy<ImagingFile>;
-  all: boolean;
-  partial: boolean;
-  busy: boolean;
-  selected: string[];
-  expanded: boolean;
-  onToggle: () => void;
-  onExpand: () => void;
-  onFileToggle: (file: ImagingFile) => void;
-  stateOf: (file: ImagingFile) => string;
-  status: React.ReactNode;
-  busyFiles: boolean;
-  onPreview: (id: string) => void;
-}) {
-  return (
-    <>
-      <tr
-        className="openable-row"
-        aria-selected={all || partial}
-        tabIndex={busy ? -1 : 0}
-        onMouseEnter={() => onPreview(group.items[0].id)}
-        onFocus={() => onPreview(group.items[0].id)}
-        onClick={() => {
-          if (!busy) onToggle();
-        }}
-        onKeyDown={(e) => {
-          if (e.target === e.currentTarget && !busy && ["Enter", " "].includes(e.key)) {
-            e.preventDefault();
-            onToggle();
-          }
-        }}
-      >
-        <td>
-          <input
-            type="checkbox"
-            checked={all}
-            ref={(input) => {
-              if (input) input.indeterminate = partial;
-            }}
-            disabled={busy}
-            aria-label={t("{{value0}} 분석 선택", { value0: studyTitle(group) })}
-            onClick={(e) => e.stopPropagation()}
-            onChange={onToggle}
-          />
-        </td>
-        <td>
-          <strong>{studyTitle(group)}</strong>
-          <small>{studySubtitle(group)}</small>
-          {JSON.parse(group.key)[0] === "ungrouped" && <small>{t("촬영 정보 미지정")}</small>}
-        </td>
-        <td>{status}</td>
-        <td>
-          <button
-            className="text-button"
-            aria-expanded={expanded}
-            onClick={(e) => {
-              e.stopPropagation();
-              onExpand();
-            }}
-          >
-            {t("개별 영상")}
-          </button>
-        </td>
-      </tr>
-      {expanded &&
-        group.items.map((file) => (
-          <tr
-            key={file.id}
-            className="xray-file-row openable-row"
-            aria-selected={selected.includes(file.id)}
-            tabIndex={busyFiles || !file.metadata ? -1 : 0}
-            onClick={() => {
-              if (!busyFiles && file.metadata) onFileToggle(file);
-            }}
-            onKeyDown={(e) => {
-              if (
-                e.target === e.currentTarget &&
-                !busyFiles &&
-                file.metadata &&
-                ["Enter", " "].includes(e.key)
-              ) {
-                e.preventDefault();
-                onFileToggle(file);
-              }
-            }}
-            onMouseEnter={() => onPreview(file.id)}
-            onFocus={() => onPreview(file.id)}
-          >
-            <td>
-              <input
-                type="checkbox"
-                disabled={busyFiles || !file.metadata}
-                checked={selected.includes(file.id)}
-                aria-label={t("{{value0}} 분석 선택", { value0: file.name })}
-                onClick={(e) => e.stopPropagation()}
-                onChange={() => onFileToggle(file)}
-              />
-            </td>
-            <td>
-              {versionLabel(file)}
-              {file.error && <small className="inline-error">{t(file.error)}</small>}
-            </td>
-            <td>
-              {xrayView(file) ? viewLabel(xrayView(file)!) : t("방향 확인 필요")} · {stateOf(file)}
-            </td>
-            <td>{file.metadata?.studyUid?.slice(-8)}</td>
-          </tr>
-        ))}
-    </>
-  );
+function LazyXrayPreview({id}: {id: string}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (!window.IntersectionObserver) {setVisible(true); return;}
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {setVisible(true); observer.disconnect();}
+    }, {root: node.closest(".grouped-review"), rootMargin: "300px"});
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return <div className="xray-lazy-preview" ref={ref}>
+    {visible ? <ImagePreview analysis="xray" id={id} compact /> : <div className="clinical-empty">{t("영상 미리보기")}</div>}
+  </div>;
 }

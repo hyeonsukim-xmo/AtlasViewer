@@ -14,6 +14,7 @@ export type Metadata = {
   seriesDescription: string;
   studyDate?: string;
   patientId?: string;
+  patientAssigned?: boolean;
   patientIssuer?: string;
   institutionName?: string;
   studyUid?: string;
@@ -170,6 +171,8 @@ export type Job = {
 declare global {
   interface Window {
     exmoDesktop: {
+      exportResults(analysis: Analysis, ids: string[], language: "ko" | "en"): Promise<Reply<{action: "save" | "cancel"; count?: number}>>;
+      imageMenu(payload: { image: string; filename: string; language: "ko" | "en"; source: {kind: "input" | "result"; id: string} }): Promise<Reply<{action: "save" | "copy" | "cancel" | "mapping"}>>;
       onImportProgress(callback: (progress: ImportProgress) => void): () => void;
       status(analysis: Analysis): Promise<Reply<ModelStatus>>;
       list(analysis: Analysis): Promise<Reply<ImagingFile[]>>;
@@ -189,6 +192,7 @@ declare global {
       ): Promise<Reply<Job>>;
       job(): Promise<Reply<Job | null>>;
       assignXrayStudy(inputIds: string[], study: { patientId: string; studyDate: string; patientIssuer: string }): Promise<Reply<void>>;
+      assignPatientStudy(analysis: Analysis, inputIds: string[], study: {patientId: string; patientIssuer: string; studyDate?: string} | null): Promise<Reply<void>>;
       variant(id: string, variant: string): Promise<Reply<AnalysisResult>>;
       cancel(analysis: Analysis): Promise<Reply<void>>;
       clear(analysis: Analysis): Promise<Reply<void>>;

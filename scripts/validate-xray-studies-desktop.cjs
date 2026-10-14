@@ -34,7 +34,7 @@ function input(id, route, day) {
     analysis: "xray",
     ready: true,
     warnings: [],
-    metadata: { ...base, studyDate: day },
+    metadata: { ...base, studyDate: day, studyUid: "study-" + day },
     classification: {
       route_to_segmentation: route,
       predicted_label: route,
@@ -135,9 +135,11 @@ const timeout = setTimeout(() => {
   await app.whenReady();
   console.log("Desktop ready");
   const win = BrowserWindow.getAllWindows()[0];
-  win.on("show", () => win.hide());
   win.hide();
   win.setSize(1500, 1000);
+  win.setPosition(80, 80);
+  win.showInactive();
+  win.webContents.setBackgroundThrottling(false);
   const handle = (name, fn) => {
     ipcMain.removeHandler("exmo:imaging:" + name);
     ipcMain.handle("exmo:imaging:" + name, async (_, ...args) => ({
@@ -217,23 +219,65 @@ const timeout = setTimeout(() => {
   await wait(() => document.querySelector(".protocol-table button"));
   await exec(() => document.querySelector('button[aria-label="X-ray 허벅지 근육 분석"]').click());
   await wait(() => document.querySelector(".xray-study-list tbody tr"));
-  assert.equal(await exec(() => document.querySelectorAll(".xray-study-list tbody tr").length), 8);
-  await exec(() => document.querySelector(".xray-study-list tbody tr td:nth-child(2)").click());
-  assert.equal(
-    await exec(() => document.querySelector(".xray-study-list tbody input").checked),
-    false,
-  );
-  await exec(() => document.querySelector(".xray-study-list tbody tr").click());
+  // Imported inputs start unchecked; analyzed studies are collapsed separately.
+  assert.equal(await exec(() => document.querySelectorAll('.xray-study-list input:checked').length), 0);
+  assert.equal(await exec(() => document.querySelector('.analysis-history-header button').getAttribute('aria-expanded')), 'false');
+  await exec(() => document.querySelector('.analysis-history-header button').click());
+  assert.equal(await exec(() => document.querySelectorAll('.analysis-history .study-header-row').length), 7);
+  // Label folds without selecting, while right space selects the whole case.
+  await exec(() => document.querySelector('.analysis-history .date-level .group-disclosure').click());
+  assert.equal(await exec(() => document.querySelectorAll('.xray-study-list input:checked').length), 0);
+  await exec(() => document.querySelector('.analysis-history .date-level .group-disclosure').click());
+  await exec(() => {
+    const buttons = document.querySelectorAll('.analysis-history .date-level .group-select-area');
+    buttons[0].click();
+  });
+  await exec(() => {
+    const buttons = document.querySelectorAll('.analysis-history .date-level .group-select-area');
+    buttons[3].dispatchEvent(new MouseEvent('click', {bubbles:true, shiftKey:true}));
+  });
+  assert.equal(await exec(() => [...document.querySelectorAll('.analysis-history .date-level > input')].slice(0,4).every(i=>i.checked)), true);
+  // Filtered range/select-all does not silently include unmatched images.
+  await exec(() => {
+    const input = document.querySelector('.xray-workspace .clinical-search');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'pendingRT');
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+  });
+  await wait(() => document.querySelectorAll('.xray-study-list tr[data-input-id]').length === 1);
+  await exec(() => document.querySelector('.xray-study-list thead input').click());
+  assert.equal(await exec(() => document.querySelector('tr[data-input-id="pendingRT"] input').checked), true);
+  await exec(() => {
+    const input = document.querySelector('.xray-workspace .clinical-search');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '');
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+  });
+  await exec(() => document.querySelector('.xray-study-list thead input').click());
   await click("선택 영상 검토");
-  await wait(() => document.querySelectorAll(".xray-review-grid article").length === 3);
-  assert.deepEqual(
-    await exec(() =>
-      [...document.querySelectorAll(".xray-review-grid .panel-title strong")].map(
-        (e) => e.textContent,
-      ),
-    ),
-    ["LT", "AP", "RT"],
-  );
+  await wait(() => document.querySelectorAll('.xray-projections article').length === 15);
+  assert.equal(await exec(() => [...document.querySelectorAll('.grouped-review .group-disclosure')].every(b => b.getAttribute('aria-expanded') === 'true')), true);
+  assert.equal(await exec(() => document.querySelectorAll('.grouped-review input:checked').length), 0);
+  assert.deepEqual(await exec(() => [...document.querySelectorAll('.xray-projections')[0].querySelectorAll('.xray-direction-column')].map(e=>e.dataset.view)), views);
+  assert.equal(await exec(() => document.querySelectorAll('.xray-projections')[0].querySelectorAll('[data-view="AP"] article').length), 2, 'Repeated projections are all visible');
+  assert.ok(await exec(() => document.querySelectorAll('.xray-missing-view').length));
+  await click('분석 가능한 영상 전체 선택');
+  assert.deepEqual((await exec(() => [...document.querySelectorAll('.review-case[data-selected="true"]')].map(e=>e.dataset.inputId))).sort(), ['pendingRT','unlinked']);
+  await exec(() => document.querySelector('.review-case[data-input-id="pendingRT"] input').click());
+  assert.equal(await exec(() => document.querySelectorAll('.xray-projections article').length), 15, 'Unchecking never removes review cards');
+  await exec(() => document.querySelector('.grouped-review .date-level .group-disclosure').click());
+  await click('영상·Series');
+  await click('선택 영상 검토');
+  assert.equal(await exec(() => [...document.querySelectorAll('.grouped-review .group-disclosure')].every(b => b.getAttribute('aria-expanded') === 'true')), true, 'Review reentry expands all groups');
+  await exec(() => [...document.querySelectorAll('.review-case[data-input-id="case7-AP"] button')].find(b=>b.textContent === '재분석 선택').click());
+  assert.equal(await exec(() => document.querySelector('.review-case[data-input-id="case7-AP"] input').checked), true);
+  await exec(() => [...document.querySelectorAll('.review-case[data-input-id="case7-AP"] button')].find(b=>b.textContent === '재분석 선택 취소').click());
+  await click('선택 해제');
+  await exec(() => [...document.querySelectorAll('.review-case[data-input-id="case7-AP"] button')].find(b=>b.textContent === '재분석 선택').click());
+  await click('선택 영상 분석 (1개)');
+  assert.deepEqual(runIds, ['case7-AP'], 'Reanalysis requires explicit selection and sends exactly that projection');
+  assert.equal(results.length, 13, 'Existing result versions are retained');
+  await click('분석 가능한 영상 전체 선택');
+  await sleep(400);
+  fs.writeFileSync(path.join(output,'review-all-studies.png'), (await win.webContents.capturePage(undefined, {stayHidden:true, stayAwake:true})).toPNG());
   await click("분석 결과");
   assert.equal(
     await exec(() => document.querySelectorAll(".xray-workspace .results-list tbody tr").length),
@@ -277,7 +321,7 @@ const timeout = setTimeout(() => {
       );
       fs.writeFileSync(
         path.join(output, "three-views.png"),
-        (await win.webContents.capturePage()).toPNG(),
+        (await win.webContents.capturePage(undefined, {stayHidden:true, stayAwake:true})).toPNG(),
       );
     }
     await click("← 결과 목록으로");
@@ -302,7 +346,7 @@ const timeout = setTimeout(() => {
   );
   await click("← 결과 목록으로");
   await click("선택 영상 검토");
-  await click("미완료 영상 분석 (2개)");
+  await click("선택 영상 분석 (2개)");
   assert.deepEqual([...runIds].sort(), ["pendingRT", "unlinked"]);
   await wait(() =>
     [...document.querySelectorAll("button")].some((b) => b.textContent === "실패한 영상만 재시도"),

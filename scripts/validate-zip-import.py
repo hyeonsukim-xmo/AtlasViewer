@@ -107,6 +107,8 @@ for modality, sop in [("ct", CTImageStorage), ("mri", MRImageStorage), ("xray", 
     assert len(groups) == (3 if modality == "xray" else 2)
     for group in groups:
         image, metadata = worker.read_dicom(group, modality)
+        assert metadata["patientId"] == "00042" and metadata["patientIssuer"] == "TEST_SITE"
+        assert metadata["studyUid"] and metadata["seriesUid"]
         assert image.GetSize() == (16, 16, 1 if modality == "xray" else 3)
         if modality == "xray":
             assert metadata["patientId"] == "00042" and metadata["studyDate"] == "20261013"

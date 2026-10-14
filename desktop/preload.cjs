@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "exmoDesktop",
   Object.freeze({
+    exportResults: (analysis, ids, language) => ipcRenderer.invoke("exmo:imaging:exportResults", analysis, ids, language),
+    imageMenu: (payload) => ipcRenderer.invoke("exmo:imaging:imageMenu", payload),
     status: (analysis) => ipcRenderer.invoke("exmo:imaging:status", analysis),
     onImportProgress: (callback) => {
       const listener = (_event, progress) => callback(progress);
@@ -21,6 +23,7 @@ contextBridge.exposeInMainWorld(
       ipcRenderer.invoke("exmo:imaging:run", analysis, ids, confirmedIds, device),
     job: () => ipcRenderer.invoke("exmo:imaging:job"),
     assignXrayStudy: (ids, study) => ipcRenderer.invoke("exmo:imaging:assignXrayStudy", ids, study),
+    assignPatientStudy: (analysis, ids, study) => ipcRenderer.invoke("exmo:imaging:assignPatientStudy", analysis, ids, study),
     variant: (id, variant) => ipcRenderer.invoke("exmo:imaging:variant", id, variant),
     cancel: (analysis) => ipcRenderer.invoke("exmo:imaging:cancel", analysis),
     clear: (analysis) => ipcRenderer.invoke("exmo:imaging:clear", analysis),

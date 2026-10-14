@@ -8,9 +8,17 @@ const readline = require("node:readline");
 const { performance } = require("node:perf_hooks");
 const { Capacity, resources, estimateMemory, runPipeline, aborted } = require("./analysis-pipeline.cjs");
 const { AnalysisWorker } = require("./analysis-worker.cjs");
+const { showImageMenu } = require("./image-menu.cjs");
+const { createExportIdentities } = require("./export-identities.cjs");
+const { exportResults } = require("./results-export.cjs");
+const { createPatientAssignments } = require("./patient-assignments.cjs");
+const { createSourceMetadata } = require("./source-metadata.cjs");
 
 function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette }) {
   fs.mkdirSync(storageRoot, { recursive: true });
+  const exportIdentities = createExportIdentities(storageRoot);
+  const patientAssignments = createPatientAssignments(storageRoot);
+  const sourceMetadata = createSourceMetadata(storageRoot);
   const channels = [],
     files = new Map(),
     results = new Map();
@@ -70,21 +78,28 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
   let studyAssignments = {};
   if (fs.existsSync(studyAssignmentsPath))
     studyAssignments = JSON.parse(fs.readFileSync(studyAssignmentsPath, "utf8"));
-  const withStudy = (record) => record.analysis === "xray" && studyAssignments[record.inputId || record.id]
-    ? { ...record, metadata: { ...record.metadata, studyAssignment: studyAssignments[record.inputId || record.id] } }
-    : record;
+  const withStudy = (record) => {
+    const source = files.get(record.inputId || record.id) || results.get(record.id)?.record || record;
+    const enriched = sourceMetadata.apply(record, source);
+    return record.analysis === "xray" && studyAssignments[record.inputId || record.id]
+      ? {...enriched, metadata:{...enriched.metadata,studyAssignment:studyAssignments[record.inputId || record.id]}}
+      : patientAssignments.apply(enriched);
+  };
   const publicFile = ({
     id,
     name,
     analysis,
     metadata,
+    sourceProof,
     classification,
     confirmation,
     ready,
     deferredValidation,
     warnings,
     error,
-  }) => withStudy({ id, name, analysis, metadata, classification, confirmation, ready, deferredValidation, warnings, error });
+  }) => withStudy({ id, name, analysis, metadata: metadata ? {...metadata,
+    studyUid: metadata.studyUid || sourceProof?.study_uid, seriesUid: metadata.seriesUid || sourceProof?.series_uid} : metadata,
+    classification, confirmation, ready, deferredValidation, warnings, error });
   function publishImport(rows = []) {
     if (!disposed && importProgress)
       window.webContents.send("exmo:imaging:importProgress", {
@@ -353,6 +368,35 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       }
     });
   }
+  function sourceFor(record, publication) {
+    const metadata = withStudy({...record, metadata: {...record.metadata, ...publication?.summary.metadata}}).metadata;
+    const assignment = studyAssignments[record.id] || metadata.studyAssignment;
+    return {inputId:record.id,resultId:publication?.summary.id || '',analysis:record.analysis,
+      patientId:assignment?.patientId || metadata.patientId,
+      patientIssuer:assignment?.patientIssuer || metadata.patientIssuer,institutionName:metadata.institutionName,
+      studyDate:assignment?.studyDate || metadata.studyDate,
+      studyUid:metadata.studyUid || record.sourceProof?.study_uid,
+      seriesUid:metadata.seriesUid || record.sourceProof?.series_uid};
+  }
+  handle("imageMenu", payload => {
+    const target = payload?.source;
+    if (!target || !['input','result'].includes(target.kind)) throw new Error('Invalid image source.');
+    const publication = target.kind === 'result' ? results.get(target.id) : null;
+    const record = publication?.record || (target.kind === 'input' ? files.get(target.id) : null);
+    if (!record) throw new Error('Image source not found.');
+    const source = sourceFor(record, publication);
+    return showImageMenu(window, payload, {registry:exportIdentities,source});
+  });
+  handle("exportResults", (analysis, ids, language) => {
+    validateAnalysis(analysis);
+    if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string')) throw new Error('Select results to export.');
+    const publications = [...new Set(ids)].map(id => {
+      const result = results.get(id);
+      if (!result || result.summary.analysis !== analysis) throw new Error('Selected result not found.');
+      return {record:result.record,summary:JSON.parse(JSON.stringify(withStudy(result.summary)))};
+    });
+    return exportResults(window, publications, {registry:exportIdentities,sourceFor,dialog,language});
+  });
   handle("status", (analysis) => {
     validateAnalysis(analysis);
     return {
@@ -400,6 +444,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     });
     catalogQueue = task.catch(() => {});
     await task;
+  });
+  handle("assignPatientStudy", async (analysis, ids, study) => {
+    if (selecting || batch?.state === "running") throw new Error("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
+    await patientAssignments.assign(analysis, ids, study,
+      id => files.get(id) || [...results.values()].find(result => result.record.id === id)?.record);
   });
   handle("choose", async (analysis, folder = false, language = "ko") => {
     validateAnalysis(analysis);

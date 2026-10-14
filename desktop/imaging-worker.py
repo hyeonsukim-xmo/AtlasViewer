@@ -153,10 +153,18 @@ def xray_study_metadata(header):
     fields = {"patientId": "PatientID", "patientIssuer": "IssuerOfPatientID",
               "institutionName": "InstitutionName", "studyUid": "StudyInstanceUID",
               "seriesUid": "SeriesInstanceUID", "sopUid": "SOPInstanceUID",
-              "studyDate": "StudyDate", "acquisitionTime": "AcquisitionTime"}
+              "studyDate": "StudyDate", "acquisitionTime": "AcquisitionTime",
+              "caseName": "PatientName", "studyDescription": "StudyDescription",
+              "seriesDescription": "SeriesDescription"}
     # Preserve exact identifiers (including leading zeros); never infer them from filenames.
-    return {key: str(header.get(tag, "")).strip()[:300] for key, tag in fields.items()
-            if header.get(tag) is not None}
+    result = {}
+    for key, tag in fields.items():
+        for candidate in (tag, "DICOM_" + tag):
+            value = header.get(candidate)
+            if value is not None and str(value).strip():
+                result[key] = str(value).strip()[:300]
+                break
+    return result
 
 
 def read_dicom(paths, analysis):
@@ -174,8 +182,8 @@ def read_dicom(paths, analysis):
                 "studyDescription": str(getattr(first, "StudyDescription", ""))[:300],
                 "seriesDescription": str(getattr(first, "SeriesDescription", ""))[:300],
                 "studyDate": str(getattr(first, "StudyDate", ""))[:20], "format": "DICOM"}
+    metadata.update(xray_study_metadata(first))
     if analysis == "xray":
-        metadata.update(xray_study_metadata(first))
         if len(paths) != 1:
             raise InputError("X-ray는 단일 projection만 지원합니다.")
         image = sitk.ReadImage(str(paths[0]))
@@ -298,7 +306,7 @@ def inspect(message, root, classifier):
             else:
                 deferred = analysis == "ct" and paths[0].suffix.lower() == ".nrrd"
                 image = load_image(paths[0], volume=analysis != "xray", metadata_only=deferred)
-                if analysis == "xray" and paths[0].suffix.lower() == ".nrrd":
+                if paths[0].suffix.lower() == ".nrrd":
                     metadata.update(xray_study_metadata(nrrd.read_header(str(paths[0]))))
             size, spacing = image.GetSize(), image.GetSpacing()
             if analysis == "xray" and size[2] != 1:

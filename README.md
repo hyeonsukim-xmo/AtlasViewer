@@ -29,6 +29,136 @@ records the requested Series preview, review grid, analysis and comparison inter
 document the 0.1.11 implementation, review pagination, bounded GPU/CPU processing,
 local NRRD file organization, executed checks and remaining validation limits.
 
+CT/MRI review keeps the review list separate from the analysis selection. Click a
+card or its checkbox to select it; selected cards have a highlighted border.
+Deselection keeps the card visible, and selections persist across review dates and pages.
+Only checked images that pass their input confirmations are sent for analysis;
+the run button is disabled when none are eligible. Select-all is limited to the
+current review list. `node node_modules/electron/cli.js scripts/validate-review-selection.cjs`
+checks this flow with fixture IPC responses and no model inference, after
+`npm run build:desktop`.
+
+CT/MRI import and review views organize series as **patient → study date → images**.
+Patient and date headers collapse/expand and offer group selection with partial-selection
+indicators. Dates are newest first, with unknown dates last. Search includes patient ID,
+institution and study date; select-all affects only matching images and keeps selections
+outside the search. Review starts with every patient and date expanded, with up to four
+image previews per page within each date. Each group can be folded independently;
+analysis selection and input confirmations remain independent of the visible dates.
+A large undated input group starts collapsed to keep imported studies easy to find.
+
+The input list puts **Previously analyzed studies** at the top, collapsed initially.
+Its subtle tinted background distinguishes the header and history rows without side stripes or vertical connector lines. The
+explicit **Show list / Hide list** control opens the first patient's branch immediately;
+the remaining history patients stay collapsed. A separated heading marks pending studies.
+Any published result moves its whole study into that section, including other protocols
+that have not yet been analyzed. Matching uses modality and Study UID, or the exact input
+ID when a Study UID is absent; a shared patient/date alone never marks a study analyzed.
+Only the actual input or matching Study/Series UIDs receives the **Analyzed** marker.
+Search retains this classification even if the analyzed sibling is outside the search.
+History series remain selectable for review or reanalysis. Patient → date → series uses
+progressive indentation. Group backgrounds are neutral until selected;
+preview focus underlines the series title without marking its checkbox as selected.
+
+Automatic patient grouping uses patient ID plus issuer/institution. IDs without an issuer
+are scoped to Study UID (or input ID), not merged across unrelated studies. Anonymous or
+missing IDs go in the **Unassigned patients** organizational bucket; that bucket does not
+assert that its images belong to the same person. Names and filenames never establish
+patient identity or study dates. Legacy DICOM Study/Series UIDs are exposed from source
+proof without rereading or modifying the original scans.
+
+NRRD imports read both standard custom tags (`PatientID`, `StudyDate`, etc.) and
+`DICOM_`-prefixed equivalents for all modalities. Legacy records are enriched from retained
+private `input.nrrd` headers, including after CT validation converts the working volume to
+NIfTI. The input/review list displays the series description; the original filename is
+available on hover. Large patient lists initially expand only the first patient. Failed
+imports without metadata have a separate **Import failed** group, not an unknown-date group.
+
+For legacy converted DICOMs, run the CT-engine Python with
+`scripts/recover-source-metadata.py --storage <userData/imaging>` to preview recovery,
+then append `--apply` to save `source-metadata.json`. It uses retained NRRD headers or
+an original DICOM frame whose Study/Series/SOP UIDs and SHA256 match the saved source proof.
+It does not infer IDs or dates from folder/filenames. Local patient assignments override
+recovered metadata; linked result displays and exports receive the same information.
+This table is private patient data and must not be committed or uploaded.
+
+In the input list, patient/date text toggles expansion. The right-hand count, blank area,
+and **Select case / Deselect** action toggle group selection. Series row space also toggles
+selection; its title remains a preview control. Shift-click selects an inclusive range
+from the last selection at the same level (patients, dates, or series). Ranges follow the
+displayed, filtered order and skip unavailable inputs; collapsed patient/date groups can
+still select their eligible series. Review card ranges include intervening pages within
+the expanded dates. The actual analysis choices remain separate in review.
+
+Use **Assign patient / date** on a review group, or **Assign selected patient / date** in the input toolbar, to record
+a confirmed patient ID and institution/dataset. An optional date overrides the selected
+images' dates; leaving it blank preserves each image's existing date, including previous
+local date assignments. **Restore original patient information** removes the local override.
+Assignments persist in `imaging/patient-assignments.json` under userData and also apply to
+linked results and exports. Original DICOM/NRRD/NIfTI files, library records, segmentation
+masks and published result JSON stay unchanged. X-ray uses its separate persisted
+`xray-studies.json` assignment table to explicitly combine selected images into a study.
+
+X-ray import/review now shares patient/date headers, group hit areas and Shift-range
+selection with CT/MRI. Automatic grouping is **patient → date → Study UID → projection**;
+different studies on the same day stay separate unless explicitly assigned together.
+Imported images start unchecked. Previously analyzed studies are collapsed at the top,
+including unfinished sibling projections. Completion matches input ID or Study/SOP UID,
+never Series UID alone: a second projection in the same series remains pending.
+
+X-ray review expands all groups on entry, with a vertically scrolling list of studies
+and fixed **LT / AP / RT** columns. Repeated projections appear as separate cards;
+missing directions have placeholders and do not block partial-study analysis. Previews
+load near the viewport. Review membership and run selection are independent; unchecking
+keeps cards visible. Only checked, ready images with a classified direction run.
+Completed images offer **Open results** and explicit **Select for reanalysis**, preserving
+earlier results. Group/select-all actions exclude completed images until reanalysis is
+explicitly selected. Existing result comparisons and version selectors remain available.
+
+X-ray checks: `node scripts/validate-xray-studies.cjs` and, after building Desktop,
+`node node_modules/electron/cli.js scripts/validate-xray-studies-desktop.cjs` cover study
+boundaries, manual assignment persistence, completed/reimported projections, range
+selection, expanded review, duplicate directions, exact run IDs and existing results.
+These UI checks use synthetic inputs and do not run model inference.
+
+Validation: `node --experimental-strip-types scripts/validate-patient-groups.mjs`,
+`node scripts/validate-patient-assignments.cjs`, and (after the Desktop build)
+`node node_modules/electron/cli.js scripts/validate-patient-workflow.cjs` cover identity
+boundaries, date validity, persisted assignments, restoring originals, group/search
+selection, cross-date execution and immediate regrouping. Export-source tests verify
+that assignments reach image export identities through trusted backend records.
+
+In Desktop, right-click a 2D image to save the displayed slice (including the
+current overlay) as PNG or copy it to the clipboard. Assembled 3D results offer
+the same menu for the current rendered view; middle-button dragging pans and
+scrolling zooms. Exploded views retain right-drag rotation of the selected
+structure and suppress the image menu. The Web demo keeps its existing controls.
+Saved images contain the image/3D viewport, without the surrounding measurement
+table or hover tooltip. Saving opens a location dialog; copying writes an image
+to the clipboard. No original volume or segmentation file is changed.
+
+Image export names start with the recorded patient ID (including leading zeros),
+or a persistent UUID when that ID is missing/anonymous. Patient names and folder
+names are never used to infer an ID. Anonymous series with the same Study UID
+share a UUID; without a Study UID, the input ID is the stable scope. Different
+anonymous studies remain separate. A known patient ID plus issuer/institution
+can link studies; conflicting IDs are not silently merged.
+
+The local `imaging/export-identities.json` table under the application's userData
+stores UUIDs, patient IDs, study/series/input/result references and export history.
+The image context menu's **Export identifier mapping (CSV)** saves this table for
+later matching, including actual saved filenames, timestamps and PNG SHA-256.
+It exports the complete local mapping table, with blank patient IDs where unknown.
+Copy operations are recorded without a filename; cancelled saves create no export
+history entry. UUIDs survive app restarts and cover both 2D and 3D exports.
+Existing PNG files are not renamed retrospectively. JSON preserves exact IDs;
+when importing CSV into Excel, select text columns to retain leading zeros.
+
+`node scripts/validate-export-identities.cjs` checks persistence, matching scopes,
+conflicts, concurrent requests and CSV output. The Electron
+`scripts/validate-image-menu.cjs` check covers PNG byte parity, proposed names,
+clipboard images, mapping export and cancellation with test dialogs.
+
 [Desktop performance checks](docs/DESKTOP_PERFORMANCE.md) cover real CT, MRI and
 X-ray AP/LAT runs, repeated stage timings and numerical regression checks.
 Run `npm run performance:desktop` after preparing the local Desktop engine.
@@ -93,8 +223,34 @@ Hover temporarily previews a series; click pins it. Checkboxes select analysis i
 right-click excludes them, and wheel/slider or middle-button vertical dragging changes
 slices in axial/coronal/sagittal views. Variant switching preserves view and slice.
 
-Completed results persist locally. Up to three results with matching class schemas
-can be inspected together, with measurements and QC in adjacent case columns.
+Completed results persist locally. In the CT/MRI results list, checkboxes select cases
+for **Export selected to Excel**, with no three-case limit. The header checkbox selects
+all completed cases; partial selection is indicated. **Open results** opens one case,
+independently of the export selection. Inside that result, **Add comparison** searches
+other results of the same modality by patient, date or series and adds up to two more
+cases (three including the base case). Added cases can be removed/replaced; the base
+case stays fixed. Returning to the list preserves the export selection. X-ray retains
+its study-based workflow. Measurements and QC appear in adjacent comparison columns.
+
+The native save dialog writes a real `.xlsx` workbook with **Cases**, **Measurements**,
+**Identifier mapping**, and **Read me** sheets. Each measurement row identifies a case,
+structure and scope (total, patient left/right, or unassigned). Values, raw values when
+available, units, counts, fat-range %, HU, entropy, side differences and QC fields retain
+their stored precision. Unavailable metrics stay blank; numeric zeros remain zero.
+The current saved variant is exported without rerunning analysis or postprocessing.
+Patient IDs (including leading zeros), UUIDs and UIDs use literal text cells; formula-like
+names are never executed. Numeric cells support Excel calculations. Headers are frozen
+and filterable. The workbook's mapping sheet includes only selected cases and uses the
+same persistent identity registry as image exports; its filename/hash are recorded in
+the export history. XLSX creation requires neither installed Excel nor a Python engine.
+
+`node scripts/validate-results-export.cjs` exercises cancellation, multi-case workbook
+creation, persistent UUIDs and export history. `node scripts/validate-export-source.cjs`
+also checks trusted backend IDs, duplicate IDs, missing results and modality boundaries.
+After `npm run build:desktop`, `node node_modules/electron/cli.js scripts/validate-results-workflow.cjs`
+checks select-all beyond three cases, exact export IDs, failure feedback, independent
+single-result opening, comparison search/add/remove/cap and retained export selection.
+
 Overlay starts with all classes selected; entire metric rows and the left header
 checkbox toggle selection. The metrics/QC panel has a draggable divider. Selection and
 Explode/Assemble apply to every compared case. Each 3D case has its own camera and structure rotation;

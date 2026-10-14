@@ -1,8 +1,11 @@
 import { t, useLanguage, localeTag } from "./language";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ImagePreview from "./image-preview";
 import ResultView from "./result-view";
 import XrayWorkspace from "./xray-workspace";
+import PatientGroupsView from "./patient-groups-view";
+import { patientIdentifier, seriesLabel, studyDate, studyAnalysisHistory } from "./patient-groups";
+import PatientAssignment from "./patient-assignment";
 import {
   number,
   unwrap,
@@ -32,13 +35,18 @@ export default function ThighWorkspace({
   const [model, setModel] = useState<ModelStatus>();
   const [files, setFiles] = useState<ImagingFile[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [runSelected, setRunSelected] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState<string[]>([]);
   const [active, setActive] = useState("");
   const [hovered, setHovered] = useState("");
   const [step, setStep] = useState<"input" | "review" | "results">("input");
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [opened, setOpened] = useState<string[]>([]);
-  const [compared, setCompared] = useState<string[]>([]);
+  const [exportSelected, setExportSelected] = useState<string[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState("");
+  const selectedResultIds = results.filter(result => exportSelected.includes(result.id)).map(result => result.id);
+  const allResultsSelected = results.length > 0 && selectedResultIds.length === results.length;
   const [job, setJob] = useState<Job | null>(null);
   const [changing, setChanging] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -53,6 +61,7 @@ export default function ThighWorkspace({
   }), [analysis]);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [assignFiles, setAssignFiles] = useState<ImagingFile[]>([]);
   const [device, setDevice] = useState("cuda:0");
   const receivedCompletion = useRef("");
   const running = job?.state === "running";
@@ -60,14 +69,12 @@ export default function ThighWorkspace({
     .map(result => `${result.id}:${result.variant}`).join(",");
   const busy = changing || running;
   const current = files.find((file) => file.id === (hovered || active));
+  const history = useMemo(() => studyAnalysisHistory(files, results), [files, results]);
   const chosen = files.filter((file) => selected.includes(file.id));
-  const [reviewPage, setReviewPage] = useState(0);
-  const reviewPages = Math.max(1, Math.ceil(chosen.length / 4));
-  const visibleReviewPage = Math.min(reviewPage, reviewPages - 1);
-  const reviewFiles = chosen.slice(visibleReviewPage * 4, visibleReviewPage * 4 + 4);
-  const confirmationRequired = chosen.filter(file => file.confirmation);
+  const executionChosen = chosen.filter(file => runSelected.includes(file.id));
+  const confirmationRequired = executionChosen.filter(file => file.confirmation);
   const allConfirmed = confirmationRequired.length > 0 && confirmationRequired.every(file => confirmed.includes(file.id));
-  const runnable = chosen.filter(file => file.ready && (!file.confirmation || confirmed.includes(file.id)));
+  const runnable = executionChosen.filter(file => file.ready && (!file.confirmation || confirmed.includes(file.id)));
   const canRun = runnable.length > 0;
   const filtered = files.filter((file) =>
     [
@@ -75,6 +82,10 @@ export default function ThighWorkspace({
       file.metadata?.caseName,
       file.metadata?.studyDescription,
       file.metadata?.seriesDescription,
+      file.metadata?.patientId,
+      file.metadata?.patientIssuer,
+      file.metadata?.studyDate,
+      file.metadata?.studyDate?.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3"),
     ]
       .join(" ")
       .toLowerCase()
@@ -156,29 +167,36 @@ export default function ThighWorkspace({
   }, [analysis, visible, running, pendingMeshes]);
   function include(id: string, value: boolean) {
     setSelected((old) => (value ? [...new Set([...old, id])] : old.filter((key) => key !== id)));
+    if (!value) setRunSelected(old => old.filter(key => key !== id));
   }
-  function comparisonBlocked(result: AnalysisResult, ids = compared) {
-    return (
-      !ids.includes(result.id) &&
-      (ids.length >= 3 ||
-        (analysis === "xray" &&
-          ids.length > 0 &&
-          (results.find((row) => row.id === ids[0])?.route === "AP") !== (result.route === "AP")))
-    );
+  function includeGroup(ids: string[], value: boolean) {
+    if (busy) return;
+    setSelected(old => value ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
+    if (!value) setRunSelected(old => old.filter(id => !ids.includes(id)));
   }
-  function toggleComparison(result: AnalysisResult) {
-    setCompared((old) =>
-      comparisonBlocked(result, old)
-        ? old
-        : old.includes(result.id)
+  function selectForRun(id: string, value: boolean) {
+    if (busy) return;
+    setRunSelected(old => value ? [...new Set([...old, id])] : old.filter(key => key !== id));
+  }
+  function toggleExport(result: AnalysisResult) {
+    setExportSelected((old) =>
+      old.includes(result.id)
           ? old.filter((id) => id !== result.id)
           : [...old, result.id],
     );
   }
+  async function exportExcel() {
+    if (exporting || !selectedResultIds.length) return;
+    setExporting(true); setError(""); setExportNotice("");
+    try {
+      const reply = unwrap(await window.exmoDesktop.exportResults(analysis, selectedResultIds, language));
+      if (reply.action === "save") setExportNotice(t("{{value0}}개 결과를 Excel로 저장했습니다.", {value0: reply.count || 0}));
+    } catch (e) { setError((e as Error).message); }
+    finally { setExporting(false); }
+  }
   async function add(folder = false) {
     setStep("input");
     setQuery("");
-    setReviewPage(0);
     setChanging(true);
     setImporting(true);
     setImportProgress(null);
@@ -221,6 +239,7 @@ export default function ThighWorkspace({
       unwrap(await window.exmoDesktop.clear(analysis));
       setFiles([]);
       setSelected([]);
+      setRunSelected([]);
       setConfirmed([]);
       setActive("");
       setStep("input");
@@ -259,8 +278,10 @@ export default function ThighWorkspace({
   if (displayResults.length)
     return (
       <ResultView
-        key={opened.join()}
+        key={opened[0]}
         results={displayResults}
+        comparison={{available: results, onAdd: id => setOpened(old => old.length < 3 && !old.includes(id) && results.some(r => r.id === id) ? [...old, id] : old),
+          onRemove: id => setOpened(old => id === old[0] ? old : old.filter(key => key !== id))}}
         workspaceError={error}
         onClose={() => {
           setOpened([]);
@@ -273,6 +294,11 @@ export default function ThighWorkspace({
     );
   return (
     <section className="thigh-workspace">
+      {assignFiles.length > 0 && <PatientAssignment analysis={analysis} files={assignFiles} onClose={() => setAssignFiles([])}
+        onSaved={async () => {
+          const [inputs, saved] = await Promise.all([window.exmoDesktop.list(analysis).then(unwrap), window.exmoDesktop.results(analysis).then(unwrap)]);
+          setFiles(inputs); setResults(saved);
+        }} />}
       <header className="workspace-heading">
         <div>
           <button className="clinical-button back-button" onClick={onBack}>
@@ -377,6 +403,8 @@ export default function ThighWorkspace({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            <button className="clinical-button" disabled={busy || !chosen.length}
+              onClick={() => setAssignFiles(chosen)}>{t("선택 영상 환자·날짜 지정")}</button>
             <button
               className="text-button"
               disabled={busy || !files.length}
@@ -402,41 +430,15 @@ export default function ThighWorkspace({
           <div className="input-layout">
             <div className="series-panel">
               <div className="series-scroll">
-                <table className="clinical-table series-table">
-                  <thead>
-                    <tr>
-                      <th>
-                        <input
-                          type="checkbox"
-                          aria-label={t("분석 가능한 영상 전체 선택")}
-                          checked={
-                            files.length > 0 &&
-                            files
-                              .filter((file) => file.ready)
-                              .every((file) => selected.includes(file.id))
-                          }
-                          disabled={busy || !files.some((file) => file.ready)}
-                          onChange={(e) =>
-                            setSelected(
-                              e.target.checked
-                                ? files.filter((file) => file.ready).map((file) => file.id)
-                                : [],
-                            )
-                          }
-                        />
-                      </th>
-                      <th>Case / Series description</th>
-                      <th>{t("영상")}</th>
-                      <th>{t("상태")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((file) => (
+                <PatientGroupsView items={filtered} selected={selected} busy={busy} onSelect={includeGroup} mode="input" onAssign={setAssignFiles} analyzedInputs={history.analyzedInputs}>
+                    {(file, pick) => (
                       <tr
                         key={file.id}
-                        aria-selected={file.id === active}
+                        data-input-id={file.id}
+                        aria-selected={selected.includes(file.id)}
                         onMouseEnter={() => setHovered(file.id)}
                         onMouseLeave={() => setHovered("")}
+                        onClick={event => {if (!(event.target as Element).closest("button, input")) pick(!selected.includes(file.id), event.shiftKey);}}
                         onContextMenu={(e) => {
                           e.preventDefault();
                           if (!busy) include(file.id, false);
@@ -448,12 +450,14 @@ export default function ThighWorkspace({
                             aria-label={t("{{value0}} 분석 선택", { value0: file.name })}
                             checked={selected.includes(file.id)}
                             disabled={busy || !file.ready}
-                            onChange={(e) => include(file.id, e.target.checked)}
+                            onChange={(e) => pick(e.target.checked, !!(e.nativeEvent as MouseEvent).shiftKey)}
                           />
                         </td>
                         <td>
                           <button
                             className="series-name"
+                            aria-current={file.id === active ? "true" : undefined}
+                            title={file.name}
                             onFocus={() => setHovered(file.id)}
                             onBlur={() => setHovered("")}
                             onClick={() => {
@@ -461,8 +465,7 @@ export default function ThighWorkspace({
                               setHovered("");
                             }}
                           >
-                            <strong>{file.metadata?.caseName || file.name}</strong>
-                            <span>{file.metadata?.seriesDescription || file.name}</span>
+                            <strong>{seriesLabel(file)}</strong>
                             <small>
                               {file.metadata?.studyDescription || t("Study description 없음")}
                             </small>
@@ -473,6 +476,7 @@ export default function ThighWorkspace({
                           <small>{file.metadata ? `${file.metadata.slices} slice` : ""}</small>
                         </td>
                         <td>
+                          {history.completedInputs.has(file.id) && <small className="analysis-complete">{t("분석 완료")}</small>}
                           <span className={file.ready ? "status-ready" : "status-review"}>
                             {file.classification?.predicted_label ||
                               (file.deferredValidation ? t("헤더 확인됨") : file.ready ? t("입력 확인됨") : t("검토 필요"))}
@@ -486,9 +490,9 @@ export default function ThighWorkspace({
                           )}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    )}
+                </PatientGroupsView>
+                {!!files.length && !filtered.length && <p className="muted-note">{t("검색 결과가 없습니다.")}</p>}
                 {!files.length && (
                   <div className="clinical-empty">
                     <strong>
@@ -509,8 +513,8 @@ export default function ThighWorkspace({
               {current?.metadata ? (
                 <>
                   <div className="panel-title">
-                    <strong>{current.metadata.seriesDescription}</strong>
-                    <span>{hovered ? "Hover preview" : t("선택 영상")}</span>
+                    <strong title={current.name}>{seriesLabel(current)}</strong>
+                    <span>{hovered ? "Hover preview" : t("현재 미리보기")}</span>
                   </div>
                   <ImagePreview key={current.id} analysis={analysis} id={current.id} />
                   <div className="metadata-strip">
@@ -564,23 +568,20 @@ export default function ThighWorkspace({
       {step === "review" && (
         <>
           <nav className="review-pagination" aria-label={t("검토 페이지")}>
-            <span>{t("{{value0}}–{{value1}} / {{value2}}개 영상", {
-              value0: chosen.length ? visibleReviewPage * 4 + 1 : 0,
-              value1: Math.min((visibleReviewPage + 1) * 4, chosen.length), value2: chosen.length,
-            })}</span>
-            <button className="clinical-button" disabled={visibleReviewPage === 0}
-              onClick={() => setReviewPage(visibleReviewPage - 1)}>{t("이전 페이지")}</button>
-            <span>{visibleReviewPage + 1} / {reviewPages}</span>
-            <button className="clinical-button" disabled={visibleReviewPage + 1 >= reviewPages}
-              onClick={() => setReviewPage(visibleReviewPage + 1)}>{t("다음 페이지")}</button>
-            <button className="clinical-button" disabled={busy || !files.some(file => file.ready)}
-              onClick={() => { setSelected(files.filter(file => file.ready).map(file => file.id)); setReviewPage(0); }}>
-              {t("분석 가능한 영상 전체 선택")}
+            <span>{t("환자·촬영일별 영상을 확인하고 분석할 영상을 선택하세요.")}</span>
+            <button className="clinical-button" disabled={busy || !chosen.some(file => file.ready)}
+              onClick={() => setRunSelected(chosen.filter(file => file.ready).map(file => file.id))}>
+              {t("검토 영상 전체 선택")}
+            </button>
+            <button className="clinical-button" disabled={busy || !executionChosen.length}
+              onClick={() => setRunSelected([])}>
+              {t("분석 선택 모두 해제")}
             </button>
           </nav>
           <div className="review-batch-summary">
-            <p>{t("검토 대상 {{value0}}개 · 지금 실행 가능한 영상 {{value1}}개. 4개씩 표시는 분석 개수 제한이 아닙니다.", { value0: chosen.length, value1: runnable.length })}</p>
-            {runnable.length < chosen.length && <p>{t("확인이 끝난 영상만 실행합니다. 나머지 {{value0}}개는 이번 실행에서 제외되며 목록에 유지됩니다.", { value0: chosen.length - runnable.length })}</p>}
+            <p>{t("검토 {{value0}}개 · 분석 선택 {{value1}}개 · 실행 가능 {{value2}}개", { value0: chosen.length, value1: executionChosen.length, value2: runnable.length })}</p>
+            <p>{t("카드나 체크박스로 분석할 영상을 선택하세요. 선택을 해제해도 검토 목록에 남습니다.")}</p>
+            {runnable.length < executionChosen.length && <p>{t("확인이 끝난 영상만 실행합니다. 나머지 {{value0}}개는 이번 실행에서 제외되며 목록에 유지됩니다.", { value0: executionChosen.length - runnable.length })}</p>}
             {confirmationRequired.length > 0 && (
               <label className="input-confirmation">
                 <input type="checkbox" disabled={busy} checked={allConfirmed}
@@ -593,22 +594,36 @@ export default function ThighWorkspace({
               </label>
             )}
           </div>
-          <div className="review-grid" key={visibleReviewPage}>
-            {reviewFiles.map((file) => (
+          <PatientGroupsView key="review" items={chosen} selected={runSelected} busy={busy}
+            onSelect={(ids, value) => {if (!busy) setRunSelected(old => value ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));}}
+            mode="review" onAssign={setAssignFiles}>
+            {(file, pick) => (
               <article
-                className="review-case"
+                className={`review-case selectable-review-case${runSelected.includes(file.id) ? " selected-for-run" : ""}`}
                 data-input-id={file.id}
+                data-selected={runSelected.includes(file.id)}
                 key={file.id}
+                onClick={event => {
+                  if ((event.target as HTMLElement).closest("button, input, select, label, a")) return;
+                  if (file.ready) pick(!runSelected.includes(file.id), event.shiftKey);
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  if (!busy) include(file.id, false);
+                  selectForRun(file.id, false);
                 }}
               >
+                <label className="review-run-selection">
+                  <input type="checkbox" disabled={busy || !file.ready}
+                    aria-label={t("{{value0}} 실행 대상 선택", { value0: file.name })}
+                    checked={runSelected.includes(file.id)}
+                    onChange={event => pick(event.target.checked, !!(event.nativeEvent as MouseEvent).shiftKey)} />
+                  {runSelected.includes(file.id) ? t("분석 선택됨") : t("분석할 영상 선택")}
+                </label>
                 <div className="panel-title">
                   <div>
-                    <strong>{file.metadata?.caseName || file.name}</strong>
+                    <strong>{patientIdentifier(file.metadata?.patientId) || (file.metadata?.caseName !== file.name && file.metadata?.caseName) || t("환자 미지정")}</strong>
                     <span>
-                      {file.metadata?.studyDescription || file.metadata?.seriesDescription}
+                      {[studyDate(file.metadata?.studyDate), file.metadata?.studyDescription].filter(Boolean).join(" · ")}
                     </span>
                   </div>
                   <button
@@ -621,7 +636,7 @@ export default function ThighWorkspace({
                 </div>
                 <ImagePreview analysis={analysis} id={file.id} compact />
                 <div className="review-case-details">
-                  {file.metadata?.seriesDescription}
+                  <span title={file.name}>{seriesLabel(file)}</span>
                   <small>
                     {file.metadata?.size.join(" × ")} ·{" "}
                     {file.metadata?.spacing.map((n) => number(n, 2)).join(" × ")} mm
@@ -647,18 +662,17 @@ export default function ThighWorkspace({
                   )}
                 </div>
               </article>
-            ))}
+            )}
+          </PatientGroupsView>
             {!chosen.length && (
               <div className="clinical-empty">
                 <strong>{t("검토할 영상이 없습니다")}</strong>
                 <p>{t("영상·Series 탭에서 분석 대상을 선택하세요.")}</p>
               </div>
             )}
-          </div>
           <footer className="workspace-bottom">
             <span>
-              {chosen.length}
-              {t("개 검사 · 우클릭으로 분석 선택 해제")}
+              {t("{{value0}}개 선택 · 선택한 영상만 실행합니다", { value0: executionChosen.length })}
             </span>
             {(
               <select
@@ -690,18 +704,22 @@ export default function ThighWorkspace({
             </span>
             <button
               className="clinical-button"
-              disabled={compared.length < 2}
-              onClick={() => setOpened(compared)}
+              disabled={exporting || !selectedResultIds.length}
+              onClick={() => void exportExcel()}
             >
-              {t("선택 검사 비교 (")}
-              {compared.length}/3)
+              {exporting ? t("Excel 저장 중") : t("선택 결과 Excel 내보내기 ({{value0}})", {value0: selectedResultIds.length})}
             </button>
           </div>
+          {exportNotice && <p className="export-notice" role="status">{exportNotice}</p>}
           <div className="results-list">
             <table className="clinical-table">
               <thead>
                 <tr>
-                  <th>{t("비교")}</th>
+                  <th><label className="result-select-all"><input type="checkbox" aria-label={t("결과 전체 선택")}
+                    checked={allResultsSelected}
+                    ref={element => { if (element) element.indeterminate = selectedResultIds.length > 0 && !allResultsSelected; }}
+                    onChange={e => setExportSelected(e.target.checked ? results.map(r => r.id) : [])}
+                    disabled={!results.length} />{t("전체 선택")}</label></th>
                   <th>Case / Study</th>
                   <th>Series</th>
                   <th>{t("결과")}</th>
@@ -714,18 +732,16 @@ export default function ThighWorkspace({
                   <tr
                     key={result.id}
                     className="openable-row"
-                    aria-selected={compared.includes(result.id)}
-                    onClick={() => toggleComparison(result)}
+                    aria-selected={exportSelected.includes(result.id)}
+                    onClick={() => toggleExport(result)}
                   >
                     <td>
                       <input
-                        aria-label={t("{{value0}} 비교", { value0: result.name })}
+                        aria-label={t("{{value0}} 내보내기 선택", { value0: result.name })}
                         type="checkbox"
-                        checked={compared.includes(result.id)}
-                        disabled={comparisonBlocked(result)}
-                        title={t("동일한 class 구성의 결과끼리 최대 3개 비교")}
+                        checked={exportSelected.includes(result.id)}
                         onClick={(e) => e.stopPropagation()}
-                        onChange={() => toggleComparison(result)}
+                        onChange={() => toggleExport(result)}
                       />
                     </td>
                     <td>

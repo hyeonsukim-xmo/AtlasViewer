@@ -52,3 +52,27 @@ assert records[0]["metadata"]["patientId"] == "00042"
 assert records[0]["metadata"]["studyDate"] == "20261012"
 assert not records[1]["metadata"].get("patientId") and not records[1]["metadata"].get("studyDate")
 print("PASS: DICOM patient/study/series/SOP identity, single projection preservation, NRRD import metadata and no filename identity inference")
+
+# CT imports defer pixel validation; identity must still come from the original header.
+ct = output / "filename_does_not_establish_identity.nrrd"
+prefixed = {"DICOM_" + key: value for key, value in identity.items()}
+nrrd.write(str(ct), np.arange(512, dtype=np.int16).reshape(8, 8, 8), {**header, **prefixed, "DICOM_SeriesDescription": "Axial 5mm"})
+records = worker.inspect({"analysis": "ct", "destination": str(output / "ct-import"), "paths": [str(ct)]}, root, None)
+assert records[0]["ready"] and records[0]["deferredValidation"], records
+assert records[0]["metadata"]["patientId"] == "00042"
+assert records[0]["metadata"]["studyDate"] == "20261012"
+assert records[0]["metadata"]["seriesDescription"] == "Axial 5mm"
+assert Path(records[0]["input"]).read_bytes() == ct.read_bytes()
+
+recovery_spec = importlib.util.spec_from_file_location("recover_source", root / "scripts/recover-source-metadata.py")
+recovery = importlib.util.module_from_spec(recovery_spec)
+recovery_spec.loader.exec_module(recovery)
+import hashlib
+dataset = pydicom.dcmread(paths[0], stop_before_pixels=True)
+record = {"id": "dicom", "reviewSetup": {"sourceFolder": str(output)}, "sourceProof": {
+    "study_uid": str(dataset.StudyInstanceUID), "series_uid": str(dataset.SeriesInstanceUID),
+    "frames": [{"sop_uid": str(dataset.SOPInstanceUID), "sha256": hashlib.sha256(paths[0].read_bytes()).hexdigest()}]}}
+assert recovery.recover([record], output)["dicom"]["metadata"]["patientId"] == "00042"
+record["sourceProof"]["frames"][0]["sha256"] = "mismatch"
+assert recovery.recover([record], output) == {}, "Never recover from a mismatching DICOM frame"
+print("PASS: CT prefixed NRRD import, unchanged original copy, DICOM recovery verified against source UIDs/hash, mismatched source rejected")
