@@ -1,4 +1,4 @@
-const {Menu, dialog, nativeImage, clipboard} = require('electron');
+const {Menu, dialog, nativeImage, clipboard, ClipboardItem} = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {createHash} = require('node:crypto');
@@ -30,8 +30,8 @@ async function showImageMenu(window, payload, {registry, source}) {
     menu.popup({window, callback: () => resolve(selected)});
   });
   if (choice === 'copy') {
+    await clipboard.write([new ClipboardItem({'image/png': new Blob([bytes], {type:'image/png'})})]);
     await registry.recordExport(identity, source, {action:'copy',filename:'',sha256:createHash('sha256').update(bytes).digest('hex')});
-    clipboard.writeImage(bitmap);
     return {action:'copy'};
   }
   if (choice === 'save') {

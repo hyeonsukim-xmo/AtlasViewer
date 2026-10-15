@@ -41,6 +41,8 @@ interface Props<Id extends string> {
   renderMeasurement?: (structure: RenderStructure<Id>, side: Side | null) => ReactNode;
   caseOpacity?: number;
   onImageMenu?: (png: string) => void;
+  highlightedId?: Id | null;
+  onHover?: (id: Id | null) => void;
 }
 interface Piece {
   mesh: T.Mesh<T.BufferGeometry, T.MeshPhysicalMaterial>;
@@ -64,6 +66,15 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
   const invalidate = useRef(() => {});
   current.current = props;
   const [hover, setHover] = useState<HoverTarget<Id> | null>(null);
+  const localHover = useRef<HoverTarget<Id> | null>(null);
+  function changeHover(target: HoverTarget<Id> | null) {
+    const previous = localHover.current;
+    if (previous?.id === target?.id && previous?.side === target?.side) return;
+    localHover.current = target;
+    setHover(target);
+    if (previous?.id !== target?.id) current.current.onHover?.(target?.id ?? null);
+    invalidate.current();
+  }
   const hovered = catalog.find((s) => s.id === hover?.id);
   function positionHover() {
     const container = host.current;
@@ -96,6 +107,9 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       stageVisible = true,
       movingCamera = false;
     let previousCaseOpacity: number | undefined;
+    let previousHighlight: Id | null | undefined;
+    const highlight = () => current.current.highlightedId ??
+      (current.current.onImageMenu ? localHover.current?.id : null);
     let sideMidlineX = 0;
     const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let renderer: T.WebGLRenderer;
@@ -120,7 +134,9 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
     canvas.setAttribute("role", "img");
     canvas.setAttribute(
       "aria-label",
-      "Interactive EXMO anatomy. Drag or use arrow keys to orbit, or pan in the fully separated view. In the exploded view, right-drag rotates the selected structure. Scroll, pinch, or use plus and minus to zoom. In the assembled view, click structures to add or remove them from your selection. Click the background to clear selection.",
+      props.onImageMenu
+        ? "Interactive EXMO anatomy. Click to select. Left-drag or use arrow keys to rotate. Middle-drag to pan. Scroll to zoom. Right-click to copy or save this view. Click the background to clear selection."
+        : "Interactive EXMO anatomy. Drag or use arrow keys to orbit, or pan in the fully separated view. In the exploded view, right-drag rotates the selected structure. Scroll, pinch, or use plus and minus to zoom. In the assembled view, click structures to add or remove them from your selection. Click the background to clear selection.",
     );
     container.appendChild(canvas);
     const scene = new T.Scene();
@@ -136,12 +152,12 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
     controls.maxPolarAngle = Math.PI - 0.08;
     controls.addEventListener("change", () => {
       requestRender();
-      setHover(null);
+      changeHover(null);
     });
     controls.addEventListener("start", () => {
       movingCamera = false;
       current.current.onInteract();
-      setHover(null);
+      changeHover(null);
     });
     scene.add(new T.HemisphereLight("#d9f7ff", "#07111a", 1.4));
     const key = new T.DirectionalLight("#dffaff", 3.5);
@@ -162,6 +178,12 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       pointer = new T.Vector2();
     const tap = new PointerTap();
     let segmentDrag: { pointerId: number; id: Id; x: number; y: number } | null = null;
+    let rightGesture: {pointerId: number; x: number; y: number; moved: boolean} | null = null;
+    const trackRightGesture = (event: PointerEvent) => {
+      if (rightGesture?.pointerId === event.pointerId &&
+          Math.hypot(event.clientX - rightGesture.x, event.clientY - rightGesture.y) > 5)
+        rightGesture.moved = true;
+    };
 
     function endSegmentDrag() {
       if (!segmentDrag) return;
@@ -175,6 +197,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       if (!ready) return;
       const state = current.current.state;
       previousCaseOpacity = current.current.caseOpacity;
+      previousHighlight = highlight();
       const visible = visibleStructures(state, catalog);
       const ids = new Set(visible.map((s) => s.id));
       const restoreAll =
@@ -206,9 +229,10 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         if (mesh.visible) bounds.union(box.clone().translate(goal));
         goal.add(center);
         const selected = state.selected.includes(id);
+        const highlighted = highlight() === id;
         if (!selected || !mesh.visible || restoreAll)
           piece.rotation.restore(performance.now(), reducedMotion);
-        const dimmed = state.selected.length > 0 && !selected;
+        const dimmed = state.selected.length > 0 && !selected && !highlighted;
         const material = mesh.material;
         const color = structureColor(
           catalog.find((s) => s.id === id)!,
@@ -225,10 +249,10 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         }
         material.opacity = opacity;
         material.depthWrite = !transparent;
-        material.emissiveIntensity = selected ? 0.28 : dimmed ? 0.015 : 0.095;
-        material.clearcoat = selected ? 0.66 : 0.3;
-        rim.value = selected ? 0.62 : dimmed ? 0.02 : 0.18;
-        mesh.renderOrder = selected ? 3 : dimmed ? 1 : 2;
+        material.emissiveIntensity = highlighted ? 0.38 : selected ? 0.28 : dimmed ? 0.015 : 0.095;
+        material.clearcoat = highlighted || selected ? 0.66 : 0.3;
+        rim.value = highlighted ? 0.8 : selected ? 0.62 : dimmed ? 0.02 : 0.18;
+        mesh.renderOrder = selected || highlighted ? 3 : dimmed ? 1 : 2;
       }
       const fitChanged =
         refit ||
@@ -245,7 +269,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         state.view !== previous.view ||
         state.reset !== previous.reset;
       if (fitChanged) {
-        setHover(null);
+        changeHover(null);
         const now = performance.now();
         const remaining = Math.max(0, transitionDuration - (now - transitionStarted));
         transitionDuration =
@@ -264,11 +288,11 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         cameraFrom.copy(camera.position);
         lookFrom.copy(controls.target);
       }
-      controls.enableRotate = state.explode < 0.99;
+      controls.enableRotate = !!current.current.onImageMenu || state.explode < 0.99;
       controls.mouseButtons.LEFT = controls.enableRotate ? T.MOUSE.ROTATE : T.MOUSE.PAN;
-      // Desktop results reserve assembled right-click for image actions.
+      // Desktop uses the same controls in every layout, including a focused muscle.
       controls.mouseButtons.MIDDLE = current.current.onImageMenu ? T.MOUSE.PAN : T.MOUSE.DOLLY;
-      controls.mouseButtons.RIGHT = current.current.onImageMenu && state.explode < 0.99 ? null : T.MOUSE.PAN;
+      controls.mouseButtons.RIGHT = current.current.onImageMenu ? null : T.MOUSE.PAN;
       controls.touches.ONE = controls.enableRotate ? T.TOUCH.ROTATE : T.TOUCH.PAN;
       controls.autoRotate = state.rotate && controls.enableRotate;
       if (fitChanged && !bounds.isEmpty()) {
@@ -359,11 +383,11 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       const rect = canvas.getBoundingClientRect();
       hoverPoint.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
       positionHover();
-      setHover((previous) =>
-        previous?.id === target?.id && previous?.side === target?.side ? previous : target,
-      );
+      changeHover(target);
     }
     const down = (event: PointerEvent) => {
+      rightGesture = event.button === 2
+        ? {pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false} : null;
       const selection = current.current.state.explode ? current.current.state.selected : [];
       const target = event.button === 2 && selection.length > 1 ? hit(event)?.id : undefined;
       const selected =
@@ -373,6 +397,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
             ? target
             : undefined;
       if (
+        !current.current.onImageMenu &&
         event.button === 2 &&
         selected &&
         pieces.get(selected)?.mesh.visible &&
@@ -395,7 +420,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         movingCamera = false;
         pieces.get(selected)!.rotation.drag(0, 0, camera.quaternion);
         current.current.onInteract();
-        setHover(null);
+        changeHover(null);
         canvas.style.cursor = "grabbing";
         return;
       }
@@ -408,6 +433,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       );
     };
     const move = (event: PointerEvent) => {
+      if (event.buttons & 2) trackRightGesture(event);
       if (segmentDrag?.pointerId === event.pointerId) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -435,6 +461,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       canvas.style.cursor = target ? "pointer" : "grab";
     };
     const up = (event: PointerEvent) => {
+      if (event.button === 2) trackRightGesture(event);
       if (segmentDrag?.pointerId === event.pointerId) {
         event.stopImmediatePropagation();
         endSegmentDrag();
@@ -447,18 +474,20 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       }
     };
     const cancel = (event: PointerEvent) => {
+      if (event.type === "pointercancel" && rightGesture?.pointerId === event.pointerId)
+        rightGesture.moved = true;
       tap.cancel(event.pointerId);
       if (segmentDrag?.pointerId === event.pointerId) endSegmentDrag();
     };
-    const leave = () => setHover(null);
+    const leave = () => changeHover(null);
     const dismissHover = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setHover(null);
+      if (event.key === "Escape") changeHover(null);
     };
     const keydown = (event: KeyboardEvent) => {
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-"].includes(event.key))
         return;
       event.preventDefault();
-      setHover(null);
+      changeHover(null);
       current.current.onInteract();
       movingCamera = false;
       const selected = current.current.state.explode
@@ -506,7 +535,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
     };
     const contextLost = (event: Event) => {
       event.preventDefault();
-      setHover(null);
+      changeHover(null);
       current.current.onError(
         "The graphics context was interrupted. Reload the model to continue.",
       );
@@ -515,8 +544,9 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       if (!current.current.onImageMenu) return;
       event.preventDefault();
       event.stopPropagation();
-      // Exploded right-drag retains the existing individual-structure rotation.
-      if (current.current.state.explode >= 0.99 || !ready) return;
+      // A stationary right-click exports in either layout. A drag must never
+      // open a menu on release, including a drag that returned to its start.
+      if (rightGesture?.moved || !ready) return;
       renderer.render(scene, camera);
       const snapshot = document.createElement('canvas');
       snapshot.width = canvas.width; snapshot.height = canvas.height;
@@ -732,7 +762,8 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       // Follow display cadence; a fixed 60 fps gate skips unevenly on 100/144 Hz screens.
       const delta = lastTime ? Math.min((time - lastTime) / 1000, 0.05) : 1 / 60;
       lastTime = time;
-      if (current.current.state !== previous || current.current.caseOpacity !== previousCaseOpacity)
+      if (current.current.state !== previous || current.current.caseOpacity !== previousCaseOpacity ||
+          highlight() !== previousHighlight)
         applyState();
       const progress = transitionProgress(time - transitionStarted, transitionDuration);
       let moving = false;
@@ -788,9 +819,9 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       canvas.remove();
     };
   }, [props.model?.url]);
-  useEffect(() => invalidate.current(), [props.state, props.caseOpacity]);
+  useEffect(() => invalidate.current(), [props.state, props.caseOpacity, props.highlightedId]);
   return (
-    <div className="scene">
+    <div className="scene" data-highlighted={props.highlightedId ?? hover?.id ?? undefined}>
       <div className="canvas-mount" ref={host} />
       {hovered && (
         <div

@@ -79,6 +79,7 @@ export default function ResultView({
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
   const [requestedMode, setMode] = useState<"overlay" | "3d">("overlay");
   const [state, setState] = useState<SceneState<string>>({ ...INITIAL_STATE, group: "All" });
+  const [linkedHover, setLinkedHover] = useState<{viewport: string; id: string} | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
   const [changing, setChanging] = useState(false);
@@ -141,7 +142,7 @@ export default function ResultView({
   const sceneState = useMemo(
     () => ({
       ...state,
-      isolate: results.length > 1 && !!state.explode && state.selected.length > 0,
+      isolate: !!state.explode && state.selected.length > 0,
     }),
     [state, results.length],
   );
@@ -163,6 +164,13 @@ export default function ResultView({
   const can3d =
     !preparing && results.every((result) => result.meshBytes && !needsPreparation(result));
   const mode = requestedMode === "3d" && !can3d ? "overlay" : requestedMode;
+  const paired = mode === "3d" && results.length === 1 && !!state.explode;
+  const assembledState = useMemo(() => ({...state, explode: 0, isolate: false}), [state]);
+  const viewports = paired
+    ? [{result: primary, key: primary.id, assembled: true},
+       {result: primary, key: `${primary.id}:exploded`, assembled: false}]
+    : results.map(result => ({result, key: result.id, assembled: !state.explode}));
+  useEffect(() => setLinkedHover(null), [paired, mode, preparationKey, state.group, state.reset, state.selected]);
   const selectedIds =
     mode === "overlay" ? (overlaySelection ?? catalog.map((row) => row.id)) : state.selected;
   const allSelected = selectedIds.length === catalog.length;
@@ -187,7 +195,7 @@ export default function ResultView({
       setChanging(false);
     }
   }
-  function select(id: string | null, caseId = primary.id) {
+  function select(id: string | null, caseId = primary.id, exploded = !!state.explode) {
     if (mode === "overlay") {
       setOverlaySelection((previous) => {
         if (id == null) return null;
@@ -217,7 +225,7 @@ export default function ResultView({
         )
           ? s.group
           : "All",
-        selected: s.explode
+        selected: exploded
           ? s.selected.length === 1 && s.selected[0] === id
             ? []
             : [id]
@@ -799,14 +807,15 @@ export default function ResultView({
               </button>
             </div>
           )}
-          <div className={`case-canvases count-${results.length}`}>
-            {results.map((result) => {
+          <div className={`case-canvases count-${viewports.length}`}>
+            {viewports.map(({result, key, assembled}) => {
               const chosen = result.rows.filter((r) => selectedIds.includes(r.id) && (result.analysis !== "xray" || xrayApplicable(result, r)));
               return (
                 <div
                   className="case-canvas"
-                  key={result.id}
+                  key={key}
                   data-result-id={result.id}
+                  data-layout={mode === "3d" ? assembled ? "assembled" : "exploded" : "overlay"}
                   data-active={active === result.id}
                 >
                   {comparison && results.length > 1 && <div className="comparison-case-action">{result.id === primary.id
@@ -814,6 +823,7 @@ export default function ResultView({
                     onClick={() => {comparison.onRemove(result.id); if (active === result.id) setActive(null);}}
                     aria-label={t("{{value0}} 비교에서 제외", {value0: result.metadata.caseName})}>{t("비교에서 제외")}</button>}</div>}
                   <button className="case-title" onClick={() => setActive(result.id)}>
+                    {paired && <span className="viewport-layout">{t(assembled ? "전체 형태" : "분해 형태")}</span>}
                     <strong>{result.metadata.caseName}</strong>
                     <span>
                       {result.route || result.analysis.toUpperCase()} ·{" "}
@@ -846,19 +856,24 @@ export default function ResultView({
                     <div className="result-scene">
                       <AnatomyScene<string>
                         model={models.get(result.id)}
-                        state={sceneState}
+                        state={paired && assembled ? assembledState : sceneState}
+                        highlightedId={paired ? linkedHover?.id : undefined}
+                        onHover={paired ? id => setLinkedHover(previous => id
+                          ? {viewport: key, id}
+                          : previous?.viewport === key ? null : previous) : undefined}
                         caseOpacity={
                           !state.selected.length && !state.explode && active && active !== result.id
                             ? 0.18
                             : 1
                         }
-                        onSelect={(id) => select(id, result.id)}
-                        onProgress={(value) => setProgress((p) => ({ ...p, [result.id]: value }))}
+                        onSelect={(id) => select(id, result.id, !assembled)}
+                        onProgress={(value) => setProgress((p) => ({ ...p, [key]: value }))}
                         onError={setError}
                         onInteract={() => {}}
                         onImageMenu={image => {
+                          setError("");
                           void window.exmoDesktop.imageMenu({image,
-                            filename: `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${state.view}.png`,
+                            filename: `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${assembled ? "assembled" : "exploded"}_${state.view}.png`,
                             source: {kind:"result",id:result.id},
                             language,
                           }).then(unwrap).catch(error => setError(error.message));
@@ -895,10 +910,10 @@ export default function ResultView({
                           );
                         }}
                       />
-                      {(progress[result.id] ?? 0) < 100 && (
+                      {(progress[key] ?? 0) < 100 && (
                         <div className="scene-loading">
                           {t("3D 준비 ")}
-                          {progress[result.id] || 0}%
+                          {progress[key] || 0}%
                         </div>
                       )}
                     </div>
@@ -910,7 +925,7 @@ export default function ResultView({
           {mode === "3d" && (
             <footer className="render-hint">
               <span>
-                {t("좌클릭 선택 · 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 조립 상태 우클릭 저장 · Explode 선택 구조 우클릭 회전")}
+                {t("좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장")}
               </span>
               <label>
                 Surrounding opacity

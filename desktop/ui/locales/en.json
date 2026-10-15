@@ -380,7 +380,7 @@
   "분석 선택됨": "Selected for analysis",
   "분석할 영상 선택": "Select for analysis",
   "{{value0}}개 선택 · 선택한 영상만 실행합니다": "{{value0}} selected · Only selected images will run",
-  "좌클릭 선택 · 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 조립 상태 우클릭 저장 · Explode 선택 구조 우클릭 회전": "Click to select · Drag to rotate · Scroll to zoom · Middle-drag to pan · Right-click assembled view to save · Right-drag selected exploded structure to rotate",
+  "좌클릭 선택 · 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 저장 · Explode 선택 구조 우클릭 드래그 회전": "Click to select · Drag to rotate · Scroll to zoom · Middle-drag to pan · Right-click to save image · Right-drag selected exploded structure to rotate",
   "결과 전체 선택": "Select all results",
   "전체 선택": "Select all",
   "{{value0}} 내보내기 선택": "Select {{value0}} for export",
@@ -427,5 +427,8 @@
   "적용": "Apply",
   "선택 영상 환자·날짜 지정": "Assign selected patient / date",
   "검색 결과가 없습니다.": "No matching images.",
-  "환자·촬영일별 영상을 확인하고 분석할 영상을 선택하세요.": "Review images by patient and study date, then select images for analysis."
+  "환자·촬영일별 영상을 확인하고 분석할 영상을 선택하세요.": "Review images by patient and study date, then select images for analysis.",
+  "전체 형태": "Assembled anatomy",
+  "분해 형태": "Exploded anatomy",
+  "좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장": "Click to select · Left-drag to rotate · Scroll to zoom · Middle-drag to pan · Right-click to copy or save image"
 }

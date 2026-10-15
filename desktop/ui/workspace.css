@@ -1316,6 +1316,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.case-title .viewport-layout {
+  color: #c3b5e2;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
 .result-scene {
   flex: 1;
   min-height: 220px;

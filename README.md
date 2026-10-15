@@ -129,10 +129,19 @@ selection, cross-date execution and immediate regrouping. Export-source tests ve
 that assignments reach image export identities through trusted backend records.
 
 In Desktop, right-click a 2D image to save the displayed slice (including the
-current overlay) as PNG or copy it to the clipboard. Assembled 3D results offer
-the same menu for the current rendered view; middle-button dragging pans and
-scrolling zooms. Exploded views retain right-drag rotation of the selected
-structure and suppress the image menu. The Web demo keeps its existing controls.
+current overlay) as PNG or copy it to the clipboard. All 3D result layouts use
+left-drag to rotate, middle-drag to pan, scrolling to zoom and right-click to
+copy or save only the clicked viewport. This includes focused exploded muscles.
+Copy uses Electron's asynchronous ClipboardItem PNG API and records a successful
+export only after the clipboard write completes. Moving more
+than five pixels suppresses the menu on release, even if the pointer returns to
+its starting position. The Web demo keeps its existing controls.
+For a single case, Explode opens assembled anatomy on the left and exploded
+anatomy on the right. Hover highlights the same muscle in both views; selection
+is shared while the assembled view keeps anatomical context and the exploded
+view focuses the selected muscles. Each camera remains independent. Comparison
+of multiple cases continues to show one viewport per case. PNG filenames include
+the assembled/exploded layout to distinguish views of the same case.
 Saved images contain the image/3D viewport, without the surrounding measurement
 table or hover tooltip. Saving opens a location dialog; copying writes an image
 to the clipboard. No original volume or segmentation file is changed.
@@ -157,7 +166,11 @@ when importing CSV into Excel, select text columns to retain leading zeros.
 `node scripts/validate-export-identities.cjs` checks persistence, matching scopes,
 conflicts, concurrent requests and CSV output. The Electron
 `scripts/validate-image-menu.cjs` check covers PNG byte parity, proposed names,
-clipboard images, mapping export and cancellation with test dialogs.
+native Windows clipboard PNG pixels/dimensions (restoring the previous clipboard),
+failed-copy history, mapping export and cancellation with test dialogs.
+After building Desktop, `electron scripts/validate-image-actions.cjs <published.json>`
+uses a local model with isolated test data to check per-viewport exports, paired
+hover/selection, unified mouse controls and independent comparison cameras.
 
 [Desktop performance checks](docs/DESKTOP_PERFORMANCE.md) cover real CT, MRI and
 X-ray AP/LAT runs, repeated stage timings and numerical regression checks.
