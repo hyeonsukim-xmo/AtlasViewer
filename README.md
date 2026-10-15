@@ -13,6 +13,12 @@ contains neither the Desktop analysis UI nor its Python runtime/model files.
 
 ## Product direction
 
+[Desktop licensing and model protection design](docs/EXMO_DESKTOP_SECURITY_DESIGN.md)
+describes online activation and periodic entitlement renewal with YubiKey authentication,
+limited offline grace (seven days is a policy candidate), encrypted model and result storage,
+safe completion of running analyses, and regression gates against v0.1.24.
+This is a design proposal; licensing and encryption are not implemented.
+
 [Development readiness and regression requirements](docs/EXMO_DEVELOPMENT_READINESS.md)
 is the current implementation guide: the implemented Web/Windows baseline, protected
 viewer behavior, data contracts, scoped development stages, and validation gates.
