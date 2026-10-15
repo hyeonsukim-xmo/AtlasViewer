@@ -1,0 +1,94 @@
+{
+  "retrieved": "2026-10-15",
+  "files": [
+    {
+      "file": "yubico-ca-1.crt",
+      "url": "https://developers.yubico.com/PKI/yubico-ca-1.pem",
+      "sha256": "9271d914d48d05487666703586aea27d9a69ad0c8ddf8c2fc4c8734a04285887",
+      "certificates": [
+        {
+          "subject": "CN=Yubico Attestation Root 1",
+          "sha256_der": "62760c6a6ef91679f454c8902b80fd009825b3f25da90f1fbace2ec6586cd5a8"
+        }
+      ]
+    },
+    {
+      "file": "yubico-piv-ca-1.crt",
+      "url": "https://developers.yubico.com/PKI/yubico-piv-ca-1.pem",
+      "sha256": "6234f33d5f652109d265b391f2898b8ba92f62df406b684db18363f50d7c9129",
+      "certificates": [
+        {
+          "subject": "CN=Yubico PIV Root CA Serial 263751",
+          "sha256_der": "63ece914e54dd87915f34033c85af4c0696ba1512f8add66ced738331207b546"
+        }
+      ]
+    },
+    {
+      "file": "yubico-intermediate.crt",
+      "url": "https://developers.yubico.com/PKI/yubico-intermediate.pem",
+      "sha256": "ec0172fe38838e3de174aae4e058bb44920be47cebd8d658a0fba1634b82aee1",
+      "certificates": [
+        {
+          "subject": "CN=Yubico Attestation Intermediate A 1",
+          "sha256_der": "4698a1d3389c3ec60016c216250f1d0439922832d65142327436376dc2942b55"
+        },
+        {
+          "subject": "CN=Yubico Attestation Intermediate B 1",
+          "sha256_der": "d4cc3f456fdaf4e7812a21aab1dfe9d8e27d24e2fd2d6f21c9940109f0daa754"
+        },
+        {
+          "subject": "CN=Yubico FIDO Attestation A 1",
+          "sha256_der": "4ebabc9cbc964f722c985f3784d057e9ef5dcf454dcb4f767fccca58cf16a4e8"
+        },
+        {
+          "subject": "CN=Yubico FIDO Attestation B 1",
+          "sha256_der": "4eadda86ff62cff987e111a07910d8554de42f71d5d6da7744610e09012dd319"
+        },
+        {
+          "subject": "CN=Yubico FIDO Attestation B2 1",
+          "sha256_der": "3c6fe819adbd80afe75dc90af7bba34c95b2b7ac64384816e033f63b7c93848b"
+        },
+        {
+          "subject": "CN=Yubico OPGP Attestation A 1",
+          "sha256_der": "a53831d9649ab86bb1132e0a8a65eda9f7506d2b1495f76b3321960cc454c054"
+        },
+        {
+          "subject": "CN=Yubico OPGP Attestation B 1",
+          "sha256_der": "5decb182e9357d4a835acf988e1ea29713737ee08bce0f0ba79da8f295dd0e9f"
+        },
+        {
+          "subject": "CN=Yubico OPGP Attestation B2 1",
+          "sha256_der": "8af24190cbd923f3a1750bd5023dfaf540cf3a5b240f000d129abf8a90a552fc"
+        },
+        {
+          "subject": "CN=Yubico PIV Attestation A 1",
+          "sha256_der": "6de693f05376f5d8ca29069261e1c8626c75d503bd2edbfd75354cad1f722870"
+        },
+        {
+          "subject": "CN=Yubico PIV Attestation B 1",
+          "sha256_der": "2d55b7998f4e42569d6d8fa382b6dc77d1dacf07358b19701163892922b17052"
+        },
+        {
+          "subject": "CN=Yubico PIV Attestation B2 1",
+          "sha256_der": "0c90b7d184a36edf50a35f9be935f0c5689bfdcfe5bdd073366cafb49061a440"
+        },
+        {
+          "subject": "CN=Yubico SD Attestation A 1",
+          "sha256_der": "d408b28425decdea936644f74ba460a4e953b92a86b3e3356eb36d9cc16c368d"
+        },
+        {
+          "subject": "CN=Yubico SD Attestation B 1",
+          "sha256_der": "8f30bdf4ac57ed7975ef7c74ae8d6c0512e678d695001b7cc781b534a0db5dfe"
+        },
+        {
+          "subject": "CN=Yubico SD Attestation B2 1",
+          "sha256_der": "976ca92b73699b8961f4f8dc2fbb41f199db8768e6b29cda83ea3c873c8f40a5"
+        },
+        {
+          "subject": "CN=YubiHSM Attestation B2 1",
+          "sha256_der": "77d88e6363149ad6ba58a2ca1b8b407206ec57e7537c16cefbbc5edc39efb8e1"
+        }
+      ]
+    }
+  ]
+}

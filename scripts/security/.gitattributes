@@ -1,0 +1,2 @@
+# Trust-file hashes must survive Windows checkouts.
+trust/*.crt text eol=lf

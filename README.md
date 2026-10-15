@@ -18,6 +18,8 @@ describes online activation and periodic entitlement renewal with YubiKey authen
 limited offline grace (seven days is a policy candidate), encrypted model and result storage,
 safe completion of running analyses, and regression gates against v0.1.24.
 This is a design proposal; licensing and encryption are not implemented.
+The [first-stage PIV verification runbook](docs/EXMO_SECURITY_POC_RUNBOOK.md) covers
+isolated development tooling; it is not integrated into the Desktop runtime.
 
 [Development readiness and regression requirements](docs/EXMO_DEVELOPMENT_READINESS.md)
 is the current implementation guide: the implemented Web/Windows baseline, protected
