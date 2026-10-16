@@ -7,6 +7,11 @@ The original HTML is kept intact.
 Windows Desktop also runs the supplied CT, MRI Water and X-ray thigh-analysis
 models locally, with native measurements, overlays and case comparison.
 
+The Desktop **DICOM folder** picker supports selecting multiple folders with
+Ctrl/Shift in CT, MRI and X-ray workspaces. All selected folders are searched
+recursively in one import; overlapping parent/child selections are collected
+once. Existing file-count and byte limits apply to the whole selection.
+
 **Product boundary:** image import and analysis belong to Desktop. Web is a result
 viewer; server-backed result retrieval is planned, not implemented. The Web build
 contains neither the Desktop analysis UI nor its Python runtime/model files.

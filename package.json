@@ -1,6 +1,6 @@
 {
   "name": "exmo-segmentation-atlas",
-  "version": "0.1.24",
+  "version": "0.1.25",
   "private": true,
   "description": "EXMO segmentation atlas desktop and web viewer",
   "license": "MIT",
