@@ -1,19 +1,32 @@
-const { app, BrowserWindow, dialog, Menu, net, protocol, session } = require("electron");
+const { app, BrowserWindow, dialog, Menu, net, protocol, session, ipcMain, safeStorage, powerMonitor } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const { installImaging } = require("./imaging.cjs");
+const { loadBuild, openLicensing } = require("./security/runtime.cjs");
+const { WindowsKey } = require("./security/windows-key.cjs");
+const { openResultStorage } = require('./security/result-storage.cjs');
+const { installLicenseUi } = require("./security/ui.cjs");
 
 const origin = "atlas://app/";
 const contentRoot = path.join(__dirname, "..", "dist-desktop");
 const bundled = path.extname(path.dirname(__dirname)) === ".asar";
 const scriptsRoot = bundled ? path.resolve(__dirname, "../..", "imaging") : __dirname;
+const securityBuild = loadBuild(app.isPackaged || bundled);
+const internalBuild = securityBuild.profile === "internal";
+const applicationName = internalBuild ? "EXMO Atlas Internal" : "EXMO Atlas";
 let desktopImaging;
+let licensing;
+let resultStorage;
+let protectedEngineRoot;
+let initializing = true;
 const preferences = { nodeIntegration: false, contextIsolation: true, sandbox: true };
 const csp =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
 
-app.setName("EXMO Atlas");
+app.setName(applicationName);
+// Internal installations have their own store and cannot overwrite customer/source results.
+if (internalBuild) app.setPath("userData", path.join(app.getPath("appData"), applicationName));
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 app.on("second-instance", () => {
@@ -51,7 +64,7 @@ app.on("web-contents-created", (_, contents) => {
 
 function createWindow() {
   const window = new BrowserWindow({
-    title: "EXMO Atlas",
+    title: applicationName,
     width: 1440,
     height: 960,
     minWidth: 800,
@@ -73,15 +86,19 @@ function createWindow() {
   } catch {}
   desktopImaging = installImaging(window, {
     engineRoot:
-      process.env.EXMO_ENGINE_ROOT ||
+      protectedEngineRoot || process.env.EXMO_ENGINE_ROOT ||
       configuredRoot ||
       path.join(__dirname, "..", "work", "modality-integration"),
     storageRoot: path.join(app.getPath("userData"), "imaging"),
     scriptsRoot,
     palette: path.join(bundled ? scriptsRoot : contentRoot, "imaging-palette.json"),
+    analysisAuthorization: licensing,
+    artifactStorage: resultStorage?.bootstrap(path.join(app.getPath('userData'), 'imaging', 'runs')),
   });
+  const removeLicenseUi = installLicenseUi({ ipcMain, dialog, window, licensing, profile: securityBuild.profile, restart:()=>{app.relaunch();app.quit();} });
   const imaging = desktopImaging;
   window.once("closed", () => {
+    removeLicenseUi();
     imaging.dispose().catch(() => {});
   });
   window.once("ready-to-show", () => window.show());
@@ -93,9 +110,41 @@ function createWindow() {
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
     if (!primaryInstance) return;
-    app.setAppUserModelId("com.exmo.atlas");
+    app.setAppUserModelId(internalBuild ? "com.exmo.atlas.internal" : "com.exmo.atlas");
+    if (securityBuild.profile !== "development") {
+      const hashes=JSON.parse(fs.readFileSync(path.join(__dirname,'security/runtime-integrity.json'),'utf8'));
+      const resources=path.resolve(scriptsRoot,'..');
+      const {hashFile,inventory}=require('./security/payload.cjs');
+      for(const [relative,expected] of Object.entries(hashes)) {
+        require('./security/payload.cjs').safeName(relative);
+        if(hashFile(path.join(resources,relative)).sha256!==expected)throw Error('분석 실행 파일이 변경되었습니다. 설치본을 복구하세요.');
+      }
+      for(const relative of inventory(scriptsRoot))if(/\.(py|pyc|pyd|dll)$/i.test(relative) && !hashes['imaging/'+relative])throw Error('승인되지 않은 분석 실행 파일이 있습니다.');
+      const payload=path.resolve(scriptsRoot,'../engine');
+      if(securityBuild.profile==='customer' || fs.existsSync(path.join(payload,'payload.json'))) {
+        const crypto=require('node:crypto');
+        const progress=new BrowserWindow({width:440,height:160,resizable:false,closable:false,autoHideMenuBar:true,backgroundColor:'#100e26',webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
+        await progress.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><style>body{background:#100e26;color:#e9e6f4;font:14px system-ui;margin:28px}p{color:#a7a2bb;font-size:12px}progress{width:100%;accent-color:#aaa0c7}</style><b>분석 실행 환경 확인</b><p>설치 파일과 모델의 무결성을 확인하고 있습니다.</p><progress max="100" value="0"></progress>'));
+        let policy;
+        try {
+          policy=await require('./security/payload.cjs').verifyPayloadAsync(payload,crypto.createPublicKey(securityBuild.issuerPublicKey),(done,total)=>{
+            if(!progress.isDestroyed())void progress.webContents.executeJavaScript('document.querySelector("progress").value='+Math.round(done/total*100)).catch(()=>{});
+          });
+        }finally{if(!progress.isDestroyed())progress.destroy();}
+        if(policy.profile!==securityBuild.profile)throw Error('분석 엔진의 제품 프로필이 일치하지 않습니다.');
+        protectedEngineRoot=payload;
+      }
+      resultStorage = openResultStorage(path.join(app.getPath('userData'), 'result-security'), safeStorage);
+      licensing = await openLicensing({ build: securityBuild, directory: path.join(app.getPath("userData"), "licensing"), safeStorage,
+        resultStorage,
+        dongle:securityBuild.profile==='customer'?new (require('./security/dongle.cjs').Dongle)(
+          path.join(protectedEngineRoot,'python','python.exe'),path.join(scriptsRoot,'piv_worker.py'),
+          [path.join(scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(protectedEngineRoot,'envs/security/Lib/site-packages'),'--']):undefined,
+        key: new WindowsKey(bundled ? path.resolve(__dirname, "../..", "security", "windows-key.ps1") : undefined) });
+      powerMonitor.on("resume", () => licensing.refresh().catch(() => {}));
+    }
     Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((_, __, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
@@ -126,6 +175,7 @@ app
         return new Response("File not found", { status: 404 });
       }
     });
+    initializing = false;
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -137,11 +187,11 @@ app
   });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" && !initializing) app.quit();
 });
 
 app.on("before-quit", (event) => {
-  if (!desktopImaging) return;
+  if (!desktopImaging) { licensing?.close(); return; }
   event.preventDefault();
   const imaging = desktopImaging;
   desktopImaging = undefined;

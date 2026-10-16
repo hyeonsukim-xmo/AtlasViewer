@@ -13,14 +13,19 @@
     "build": "vite build",
     "check": "tsc --noEmit",
     "test:language": "node scripts/validate-language.mjs",
+    "test:license": "node --test scripts/security/test-license.cjs scripts/security/test-internal.cjs && node scripts/validate-early-results.cjs && node scripts/validate-analysis-pipeline.cjs",
+    "test:model-security": "node --test scripts/security/test-model-package.cjs scripts/security/test-models.cjs scripts/security/test-customer.cjs scripts/security/test-operations.cjs scripts/security/test-payload.cjs",
+    "test:artifact-security": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -B scripts/security/test_artifact_store.py && work\\modality-integration\\envs\\ct\\Scripts\\python.exe -B scripts/security/validate-protected-results.py",
     "test": "node --experimental-strip-types scripts/validate-atlas.mjs && node --experimental-strip-types scripts/validate-interactions.mjs",
     "extract:model": "node scripts/extract-exmo.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 3017",
     "build:desktop": "vite build --mode desktop && node --experimental-strip-types scripts/write-imaging-palette.mjs",
     "desktop": "npm run build:desktop && electron .",
     "desktop:engine": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-imaging.ps1",
-    "desktop:pack": "npm run build:desktop && electron-builder --win --x64 --dir",
-    "desktop:dist": "npm run build:desktop && electron-builder --win nsis --x64",
+    "desktop:pack": "node scripts/security/package.cjs customer dir",
+    "desktop:dist": "node scripts/security/package.cjs customer nsis",
+    "desktop:pack:internal": "node scripts/security/package.cjs internal dir",
+    "desktop:dist:internal": "node scripts/security/package.cjs internal nsis",
     "test:desktop": "npm run build:desktop && electron scripts/validate-desktop.cjs",
     "test:classifier": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-classifier.py",
     "test:imaging": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-imaging.py",
@@ -63,17 +68,21 @@
     "files": [
       "dist-desktop/**/*",
       "desktop/*.cjs",
+      "desktop/security/*.cjs",
       "desktop/icon.*",
       "package.json",
       "LICENSE",
       "!node_modules/**/*"
     ],
     "extraResources": [
+      { "from": "desktop/security/windows-key.ps1", "to": "security/windows-key.ps1" },
       {
         "from": "desktop",
         "to": "imaging",
         "filter": [
-          "*.py"
+          "*.py",
+          "!model-runner.py",
+          "!model_security.py"
         ]
       },
       {
@@ -82,6 +91,7 @@
       }
     ],
     "asar": true,
+    "beforePack": "scripts/security/package.cjs",
     "npmRebuild": false,
     "win": {
       "icon": "desktop/icon.ico",

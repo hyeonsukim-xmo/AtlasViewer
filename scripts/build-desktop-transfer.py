@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--uv", type=Path, required=True)
     args = parser.parse_args()
+    if "internal" in args.installer.name.lower():
+        raise ValueError("Internal licensed installers use a separate app/config directory; the legacy transfer installer is incompatible. Follow docs/EXMO_LICENSE_POC_RUNBOOK.md")
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT).strip():
         raise RuntimeError("Commit the source before creating a versioned transfer folder")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()

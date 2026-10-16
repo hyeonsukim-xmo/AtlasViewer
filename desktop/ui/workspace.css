@@ -38,6 +38,16 @@
   border-radius: 9px;
   background: #ffffff05;
 }
+.license-status {
+  color: #b0b2c8;
+  font-size: 13px;
+  padding: 7px 12px;
+  border: 1px solid #ffffff25;
+  border-radius: 9px;
+  background: #ffffff05;
+}
+.license-status[data-permitted="false"] { color: #e1bd87; }
+.license-status:focus-visible { outline: 2px solid #9bafff; outline-offset: 2px; }
 .desktop-content {
   flex: 1;
   min-height: 0;

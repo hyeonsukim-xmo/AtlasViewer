@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "exmoDesktop",
   Object.freeze({
+    licenseStatus: () => ipcRenderer.invoke("exmo:license:status"),
+    manageLicense: () => ipcRenderer.invoke("exmo:license:manage"),
     exportResults: (analysis, ids, language) => ipcRenderer.invoke("exmo:imaging:exportResults", analysis, ids, language),
     imageMenu: (payload) => ipcRenderer.invoke("exmo:imaging:imageMenu", payload),
     status: (analysis) => ipcRenderer.invoke("exmo:imaging:status", analysis),

@@ -23,6 +23,7 @@ _context = threading.local()
 _emit_lock = threading.Lock()
 _stdout = sys.stdout
 _model_cache = {}
+PROTECTED_MRI = False  # Packaging fixes this to True; legacy/source runners stay compatible.
 
 
 @contextmanager
@@ -94,7 +95,8 @@ def cached_model(key, paths, loader):
     """Reuse immutable weights inside one batch; file changes invalidate the cache."""
     if getattr(_context, "control", None) is None:
         return loader(), False
-    signature = tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in paths)
+    protection = getattr(_context, 'protection', None)
+    signature = ('signed', protection.model_digest) if protection else tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in paths)
     cached = _model_cache.get(key)
     if cached and cached[0] == signature:
         emit("model_reused")
@@ -102,6 +104,18 @@ def cached_model(key, paths, loader):
     value = loader()
     _model_cache[key] = (signature, value)
     return value, False
+
+
+def protected_torch(torch, protection):
+    """Authenticate bytes before pickle/zip parsing; preserve each vendor's strict loader."""
+    import io
+    from types import SimpleNamespace
+    def load(path, *args, **kwargs):
+        with measured('model_decryption'):
+            value = protection.weights(path).value
+        with io.BytesIO(value) as stream:
+            return torch.load(stream, *args, **kwargs)
+    return SimpleNamespace(**{**vars(torch), 'load': load})
 
 
 def cpu_phase(job, torch):
@@ -145,6 +159,21 @@ def windows_transactions(module):
     module._fsync_directory = lambda _path: None
 
 
+def windows_slicer_export(module, atomic):
+    if not getattr(module, '_desktop_windows_export_ready', False):
+        import inspect
+        source = inspect.getsource(module.export_slicer_segmentation)
+        directory_flush = "        directory_fd = os.open(parent, os.O_RDONLY)\n        try:\n            os.fsync(directory_fd)\n        finally:\n            os.close(directory_fd)"
+        if source.count('temporary.open("rb")') != 1 or source.count(directory_flush) != 1:
+            raise RuntimeError('Unexpected MRI export implementation; Windows adaptation blocked')
+        # Windows fsync requires a writable descriptor; preserve metadata and readback checks.
+        source = source.replace('temporary.open("rb")', 'temporary.open("r+b")').replace(directory_flush, '        _desktop_fsync_directory(parent)')
+        module._desktop_fsync_directory = atomic._fsync_directory
+        exec(compile(source, module.__file__, 'exec'), module.__dict__)
+        module._desktop_windows_export_ready = True
+    return module.export_slicer_segmentation
+
+
 def windows_nrrd_reader(module):
     """Hold a read-only, no-replace Windows file handle through hash and vendor decode."""
     if os.name != "nt":
@@ -163,6 +192,14 @@ def windows_nrrd_reader(module):
 
     @contextmanager
     def snapshot(source):
+        import artifact_store
+        store = artifact_store.current()
+        if store and store.encrypted(source):
+            with store.open(source, 'rb') as stream:
+                sha = hashlib.file_digest(stream, 'sha256').hexdigest()
+                size = stream.seek(0, 2)
+                yield Path(source), module.ArtifactRecord(path=str(source), sha256=sha, size_bytes=size)
+            return
         path = Path(os.path.abspath(source))
         handles = []
         try:
@@ -373,9 +410,15 @@ def run_ct(root, job):
     case = {"case_id": case_id, "input": str(source), "input_sha256": runtime.sha256_file(source)}
     for name in ("hu_evidence", "source_proof"):
         case[name + "_sha256"] = runtime.sha256_file(source.parent / (name + ".json"))
+    model_for = runtime.model_for
+    protection = getattr(_context, 'protection', None)
+    if protection:
+        def model_hash(path):
+            return protection.assets[Path(path).relative_to(root).as_posix()]['sha256']
+        model_for = with_globals(model_for, torch=protected_torch(torch, protection), sha256_file=model_hash)
     (model, model_hash), reused = cached_model(("ct", str(root), device),
         [root / "model/trial_230704_4_best.pth", root / "configs/inference.json"],
-        lambda: timed("model_loading", runtime.model_for)(cfg, device))
+        lambda: timed("model_loading", model_for)(cfg, device))
     microbatch = int(job.get("ct_microbatch", 4))
     if microbatch not in (1, 2, 4):
         raise ValueError("Unsupported CT predictor microbatch")
@@ -486,6 +529,31 @@ def prepare_execution(torch, job):
     return device
 
 
+def protected_mri_run(runtime, protection):
+    """Keep the vendor's exact strict loader; replace only its payload byte snapshot."""
+    import builtins
+    from thigh_muscle_seg.training import checkpoint
+    def snapshot(path, *, limits, label, expected_sha256):
+        with measured('model_decryption'):
+            value = protection.weights(path)
+        if value.sha256 != expected_sha256 or len(value.value) > limits.max_bytes:
+            raise RuntimeError('Protected MRI payload identity mismatch')
+        return value
+    loader = with_globals(checkpoint.load_model_weights_strict, read_regular_bytes_snapshot=snapshot)
+    def imported(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == 'thigh_muscle_seg.training.checkpoint' and fromlist == ('load_model_weights_strict',):
+            from types import SimpleNamespace
+            return SimpleNamespace(load_model_weights_strict=loader)
+        return builtins.__import__(name, globals, locals, fromlist, level)
+    original_hash = runtime.sha256_file
+    def sha256_file(path):
+        if Path(path).absolute() == protection.root / 'weights/final.safetensors':
+            return protection.value['sha256']
+        return original_hash(path)
+    # Job-local globals and import dispatch: concurrent CPU export never sees another job's key.
+    return with_globals(runtime.run, __builtins__={**vars(builtins), '__import__': imported}, sha256_file=sha256_file)
+
+
 def run_mri(root, job):
     import torch
     device = prepare_execution(torch, job)
@@ -503,20 +571,8 @@ def run_mri(root, job):
         structured_input.os.O_RDONLY |= os.O_BINARY
         from thigh_muscle_seg.data import image_io
         windows_nrrd_reader(image_io)
-        import inspect
         from thigh_muscle_seg.integrations import slicer_export
-        if not getattr(slicer_export, "_desktop_windows_export_ready", False):
-            source = inspect.getsource(slicer_export.export_slicer_segmentation)
-            directory_flush = "        directory_fd = os.open(parent, os.O_RDONLY)\n        try:\n            os.fsync(directory_fd)\n        finally:\n            os.close(directory_fd)"
-            if source.count('temporary.open("rb")') != 1 or source.count(directory_flush) != 1:
-                raise RuntimeError("Unexpected MRI export implementation; Windows adaptation blocked")
-            # Windows _commit needs a writable fd. Adapt only the temporary-output open
-            # and POSIX directory fsync; header creation and readback checks are unchanged.
-            source = source.replace('temporary.open("rb")', 'temporary.open("r+b")').replace(directory_flush, "        _desktop_fsync_directory(parent)")
-            slicer_export._desktop_fsync_directory = atomic._fsync_directory
-            exec(compile(source, slicer_export.__file__, "exec"), slicer_export.__dict__)
-            slicer_export._desktop_windows_export_ready = True
-        runtime.export_slicer_segmentation = slicer_export.export_slicer_segmentation
+        runtime.export_slicer_segmentation = windows_slicer_export(slicer_export, atomic)
     # Separate Slicer metadata construction and full readback from serialization.
     exporter = runtime.export_slicer_segmentation
     scope = exporter.__globals__
@@ -568,7 +624,9 @@ def run_mri(root, job):
     emit("inference_start", device=device)
     # Keep native full6 FP32, both TTA passes, raw + PP500. No hidden fallback.
     try:
-        runtime.run([(job["id"], Path(job["input"]))], Path(job["output"]), device)
+        protection = getattr(_context, 'protection', None)
+        run = protected_mri_run(runtime, protection) if protection else runtime.run
+        run([(job["id"], Path(job["input"]))], Path(job["output"]), device)
     finally:
         if loading is not None: loading.__exit__(None, None, None)
     return Path(job["output"]) / job["id"]
@@ -586,7 +644,11 @@ def run_ap(root, job):
     emit("model_loading", device=str(device))
     def load_ap():
         candidate = legacy.build_model("vnet", len(names), size, "AP").to(device)
-        return legacy.load_checkpoint_to_model(candidate, checkpoint, device)[0]
+        loader = legacy.load_checkpoint_to_model
+        protection = getattr(_context, 'protection', None)
+        if protection:
+            loader = with_globals(loader, torch=protected_torch(torch, protection))
+        return loader(candidate, checkpoint, device)[0]
     model, reused = cached_model(("ap", str(root), str(device)), [checkpoint], timed("model_loading", load_ap))
     job["execution"]["model_reused"] = reused
     model.eval()
@@ -646,7 +708,11 @@ def run_lat(root, job):
     def load_lat():
         predictor = nnUNetPredictor(tile_step_size=.5, use_gaussian=True, use_mirroring=True,
             perform_everything_on_device=False, device=device, verbose=False, verbose_preprocessing=False, allow_tqdm=False)
-        predictor.initialize_from_trained_model_folder(str(root / "models" / route), (0, 1, 2, 3, 4), checkpoint_name="checkpoint_final.pth")
+        initialize = predictor.initialize_from_trained_model_folder
+        protection = getattr(_context, 'protection', None)
+        if protection:
+            initialize = with_globals(initialize, torch=protected_torch(torch, protection))
+        initialize(str(root / "models" / route), (0, 1, 2, 3, 4), checkpoint_name="checkpoint_final.pth")
         return predictor
     predictor, reused = cached_model(("lat", str(root), route, str(device)),
         [root / "models" / route / f"fold_{fold}" / "checkpoint_final.pth" for fold in range(5)], timed("model_loading", load_lat))
@@ -716,15 +782,32 @@ def peak_host_process_memory():
     return int(counters.peak_working_set)
 
 
-def run_job(engine_root, job):
-    start = time.monotonic()
+def run_job(engine_root, job, protection=None):
+    admission = getattr(protection, 'admission_seconds', 0.0)
+    start = time.monotonic() - admission
     _context.timing = {"seconds": {}, "stack": []}
+    if protection is not None:
+        _context.timing['seconds']['model_integrity'] = admission
     modality = job["analysis"]
     package = {"ct": "EXMO_CT", "mri": "EXMO_MRI", "xray": "EXMO_XRAY"}[modality]
     root = engine_root / "packages" / package
+    from model_security import model_id, package_file
+    protected_build = PROTECTED_MRI or Path(__file__).with_name('model-policy.json').exists()
+    if (protected_build or (root / package_file(model_id(job))).exists()) and protection is None:
+        raise RuntimeError('Protected model requires a fresh worker authorization; direct CLI is disabled')
+    if protection:
+        import artifact_store
+        store = artifact_store.current()
+        if store is None or store.root not in Path(os.path.abspath(job['output'])).parents:
+            raise RuntimeError('Protected analysis output must stay inside the encrypted result store')
+        artifact_store.measure_with(measured)
+    _context.protection = protection
     handler = {"ct": run_ct, "mri": run_mri, "xray": run_ap if job.get("route") == "AP" else run_lat}[modality]
-    with measured("other"):
-        result = handler(root, job)
+    try:
+        with measured("other"):
+            result = handler(root, job)
+    finally:
+        _context.protection = None
     if job.get("execution", {}).get("device") == "cuda:0" and "peak_gpu_memory_bytes" not in job["execution"]:
         import torch
         torch.cuda.synchronize()

@@ -17,9 +17,27 @@ contains neither the Desktop analysis UI nor its Python runtime/model files.
 describes online activation and periodic entitlement renewal with YubiKey authentication,
 limited offline grace (seven days is a policy candidate), encrypted model and result storage,
 safe completion of running analyses, and regression gates against v0.1.24.
-This is a design proposal; licensing and encryption are not implemented.
+Internal Desktop builds now require an EXMO-approved Windows installation key,
+without a dongle. Customer packaging is blocked until real YubiKey authentication,
+protected worker/model loading and release signing are verified.
 The [first-stage PIV verification runbook](docs/EXMO_SECURITY_POC_RUNBOOK.md) covers
 isolated development tooling; it is not integrated into the Desktop runtime.
+The [internal licensing runbook](docs/EXMO_LICENSE_POC_RUNBOOK.md) covers separate build
+profiles, device approval, signed leases, Windows CNG/DPAPI, revocation and packaging.
+Run `npm run test:license` to verify renewal, grace, revocation and safe completion.
+Use `npm run desktop:pack:internal -- PATH_TO_PUBLIC_BUILD_CONFIG` (or
+`desktop:dist:internal`) for internal packages. The normal `desktop:pack`/`desktop:dist`
+customer paths currently fail closed. Source development (`npm run desktop`) is unchanged.
+Internal results/config live separately under `%APPDATA%/EXMO Atlas Internal`.
+Server keys, simulated devices and management scripts are excluded from packages.
+Protected builds require signed encrypted CT/MRI/AP/LAT/classifier packages and fresh worker authorization.
+New mask artifacts are encrypted; institution recovery keys remain separate from analysis licensing.
+Customer builds bind both PC and YubiKey keys and require a signed offline runtime payload.
+See the [product security runbook](docs/EXMO_PRODUCT_SECURITY_RUNBOOK.md) for provisioning, packaging,
+revocation, recovery and the hardware/server/code-signing checks still required before release.
+Run `npm run test:model-security` for tamper/replay/worker checks and
+`node scripts/security/validate-protected-mri.cjs` for the actual MRI strict loader and a
+synthetic 128³ FP32 GPU comparison; this does not run patient cases.
 
 [Development readiness and regression requirements](docs/EXMO_DEVELOPMENT_READINESS.md)
 is the current implementation guide: the implemented Web/Windows baseline, protected
@@ -314,7 +332,8 @@ CT restores class probabilities in native-grid blocks before normalization and a
 
 The installer contains the UI and private adapter scripts. The multi-GB model/runtime
 store is installed separately; the installer alone is not a portable inference package.
-No network is required once the local engine is prepared. Private weights, input
+Source development runs locally once the engine is prepared. Licensed internal builds
+require online activation and periodic renewal, with bounded offline grace. Private weights, input
 snapshots, masks and logs never enter `public/`, Git or the Web build. The renderer
 receives opaque IDs, curated measurements, composed PNGs and permitted meshes.
 Original input files are not modified. Clearing the worklist retains completed
@@ -322,12 +341,12 @@ results and the inputs they need. Local-machine owners can still inspect local a
 this implementation does not claim DRM against the machine owner.
 
 ```sh
-npm run desktop:pack
-npm run desktop:dist
+npm run desktop:pack:internal -- PATH_TO_PUBLIC_BUILD_CONFIG
+npm run desktop:dist:internal -- PATH_TO_PUBLIC_BUILD_CONFIG
 ```
 
-Outputs: `release/win-unpacked/EXMO Atlas.exe` and
-`release/EXMO-Atlas-Setup-<version>.exe` using the version in `package.json`.
+Outputs: `release/internal/win-unpacked/EXMO Atlas Internal.exe` and
+`release/internal/EXMO-Atlas-Internal-Setup-<version>.exe` using the version in `package.json`.
 This internal development build is unsigned.
 Application updates do not replace the private engine store. The web-only build is
 still `npm run build` -> `dist/`; Desktop builds to `dist-desktop/`.
@@ -343,8 +362,8 @@ npm run test:desktop
 # Populate private integration fixtures after running the sample jobs:
 work\modality-integration\envs\ct\Scripts\python.exe -X utf8 scripts/validate-imaging.py --results
 npm run test:imaging:desktop
-# Check the packaged application using the same local engine:
-npx electron scripts/validate-imaging-desktop.cjs release/win-unpacked/resources/app.asar
+# Check a local-test internal package with its matching loopback authority:
+npx electron scripts/security/validate-internal-electron.cjs release/internal/win-unpacked/resources/app.asar work/security-internal-local/authority
 ```
 
 `--results` rebuilds only `outputs/imaging-check/userdata/imaging`, the generated test

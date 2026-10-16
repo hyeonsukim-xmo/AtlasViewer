@@ -14,6 +14,7 @@ import faulthandler
 import os
 
 sys.dont_write_bytecode = True
+from model_security import ModelGuard, load_policy, model_id, package_file
 spec = importlib.util.spec_from_file_location("desktop_runner", Path(__file__).with_name("model-runner.py"))
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
@@ -72,6 +73,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--engine-root", type=Path, required=True)
     args = parser.parse_args()
+    model_guard = ModelGuard(load_policy(), args.engine_root)
     faulthandler.enable()
     if os.environ.get("EXMO_DIAGNOSTIC_STACKS") == "1":
         faulthandler.dump_traceback_later(120, repeat=True)
@@ -80,18 +82,20 @@ def main():
     active, threads = {}, []
     initialized = False
 
-    def execute(control, job):
+    def execute(control, job, protection):
         runner._context.control = control
         try:
             gpu.acquire()
             control.gpu_owned = True
             if control.cancelled:
                 raise RuntimeError("Analysis cancelled")
-            runner.run_job(args.engine_root, job)
+            runner.run_job(args.engine_root, job, protection=protection)
         except Exception:
             traceback.print_exc(file=sys.stderr)
             runner.emit("failed")
         finally:
+            if protection is not None:
+                protection.close()
             control.release_gpu()
             # Each CT/MRI module has per-job hooks; never retain completed closures.
             for prefix in ("exmo_ct_vendor_", "exmo_mri_vendor_"):
@@ -103,13 +107,39 @@ def main():
     for line in sys.stdin:
         try:
             message = json.loads(line)
+            if message['operation'] == 'storage_init':
+                import artifact_store
+                artifact_store.initialize(message)
+                continue
             ident = str(message["id"])
-            if message["operation"] == "resume_cpu":
+            if message["operation"] == "model_challenge":
+                try:
+                    reply = {'id': ident, 'result': model_guard.challenge(message['runId'], message.get('engine', 'mri'))}
+                except Exception:
+                    reply = {'id': ident, 'error': '암호화 MRI 패키지 또는 실행 정책을 확인할 수 없습니다.'}
+                with runner._emit_lock:
+                    runner._stdout.write(json.dumps(reply) + '\n')
+                    runner._stdout.flush()
+            elif message['operation'] == 'model_discard':
+                model_guard.pending.pop(message['runId'], None)
+            elif message["operation"] == "resume_cpu":
                 with guard:
                     control = active.get(ident)
                 if control:
                     control.ready.set()
             elif message["operation"] == "run":
+                protection = None
+                job = message['job']
+                engine = model_id(job)
+                if model_guard.policy or (model_guard.model_root(engine) / package_file(engine)).exists():
+                    try:
+                        import artifact_store
+                        if artifact_store.current() is None:
+                            raise ValueError('Protected result storage was not initialized')
+                        protection = model_guard.admit(ident, job, message.pop('authorization', None))
+                    except Exception:
+                        runner.emit('failed', job_id=ident)
+                        continue  # Denied new work must not terminate another job's CPU export.
                 if not initialized:
                     # Initialize native DLLs before a thread blocks on Windows stdin.
                     # NumPy/OpenBLAS initialization otherwise stalls in create_module.
@@ -138,13 +168,16 @@ def main():
                         raise RuntimeError("Model service admission limit exceeded")
                     control = Control(ident, gpu)
                     active[ident] = control
-                thread = threading.Thread(target=execute, args=(control, message["job"]), daemon=True)
+                thread = threading.Thread(target=execute, args=(control, message["job"], protection), daemon=True)
                 threads = [item for item in threads if item.is_alive()]
                 threads.append(thread)
                 thread.start()
+                protection = None  # The admitted job owns cleanup even after expiry/revocation.
             else:
                 raise ValueError("Unknown model service operation")
         except Exception:
+            if locals().get('protection') is not None:
+                protection.close()
             traceback.print_exc(file=sys.stderr)
             # Protocol corruption is fatal, never silently wait for an absent result.
             break

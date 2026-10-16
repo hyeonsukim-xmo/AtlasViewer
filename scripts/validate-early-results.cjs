@@ -18,18 +18,20 @@ const input = path.join(storageRoot, 'input.nii.gz');
 fs.writeFileSync(input, 'fixture');
 const record = {id:'one', analysis:'ct', input, name:'fixture', ready:true, metadata:{size:[8,8,8],spacing:[1,1,1]}};
 fs.writeFileSync(path.join(storageRoot, 'library.json'), JSON.stringify([record]));
-let releaseMesh, failMesh = false, workers = [];
+let releaseMesh, failMesh = false, workers = [], onModelRun, onInspect, onModelChallenge;
 class FakeWorker {
   constructor() { this.closed=false; workers.push(this); }
-  async request(message) {
+  async request(message, options) {
+    if (message.operation === 'model_challenge') return onModelChallenge(message);
     if (message.operation === 'run') {
+      await onModelRun?.(message,options);
       fs.mkdirSync(message.job.output, {recursive:true});
       return {complete:true, result:message.job.output};
     }
     if (message.operation === 'finalize') {
       assert.equal(message.deferMesh,true);
       const mask = path.join(message.result, 'mask.nii.gz'); fs.writeFileSync(mask,'native');
-      return {summary:{id:message.id, inputId:record.id, analysis:message.record.analysis, variant:message.variant || 'raw',
+      return {summary:{id:message.id, inputId:message.record.id, analysis:message.record.analysis, variant:message.variant || 'raw',
         createdAt:message.createdAt, meshBytes:null, meshState:'pending', rows:[], seconds:1,
         laterality:{method:'femur_components_lps_v1'}, timings:{model:{inference:.5}}},
         record:message.record, result:message.result, mask, sideMask:mask, mesh:null};
@@ -56,23 +58,24 @@ function spawn() {
   child.stdin=new PassThrough();
   child.stdin.on('data', async data => {
     const message=JSON.parse(data.toString());
-    const result=message.operation==='prepare'?message.record:message.operation==='finalize'?
+    if(message.operation==='inspect')onInspect?.(message);
+    const result=message.operation==='inspect'?[]:message.operation==='prepare'?message.record:message.operation==='finalize'?
       await new FakeWorker().request(message):{image:'data:image/png;base64,test'};
     child.stdout.write(JSON.stringify({id:message.requestId,result})+'\n');
   });
   child.kill=()=>{child.exitCode=0;child.emit('exit');};
   return child;
 }
-function install() {
+function install(analysisAuthorization) {
   const handlers=new Map(), frame={url:'atlas://app/'};
   const window={webContents:{mainFrame:frame,send(){}}};
-  const electron={dialog:{},ipcMain:{handle:(key,fn)=>handlers.set(key,fn),removeHandler:key=>handlers.delete(key)},
+  const electron={dialog:{showOpenDialog:async()=>({canceled:false,filePaths:[input]})},ipcMain:{handle:(key,fn)=>handlers.set(key,fn),removeHandler:key=>handlers.delete(key)},
     powerSaveBlocker:{start:()=>1,stop(){}}};
   const context={module:{exports:{}},process,console,setTimeout,clearTimeout,URL,AbortController,
     require:name=>name==='electron'?electron:name==='./analysis-worker.cjs'?{AnalysisWorker:FakeWorker}:
       name==='node:child_process'?{spawn}:localRequire(name)};
   vm.runInNewContext(fs.readFileSync(path.join(root,'desktop/imaging.cjs'),'utf8'),context);
-  const backend=context.module.exports.installImaging(window,{engineRoot:storageRoot,storageRoot,scriptsRoot:root,palette});
+  const backend=context.module.exports.installImaging(window,{engineRoot:storageRoot,storageRoot,scriptsRoot:root,palette,analysisAuthorization});
   return {backend,call:async(name,...args)=>{
     const reply=await handlers.get('exmo:imaging:'+name)({sender:window.webContents,senderFrame:frame},...args);
     assert.equal(reply.ok,true,reply.error);return reply.value;
@@ -148,12 +151,141 @@ async function run(meshFailure=false,cancel=false) {
     }
   } finally {await backend.dispose();}
 }
+async function runAuthorization() {
+  const {Authority,createServer}=require('./security/license-server.cjs');
+  const {createFixture,simulatedClient}=require('./security/license-demo.cjs');
+  const directory=path.join(storageRoot,'license-fixture');
+  const fixture=createFixture(directory),authority=new Authority(fixture.server),server=createServer(authority);
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const client=simulatedClient(directory,`http://127.0.0.1:${server.address().port}`);
+  failMesh=false;releaseMesh=undefined;
+  const records=['one','two','three'].map(id=>({...record,id}));
+  fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify(records));
+  let finishFirst;
+  const first=new Promise(resolve=>{finishFirst=resolve;}),entered=[],admissions=[];
+  onModelRun=async(message,options)=>{
+    entered.push(message.job.id);
+    if(message.job.id==='two') {
+      authority.status('development-only','revoked');
+      assert.equal(await client.refresh(),'REVOKED');
+    }
+    await options.onEvent({stage:'cpu_ready'});
+    if(message.job.id==='one')await first;
+  };
+  const {backend,call}=install({authorize:async({runId,engine,signal})=>{
+    assert.equal(engine,'ct');assert.equal(signal.aborted,false);
+    assert.match(runId,/^[0-9a-f-]{36}$/);admissions.push(runId);
+    return client.authorize({runId,engine,signal});
+  }});
+  try {
+    await call('run','ct',records.map(r=>r.id),[],'cuda:0');
+    await until(()=>entered.length===2);
+    finishFirst();
+    await until(()=>admissions.length===3);
+    assert.deepEqual(entered,['one','two']);assert.equal(new Set(admissions).size,3);
+    assert.ok(workers.filter(w=>!w.closed).length>0,'Revocation does not stop an active worker');
+    finishFirst();
+    for(let i=0;i<2;i++) {await until(()=>releaseMesh);const finish=releaseMesh;releaseMesh=undefined;finish();}
+    await until(async()=>(await call('job')).state!=='running');
+    const job=await call('job');assert.equal(job.completed.length,2);assert.equal(job.failed.length,1);
+    assert.equal(job.failed[0].id,'three');assert.match(job.failed[0].error,/REVOKED/);
+    for(const result of job.completed) {
+      assert.ok(result.timings.authorization>=0,'Authorization time is separate from model inference');
+      assert.equal((await call('results','ct')).find(r=>r.id===result.id).meshState,'ready');
+      assert.ok((await call('resultPreview',result.id,{})).image,'Completed results stay viewable');
+    }
+    await call('run','ct',['one'],[],'cpu');
+    await until(async()=>(await call('job')).state!=='running');
+    assert.equal((await call('job')).completed.length,0,'Rerun gets a fresh authorization check');
+    assert.deepEqual(entered,['one','two']);
+  } finally {
+    finishFirst();releaseMesh?.();await backend.dispose();onModelRun=undefined;
+    client.close();await new Promise(resolve=>server.close(resolve));authority.close();
+    fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify([record]));
+  }
+  console.log('PASS: running GPU/CPU cases finish after revocation; queued and repeated runs denied; results remain readable');
+}
+async function rejectInvalidGrants() {
+  assert.throws(()=>install({}),/권한/);
+  let started=0;onModelRun=()=>{started++;};
+  try {
+    for(const alter of [()=>null,grant=>({...grant,runId:'wrong'}),grant=>({...grant,engine:'lat'}),grant=>({...grant,state:'EXPIRED'})]) {
+      const {backend,call}=install({authorize:async request=>alter({...request,state:'VALID'})});
+      try {
+        await call('run','ct',['one'],[],'cpu');
+        await until(async()=>(await call('job')).state!=='running');
+        const job=await call('job');assert.equal(job.completed.length,0);assert.equal(job.failed.length,1);
+      } finally {await backend.dispose();}
+    }
+    assert.equal(started,0,'Malformed or mismatched grants must never start a model');
+  } finally {onModelRun=undefined;}
+}
+async function authorizeXrayClassification() {
+  fs.writeFileSync(path.join(storageRoot,'verified-packages.json'),'{}');
+  for(const engine of ['ap','lat']){
+    fs.mkdirSync(path.join(storageRoot,'envs',engine,'Scripts'),{recursive:true});
+    fs.writeFileSync(path.join(storageRoot,'envs',engine,'Scripts/python.exe'),'stub');
+  }
+  let inspections=0,admissions=0;const inspected=[];onInspect=message=>{inspections++;inspected.push(message);};
+  try {
+    for(const allowed of [false,true]) {
+      const {backend,call}=install({authorize:async request=>{
+        admissions++;assert.equal(request.engine,'xray-classifier');
+        if(!allowed)throw Error('REVOKED');return {...request,state:'VALID'};
+      }});
+      try {
+        const rows=await call('choose','xray',false,'ko');
+        assert.equal(inspections,allowed?2:1);
+        assert.equal(Boolean(inspected.at(-1).classificationDenied),!allowed,'Metadata import proceeds but denied classification stays disabled');
+      } finally {await backend.dispose();}
+    }
+    assert.equal(admissions,2);
+    console.log('PASS: X-ray import cannot start classification without a fresh permitted grant');
+  } finally {onInspect=undefined;fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify([record]));}
+}
+async function authorizeMriWorker() {
+  fs.mkdirSync(path.join(storageRoot,'envs/mri/Scripts'),{recursive:true});
+  fs.writeFileSync(path.join(storageRoot,'envs/mri/Scripts/python.exe'),'stub');
+  fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify([{...record,analysis:'mri'}]));
+  let runs=0,proofs=0;
+  const proof={key:'private-pipe-only-test-key'},challenge={nonce:'worker-nonce',modelDigest:'model-digest'};
+  onModelChallenge=message=>{assert.ok(message.runId);return challenge;};
+  onModelRun=(message,options)=>{
+    runs++;assert.deepEqual(message.authorization,proof);
+    const saved=fs.readFileSync(path.join(path.dirname(message.job.output),'job.json'),'utf8');
+    assert.ok(!saved.includes(proof.key) && !saved.includes('authorization'));
+    assert.ok(options.id);
+  };
+  try {
+    for(const allowed of [false,true]) {
+      const {backend,call}=install({authorize:async request=>({...request,state:'VALID'}),
+        authorizeModel:async request=>{
+          proofs++;assert.deepEqual(request.challenge,challenge);assert.equal(request.job.analysis,'mri');
+          if(!allowed)throw Error('MRI model approval missing');return proof;
+        }});
+      try {
+        await call('run','mri',['one'],[],'cpu');
+        if(allowed) {await until(()=>releaseMesh);const finish=releaseMesh;releaseMesh=undefined;finish();}
+        await until(async()=>(await call('job')).state!=='running');
+        assert.equal((await call('job')).completed.length,allowed?1:0);
+      } finally {await backend.dispose();}
+    }
+    assert.equal(runs,1);assert.equal(proofs,2);
+    console.log('PASS: protected MRI worker handshake, missing model approval denied, secrets absent from job files');
+  } finally {onModelRun=undefined;onModelChallenge=undefined;fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify([record]));}
+}
 (async()=>{
   try {
     await checkResultPolling();
     await run(); await run(true); await run(false,true);
+    await runAuthorization();
+    await rejectInvalidGrants();
+    await authorizeXrayClassification();
+    await authorizeMriWorker();
     // A process exit during meshing must reopen the existing measurements as retryable.
-    const directory=fs.readdirSync(path.join(storageRoot,'runs'))[0];
+    const directory=fs.readdirSync(path.join(storageRoot,'runs'))
+      .find(id=>{const file=path.join(storageRoot,'runs',id,'published.json');return fs.existsSync(file) && JSON.parse(fs.readFileSync(file)).summary.analysis==='ct';});
+    assert.ok(directory,'Select a published result, not a denied run directory');
     const published=path.join(storageRoot,'runs',directory,'published.json');
     const saved=JSON.parse(fs.readFileSync(published));
     saved.summary.meshState='pending'; saved.summary.meshBytes=null; saved.mesh=null;

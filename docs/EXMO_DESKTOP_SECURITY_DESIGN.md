@@ -2,13 +2,13 @@
 
 - 작성일: 2026-10-15
 - 검토 기준: `ac0998e`, 앱 `0.1.24`, Windows x64 / Electron / Python CT·MRI·AP·LAT 환경
-- 상태: 설계 초안. 앱 코드, 서버, 동글, 설치 파일에는 아직 적용하지 않았다.
+- 상태 (2026-10-16): 전체 모델 암호화·작업별 허가, 고객 PC+YubiKey 이중 키, 결과 보호·기관 복구, 서명 payload·설치본 검사·운영 CLI 구현. 실물 동글·실제 서버·코드 서명·신규 PC 현장 검증은 미완료. 최신 구현과 검증 증거는 [제품 보안 runbook](EXMO_PRODUCT_SECURITY_RUNBOOK.md)에 있다.
 
-구현 착수: [1단계 YubiKey 검증 도구와 실행 절차](EXMO_SECURITY_POC_RUNBOOK.md)를 추가했다. 앱 밖의 개발 도구이며 실물 동글 통과, 서버 권한, 모델 암호화는 아직 완료되지 않았다.
+구현 진행: [YubiKey 검증 도구](EXMO_SECURITY_POC_RUNBOOK.md), [내부용 라이선스 운영·검증](EXMO_LICENSE_POC_RUNBOOK.md). 내부용은 실제 CNG software KSP 서명과 DPAPI 상태 저장을 사용한다. 고객 동글 흐름은 합성 키로 검증했고 모델 strict loader는 실제 가중치로 대조했다. 아래 내용은 설계 목표와 한계를 포함하며 제품 runbook의 검증 목록이 구현 상태의 기준이다.
 
 **기본 설계는 온라인 우선 + YubiKey 인증 + 제한적인 오프라인 유예다.** 최초 활성화와 정기적인 사용 권한 갱신은 EXMO 서버에서 수행한다. 인터넷·서버 장애 시에는 마지막으로 승인된 유효 권한과 등록된 YubiKey로 일시적인 오프라인 분석을 허용한다. 공통 보안 모듈을 기존 Python 분석 경로에 연결하고 모델 암호화와 결과 마스크 보호를 함께 구현한다. CT·MRI·X-ray의 계산 설정과 현재 화면 동작은 유지한다.
 
-[공유 구축안](https://chatgpt.com/share/6ad0388c-4fd4-83ee-a2c9-522c7c490df2)의 하드웨어 인증·키 분리·모델 보호 제안을 반영하되, 운영 정책은 이후 사용자가 검토한 온라인 우선 방향으로 갱신한다. 앞선 초안의 무기한 오프라인 영구 라이선스는 기본 배포 정책에서 제외한다. **오프라인 최대 7일은 출시 전 확정할 정책 후보이며 이미 승인·구현된 제한이 아니다.** 영구 판매 또는 구독 판매의 선택도 미정이다. 영구 사용권을 판매하더라도 이 기본 설계에서는 주기적인 온라인 확인이 필요하다는 조건을 계약과 제품 안내에 명시해야 한다.
+[공유 구축안](https://chatgpt.com/share/6ad0388c-4fd4-83ee-a2c9-522c7c490df2)의 하드웨어 인증·키 분리·모델 보호 제안을 반영하되, 운영 정책은 이후 사용자가 검토한 온라인 우선 방향으로 갱신한다. 앞선 초안의 무기한 오프라인 영구 라이선스는 기본 배포 정책에서 제외한다. **현재 구현은 서버 발급 유예를 최대 7일로 제한한다.** 이 수치의 판매 계약 확정과 PC 시계 조작 방어는 별개다. 영구 판매 또는 구독 판매의 선택도 미정이다. 영구 사용권을 판매하더라도 주기적인 온라인 확인이 필요하다는 조건을 계약과 제품 안내에 명시해야 한다.
 
 ### 정책 기준과 미확정 값
 
@@ -26,6 +26,16 @@
 | 시간·회수 보장 | 오프라인 중 즉시 회수와 관리자에 의한 시계·상태 조작의 완전 차단은 보장하지 않음 | 명시할 한계 |
 
 서버가 서명한 정책 값만 실행에 사용한다. 후보 숫자를 클라이언트의 수정 가능한 설정이나 장애 시 임의 기본값으로 대체하지 않는다. 구현하지 않은 보안 기능을 현재 설치본의 기능으로 안내하지 않는다.
+
+### 승인된 내부 개발 장비의 예외
+
+내부 개발 PC·서버는 별도 `internal` profile과 발급 키로 승인하고 동글 없이 Windows 설치 키로 인증한다. 내부용 패키지는 서버 공개키·profile·주소를 고정하며 고객 profile과 교차 수용하지 않는다. EXMO 서버 운영자가 장비와 만료일을 승인한다. Windows 관리자 설치, 환경변수, 공용 Admin 암호로 인증을 끄는 방식은 허용하지 않는다.
+
+내부용도 최초 온라인 활성화·유한한 유예·계약 만료·회수·매 분석 설치 증명을 적용한다. 내부용 app ID와 결과 저장 위치를 고객/기존 개발 앱과 분리한다. CNG software KSP의 내보내기 금지와 DPAPI를 구현했지만 TPM 보안이나 같은 사용자 공격의 완전 방어로 표시하지 않는다. 소스 개발 실행은 유지하며 무보호 소스 실행본을 제품 패키지로 만들지 못하도록 빌드 검사와 고객 출시 차단을 둔다.
+
+모델 암호화 연결에서는 내부용 전용 설치 복호화 키에 봉투를 묶고, 고객용은 PC + YubiKey 조건을 유지한다. profile·수신 키·model/recipe digest를 서명해 교차 복호화를 막아야 한다. 현재 설치 키는 서명 전용이다. 키 봉투·암호화 로더를 구현한 것으로 간주하지 않는다.
+
+이하 YubiKey 필수 조건은 고객용 기준이며, 내부용에는 위의 승인된 설치 키 예외를 적용한다. 고객 출시 전 통과 조건은 예외로 생략하지 않는다.
 
 ## 1. 기존 논의에서 바꾸는 부분
 
@@ -254,6 +264,10 @@ PC 시각이 크게 앞으로 이동한 경우도 권한을 자동 연장하거�
 
 ## 7. 모델과 결과 파일 보호
 
+**현재 구현 범위:** 전체 모델은 AES-256-GCM 자산과 Ed25519 서명 manifest를 사용한다. 내부용은 RSA-3072 OAEP-SHA256 설치 키 봉투, 고객용은 아래 이중 JWE를 쓴다. 등록 키 증명·license/installation/model digest·최신 lease의 기능 및 모델 허용 목록을 함께 검사한다. 모델 digest별 회수와 서명 payload 검증을 구현했다. 자동 다운로드와 자동 키 회전은 제공하지 않는다.
+
+Electron은 worker nonce·실행 ID·입력 작업 digest·모델 digest·lease digest·짧은 기한에 묶인 설치 서명을 만들어 개인 pipe로 전달한다. Python은 자체 build-pinned 공개키로 재검증하고 nonce를 한 번만 소비한다. 보호된 MRI의 직접 CLI 실행은 거부한다. MRI는 원래 모델 캐시를 쓰지 않으며 매 작업을 검증한다. 코드·config·원본 weight hash·strict load는 유지하고 평문 checkpoint를 임시 파일로 쓰지 않는다. 정상 코드 경로의 차단이며 Python/ASAR 변조나 같은 사용자 권한의 메모리 추출에 대한 완전 방어는 아니다.
+
 ### 7.1 모델 패키지
 
 배포물은 서명된 manifest와 암호화 자산으로 구성한다. manifest에는 릴리스/모델/recipe, 파일 ID, 크기 상한, 암호문 해시, 원본 검증 해시, loader contract, runtime 호환 버전, key ID를 둔다. manifest 서명과 암호문 무결성을 확인한 뒤 복호화하고, 승인된 원본 해시와 구조를 확인한 다음 deserialization한다. 신뢰되지 않은 `.pth`를 먼저 `torch.load`하지 않는다.
@@ -318,7 +332,7 @@ UI 디자인·색상·선택·좌우 hover·3방향 X-ray 묶음·독립 회전�
 
 오프라인 유예 중 업데이트는 현재 lease가 허용한 모델·runtime 범위에서만 활성화한다. 새로운 모델·기능·봉투가 필요하면 연결 복구 후 권한을 받아야 한다. 앱 재설치·업데이트가 installation 키, 회수 기록, lease 만료, 보호된 시간 상태를 초기화해 새 유예를 만드는 경로가 되어서는 안 된다. 유실 시 온라인 재활성화를 요구하고 결과 저장소와 기관 복구 경로는 보존한다.
 
-Electron은 코드 서명에 더해 `EnableEmbeddedAsarIntegrityValidation`과 `OnlyLoadAppFromAsar` 적용을 검토한다. ASAR 밖의 Python·DLL·runtime은 별도 서명 manifest 검증이 필요하다. ASAR 무결성 기능 자체는 모델 암호화가 아니다. [Electron ASAR integrity](https://www.electronjs.org/docs/latest/tutorial/asar-integrity)
+Electron 빌드는 `EnableEmbeddedAsarIntegrityValidation`과 `OnlyLoadAppFromAsar`를 적용하고 RunAsNode·NodeOptions·inspect를 비활성화한다. ASAR 밖의 Python·DLL·runtime은 별도 해시 목록/서명 payload로 검증한다. 고객 NSIS는 실제 코드 서명을 요구한다. ASAR 무결성 기능 자체는 모델 암호화가 아니다. [Electron ASAR integrity](https://www.electronjs.org/docs/latest/tutorial/asar-integrity)
 
 고객 빌드에서는 `EXMO_ENGINE_ROOT`, `PYTHONPATH`, Node/Python 디버그 옵션 등으로 미검증 runtime을 실행할 수 없어야 한다. 서명된 자산 manifest로 허용한 설치 경로만 사용하고, 검증기 자체가 변조 가능한 환경이라는 한계도 유지한다. 디버거 흔적만으로 앱을 강제 종료하거나 환자 데이터를 지우는 대응은 넣지 않는다.
 
@@ -377,4 +391,4 @@ Electron은 코드 서명에 더해 `EnableEmbeddedAsarIntegrityValidation`과 `
 3. **기관 복구와 재발급 책임:** 결과 키 복구 주체·백업 위치·PC 이전·분실키 재발급 절차·서버 장애 대응 담당을 지정한다. 기존 lease가 남아 있는 PC의 회수 지연과 오프라인 시간 조작 한계를 계약·운영 정책에 반영한다.
 4. **허용되는 로컬 보호 수준:** YubiKey로 복제·사용권을 통제하되 고객 관리자에 의한 메모리 추출까지 절대 금지해야 한다면 로컬 GPU 방식의 보강만으로 요구를 충족했다고 판정하지 않는다. 그때는 EXMO가 통제하는 추론 환경을 별도 검토한다.
 
-이번 문서화에서는 공유 구축안·제조사 문서·현재 소스를 대조하고 정책 간 모순과 문서 링크를 검토했다. 동글 연결, 서버 배포, 암호화 로더, 시간 조작 실험, GPU 추론 회귀, 신규 PC 설치 실험은 다음 단계의 통과 조건이며 아직 수행하지 않았다. 이 문서만으로 현재 앱이나 NAS 이관 ZIP에 보안이 적용되지는 않는다.
+실제 수행한 구현·테스트와 외부 환경에서 남은 출시 조건은 [제품 보안 runbook](EXMO_PRODUCT_SECURITY_RUNBOOK.md)에 구분한다. 예전 NAS 이관 ZIP과 기존 설치본에 이번 코드가 자동 적용되지는 않는다.

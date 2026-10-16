@@ -117,6 +117,7 @@ export type AnalysisResult = {
     admissionWait?: number;
     input?: number;
     gpuWait?: number;
+    authorization?: number;
     modelProcess?: number;
     resultWait?: number;
     resultPreparation?: number;
@@ -168,9 +169,12 @@ export type Job = {
   failed: { id: string; name: string; error: string }[];
   total: number;
 };
+export type LicenseStatus = { profile: "development" | "internal" | "customer"; state: string; expiresAt: number | null };
 declare global {
   interface Window {
     exmoDesktop: {
+      licenseStatus(): Promise<LicenseStatus>;
+      manageLicense(): Promise<LicenseStatus>;
       exportResults(analysis: Analysis, ids: string[], language: "ko" | "en"): Promise<Reply<{action: "save" | "cancel"; count?: number}>>;
       imageMenu(payload: { image: string; filename: string; language: "ko" | "en"; source: {kind: "input" | "result"; id: string} }): Promise<Reply<{action: "save" | "copy" | "cancel" | "mapping"}>>;
       onImportProgress(callback: (progress: ImportProgress) => void): () => void;

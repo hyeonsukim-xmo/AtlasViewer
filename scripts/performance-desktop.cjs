@@ -72,8 +72,9 @@ function markdown(report) {
     '|---|'+Object.keys(report.cases).map(()=>'---:|').join('')];
   const fmt=value=>value ? value.n===1 ? value.median.toFixed(2) : `${value.median.toFixed(2)} [${value.min.toFixed(2)}–${value.max.toFixed(2)}]` : '—';
   lines.push('| Import / classification (one import) | '+Object.values(report.cases).map(item=>item.importSeconds?.toFixed(2)||'—').join(' | ')+' |');
-  const stages={input:'Input preparation',modelStartup:'Engine startup / communication',model_loading:'Model / checkpoint loading',
-    preprocessing:'Preprocessing',input_upload:'One-time input GPU upload',inference:'Inference',inference_with_resampling:'Legacy LAT combined inference / resampling',
+  const stages={input:'Input preparation',authorization:'License authorization',modelStartup:'Engine startup / communication',model_integrity:'Worker authorization / package integrity',model_loading:'Model / checkpoint loading',model_decryption:'Authenticated model decryption',
+      artifact_encrypt:'Artifact authenticated encryption',artifact_decrypt:'Artifact authenticated decryption',
+      preprocessing:'Preprocessing',input_upload:'One-time input GPU upload',inference:'Inference',inference_with_resampling:'Legacy LAT combined inference / resampling',
     native_restore:'Native restoration',postprocessing:'Postprocessing',qc:'QC / entropy',measurement:'Native measurements',
     overlay_generation:'Export Overlay generation',export_metadata:'Slicer metadata construction',save:'Result serialization / copies',
     verification:'Hashes / readback verification',export:'Legacy combined save / verification',

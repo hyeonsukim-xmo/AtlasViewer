@@ -1,5 +1,6 @@
 import { t, useLanguage, localeTag } from "./language";
 import LanguageSelect from "./language-select";
+import LicenseStatusButton from "./license-status";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import Home from "../../app/page";
@@ -87,6 +88,7 @@ function Desktop() {
             <img src="/brand/exmo-logo-white.svg" alt="EXMO" />
           </button>
           <span className="desktop-nav-label">Clinical imaging workspace</span>
+          <LicenseStatusButton />
           <button className="desktop-demo-link" onClick={() => setView("demo")}>
             {t("3D 데모")}
           </button>

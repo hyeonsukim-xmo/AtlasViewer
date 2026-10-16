@@ -4,8 +4,8 @@ const fs = require("node:fs");
 const { randomUUID } = require("node:crypto");
 
 class AnalysisWorker {
-  constructor({ python, args, env, logPath }) {
-    Object.assign(this, { python, args, env, logPath });
+  constructor({ python, args, env, logPath, artifactStorage }) {
+    Object.assign(this, { python, args, env, logPath, artifactStorage });
     this.pending = new Map(); this.child = null; this.closed = false;
   }
   start() {
@@ -23,6 +23,7 @@ class AnalysisWorker {
     child.stdin.on("error", () => { fail(); void this.stop(); });
     child.once("error", fail);
     child.once("close", () => { fail(); if (this.child === child) this.child = null; log.end(); });
+    if (this.artifactStorage) child.stdin.write(JSON.stringify({operation:'storage_init',...this.artifactStorage})+'\n');
     readline.createInterface({ input: child.stdout }).on("line", line => {
       log.write(line + "\n");
       let event;

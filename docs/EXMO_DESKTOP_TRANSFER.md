@@ -1,5 +1,7 @@
 # EXMO Desktop · 다른 Windows PC로 옮기기
 
+**2026-10-15 이후 내부 라이선스 설치본은 [내부용 운영 절차](EXMO_LICENSE_POC_RUNBOOK.md)를 사용한다.** 이 문서는 기존 무보호 개발 이관 묶음의 절차다. 기존 ZIP은 그대로 검증할 수 있지만 새 `EXMO Atlas Internal` 설치 파일을 이 이관 도구에 넣거나 이름만 바꿔 교체하지 않는다. 설치 경로·설정 저장 위치가 달라 기존 앱을 잘못 수정할 수 있다. 이관 생성기는 기본 이름의 Internal 설치 파일을 거부한다. 이 문서의 과거 패키징 명령은 현재 고객 출시 차단으로 실행되지 않는다.
+
 이 폴더는 앱 설치 파일, CT/MRI/X-ray 원본 모델 묶음, 고정된 Python 환경 설치 도구, 실제 샘플 검증 명령을 포함한다. 모델 원본은 GitHub에 포함하지 않는다. 소스는 `source.zip`과 `transfer-manifest.json`의 Git commit으로 연결한다.
 
 ## 새 PC에서 실행

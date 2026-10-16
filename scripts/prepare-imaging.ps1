@@ -31,6 +31,10 @@ try {
     $index = if ($name -eq "ct") { "https://download.pytorch.org/whl/cpu" } else { "https://download.pytorch.org/whl/cu128" }
     & $UvPath --no-config pip install --python $pythonPath -r "desktop/requirements-$name.txt" --extra-index-url $index --index-strategy unsafe-best-match
     if ($LASTEXITCODE -ne 0) { throw "Cannot install $name runtime" }
+    if ($name -in @('ct', 'mri', 'ap', 'lat')) {
+      & $UvPath --no-config pip install --python $pythonPath --require-hashes --only-binary=:all: -r desktop/requirements-model-security.txt
+      if ($LASTEXITCODE -ne 0) { throw 'Cannot install protected model loader dependencies' }
+    }
     & $UvPath --no-config pip check --python $pythonPath
     if ($LASTEXITCODE -ne 0) { throw "Conflicting dependencies in $name runtime" }
   }

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,12 @@ def main():
         config.parent.mkdir(parents=True)
         original = b'{"root":"existing-engine-must-not-change"}'
         config.write_bytes(original)
+        internal = subprocess.run([sys.executable, str(ROOT/"scripts/build-desktop-transfer.py"),
+            "--installer", str(folder/"EXMO-Atlas-Internal-Setup.exe"), "--source", str(folder),
+            "--uv", str(folder/"unused-uv.exe"), "--output", str(folder/"must-not-exist")],
+            capture_output=True, text=True, timeout=10)
+        assert internal.returncode != 0 and "legacy transfer installer is incompatible" in internal.stderr
+        assert not (folder/"must-not-exist").exists()
         bundle = folder/"transfer with spaces"
         (bundle/"scripts").mkdir(parents=True)
         installer = bundle/"scripts/install-desktop-transfer.ps1"
@@ -31,7 +38,7 @@ def main():
         names = ["EXMO-Atlas-Setup.exe", "tools/uv.exe", "scripts/prepare-imaging.ps1", "scripts/prepare-imaging-packages.py",
                  "scripts/validate-imaging-engine.py", "scripts/validate-imaging-transfer.py", "desktop/imaging-palette.json",
                  "desktop/imaging-worker.py", "desktop/classifier-worker.py", "desktop/model-runner.py",
-                 "desktop/requirements-ct.txt", "desktop/requirements-mri.txt", "desktop/requirements-ap.txt", "desktop/requirements-lat.txt",
+                 "desktop/requirements-ct.txt", "desktop/requirements-mri.txt", "desktop/requirements-ap.txt", "desktop/requirements-lat.txt", "desktop/requirements-model-security.txt",
                  "models/EXMO_CT.zip", "models/EXMO_MRI.tar.gz", "models/EXMO_XRAY.zip"]
         entries = []
         for name in names:

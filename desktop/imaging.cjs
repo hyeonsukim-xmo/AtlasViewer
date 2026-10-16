@@ -14,7 +14,16 @@ const { exportResults } = require("./results-export.cjs");
 const { createPatientAssignments } = require("./patient-assignments.cjs");
 const { createSourceMetadata } = require("./source-metadata.cjs");
 
-function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette }) {
+function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette, analysisAuthorization, artifactStorage }) {
+  if (analysisAuthorization !== undefined && typeof analysisAuthorization?.authorize !== "function")
+    throw new Error("분석 권한 확인 모듈을 초기화하지 못했습니다.");
+  async function authorize(runId, engine, signal) {
+    if (!analysisAuthorization) return;
+    const grant = await analysisAuthorization.authorize({ runId, engine, signal });
+    if (grant?.runId !== runId || grant.engine !== engine || !["VALID", "GRACE"].includes(grant.state))
+      throw new Error("분석 권한을 확인하지 못했습니다. 신규 분석을 시작하지 않습니다.");
+    if (signal?.aborted) throw aborted();
+  }
   fs.mkdirSync(storageRoot, { recursive: true });
   const exportIdentities = createExportIdentities(storageRoot);
   const patientAssignments = createPatientAssignments(storageRoot);
@@ -39,19 +48,24 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
   let resultRevision = 0;
   let batchStarted = 0;
   const modelWorkers = new Map();
+  function runtime(name, args) {
+    const portable=path.join(engineRoot,'python','python.exe');
+    return fs.existsSync(portable)?{python:portable,args:['-I','-B','-X','utf8',path.join(scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(engineRoot,'envs',name,'Lib','site-packages'),'--',...args]}:
+      {python:python(name),args:['-X','utf8',...args]};
+  }
   function modelWorker(engine) {
     if (!modelWorkers.has(engine) || modelWorkers.get(engine).closed) modelWorkers.set(engine, new AnalysisWorker({
-      python: python(engine),
-      args: ["-X", "utf8", path.join(scriptsRoot, "model-service.py"), "--engine-root", engineRoot],
+      ...runtime(engine,[path.join(scriptsRoot, "model-service.py"), "--engine-root", engineRoot]),
       env: workerEnv(), logPath: path.join(storageRoot, `model-${engine}-private.log`),
+      artifactStorage,
     }));
     return modelWorkers.get(engine);
   }
   function resultWorker() {
     if (!finalizer || finalizer.closed) finalizer = new AnalysisWorker({
-      python: python("ct"),
-      args: ["-X", "utf8", path.join(scriptsRoot, "imaging-worker.py"), "--engine-root", engineRoot, "--palette", palette],
+      ...runtime('ct',[path.join(scriptsRoot, "imaging-worker.py"), "--engine-root", engineRoot, "--palette", palette]),
       env: workerEnv(), logPath: path.join(storageRoot, "finalize-private.log"),
+      artifactStorage,
     });
     return finalizer;
   }
@@ -72,7 +86,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
   const available = (analysis) =>
     fs.existsSync(path.join(engineRoot, "verified-packages.json")) &&
     (analysis === "xray" ? ["ct", "ap", "lat"] : ["ct", analysis]).every((name) =>
-      fs.existsSync(python(name)),
+      fs.existsSync(python(name)) || (fs.existsSync(path.join(engineRoot,'python','python.exe')) && fs.existsSync(path.join(engineRoot,'envs',name,'Lib','site-packages'))),
     );
   const studyAssignmentsPath = path.join(storageRoot, "xray-studies.json");
   let studyAssignments = {};
@@ -256,8 +270,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
     return workerShutdown;
   }
   function workerEnv() {
+    const environment={...process.env};
+    if(artifactStorage)for(const key of Object.keys(environment))if(/^(PYTHON|NODE_OPTIONS|ELECTRON_RUN_AS_NODE)/i.test(key))delete environment[key];
     return {
-      ...process.env,
+      ...environment,
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
       PYTHONDONTWRITEBYTECODE: "1",
@@ -267,18 +283,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
   }
   function startWorker() {
     if (worker) return worker;
-    if (!fs.existsSync(python("ct"))) throw new Error("로컬 분석 엔진을 준비해야 합니다.");
+    const command=runtime('ct',[path.join(scriptsRoot,'imaging-worker.py'),'--engine-root',engineRoot,'--palette',palette]);
+    if (!fs.existsSync(command.python)) throw new Error("로컬 분석 엔진을 준비해야 합니다.");
     const process = spawn(
-      python("ct"),
-      [
-        "-X",
-        "utf8",
-        path.join(scriptsRoot, "imaging-worker.py"),
-        "--engine-root",
-        engineRoot,
-        "--palette",
-        palette,
-      ],
+      command.python,
+      command.args,
       {
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
@@ -310,6 +319,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       log.end();
       if (worker === process) stopWorker();
     });
+    if (artifactStorage) process.stdin.write(JSON.stringify({operation:'storage_init',...artifactStorage})+'\n');
     return process;
   }
   function request(operation, values = {}, signal) {
@@ -551,10 +561,26 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
           }
           importProgress.phase = "inspect";
           publishImport();
-          rows = await request("inspect", {
+          const inspection = {
             analysis, paths, names, consumeSnapshots: true,
             destination: path.join(importRoot, randomUUID().replaceAll("-", "").slice(0, 16)),
-          });
+          };
+          if (analysis === "xray") {
+            const runId = randomUUID();
+            try {
+              if (analysisAuthorization?.authorizeModel) {
+                const challenge = await request('model_challenge', {runId});
+                const job = {analysis:'xray-classifier',paths,destination:inspection.destination};
+                inspection.authorization = await analysisAuthorization.authorizeModel({runId,job,challenge});
+                inspection.runId = runId;
+              } else await authorize(runId, "xray-classifier");
+            } catch {
+              inspection.classificationDenied = true;
+              if (analysisAuthorization?.authorizeModel) await request('model_discard', {runId});
+            }
+          }
+          if (disposed) break;
+          rows = await request("inspect", inspection);
         } catch (error) {
           if (disposed) break;
           rows = [{ id: randomUUID(), analysis, name: extractedNames.get(sourcePaths[0]) || path.basename(sourcePaths[0]),
@@ -736,10 +762,31 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
       const job = { id: file.id, input: file.input, analysis: file.analysis, route, device, output: path.join(directory, "output") };
       await fsp.writeFile(path.join(directory, "job.json"), JSON.stringify(job));
       if (signal.aborted) throw aborted();
+      // Authorize each run after waiting; expiry never cancels a run already admitted here.
+      if (analysisAuthorization) {
+        taskState(task, { stage: "분석 권한 확인", lane: "waiting", progress: null });
+        const authorizationStarted = performance.now();
+        await authorize(id, engine, signal);
+        timings.authorization = (performance.now() - authorizationStarted) / 1000;
+      }
       const model = modelWorker(engine);
+      let modelAuthorization;
+      if (analysisAuthorization?.authorizeModel) {
+        const authorizationStarted = performance.now();
+        const challenge = await model.request({ operation: "model_challenge", runId: id, engine: require('./security/model-package.cjs').modelId(job) }, { timeout: 15000 });
+        try {
+          modelAuthorization = await analysisAuthorization.authorizeModel({ runId: id, job, challenge, signal });
+          if (signal.aborted) throw aborted();
+        } catch (error) {
+          model.send({ operation: "model_discard", id, runId: id });
+          throw error;
+        }
+        timings.authorization += (performance.now() - authorizationStarted) / 1000;
+      }
       taskState(task, { stage: "모델 준비", lane: device === "cpu" ? "cpu" : "gpu", progress: null });
       phase = performance.now();
-      const complete = await model.request({ operation: "run", job }, {
+      // Keys/proofs travel only over the private process pipe, never job.json, logs or renderer IPC.
+      const request = model.request({ operation: "run", job, ...(modelAuthorization ? { authorization: modelAuthorization } : {}) }, {
         id, logPath: path.join(directory, "engine-private.log"),
         onEvent: async event => {
           if (signal.aborted) return;
@@ -760,6 +807,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
           if (["native_inverse", "native_normalization", "native_prepare", "native_blocks"].includes(event.stage)) taskState(task, { progress: Math.round(event.current / event.total * 100) });
         },
       });
+      modelAuthorization = undefined;
+      const complete = await request;
       timings.modelProcess = (performance.now() - phase) / 1000;
       gpu?.release(); gpu = undefined;
       modelSlot?.release(); modelSlot = undefined;

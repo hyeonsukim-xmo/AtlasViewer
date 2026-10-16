@@ -13,9 +13,32 @@ import nrrd
 import pydicom
 from PIL import Image
 
-import classify_single_view as engine
-from pipeline import ViewClassificationPipeline
-from lower_extremity_classifier.features import normalize_image
+from model_security import load_policy
+
+engine = None
+
+
+def load_vendor(root, protection=None):
+    global engine, ViewClassificationPipeline, normalize_image
+    if (load_policy() or (Path(root).parent / 'model-package-xray-classifier.json').exists()) and protection is None:
+        raise ValueError('Protected classifier requires worker admission')
+    sys.path.insert(0, str(root))
+    import classify_single_view as engine
+    from pipeline import ViewClassificationPipeline
+    from lower_extremity_classifier.features import normalize_image
+    engine.DEFAULT_DICOM_CACHE = Path(root) / 'models/dicom/training_features_4class_dicom_260711_corrected.npz'
+    engine.DEFAULT_NRRD_CACHE = Path(root) / 'models/nrrd/training_features_4class_nrrd_260711.npz'
+    pipeline = ViewClassificationPipeline(min_confidence=.4)
+    if protection:
+        from types import FunctionType, MethodType, SimpleNamespace
+        original = pipeline.load.__func__
+        def load(path, **kwargs):
+            if kwargs != {'allow_pickle': False}:
+                raise ValueError('Unsafe classifier deserialization')
+            return np.load(io.BytesIO(protection.weights(path).value), allow_pickle=False)
+        wrapped = FunctionType(original.__code__, {**original.__globals__, 'np': SimpleNamespace(load=load)}, original.__name__, original.__defaults__, original.__closure__)
+        pipeline.load = MethodType(wrapped, pipeline)
+    return pipeline
 
 MAX_PIXELS = 64_000_000
 
@@ -92,9 +115,7 @@ def process(message, pipeline):
 
 def main():
     root = Path(sys.argv[1]).resolve()
-    engine.DEFAULT_DICOM_CACHE = root / "models/dicom/training_features_4class_dicom_260711_corrected.npz"
-    engine.DEFAULT_NRRD_CACHE = root / "models/nrrd/training_features_4class_nrrd_260711.npz"
-    pipeline = ViewClassificationPipeline(min_confidence=0.4)
+    pipeline = load_vendor(root)
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     for line in sys.stdin:

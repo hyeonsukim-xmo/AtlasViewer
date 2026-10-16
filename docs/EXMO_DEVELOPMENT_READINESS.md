@@ -501,9 +501,10 @@ npm run build
 # Windows에서 renderer/Desktop에 영향이 있을 때 실행한다. 내부에서 Web build도 수행한다.
 npm run test:desktop
 
-# 패키징에 영향이 있을 때만 새 패키지를 만든다.
-npm run desktop:dist
-npx electron scripts/validate-desktop.cjs release/win-unpacked/resources/app.asar
+# 내부 라이선스 runbook에서 시험 authority와 공개 빌드 설정을 먼저 만든다.
+# 패키징에 영향이 있을 때만 내부용 새 패키지를 만든다. 고객용은 출시 차단 상태다.
+npm run desktop:dist:internal -- work/security-internal-local/build-public.json
+npx electron scripts/security/validate-internal-electron.cjs release/internal/win-unpacked/resources/app.asar work/security-internal-local/authority
 
 # 커밋 전 파일 범위와 실제 diff를 확인한다.
 git diff --check

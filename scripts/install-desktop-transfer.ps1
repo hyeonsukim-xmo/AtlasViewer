@@ -12,6 +12,7 @@ $required = @("EXMO-Atlas-Setup.exe", "tools/uv.exe", "scripts/prepare-imaging.p
 foreach ($name in $required) {
   if ($name -notin $manifest.files.path) { throw "Incomplete manifest: $name" }
 }
+if ('desktop/requirements-model-security.txt' -notin $manifest.files.path) { throw 'Incomplete manifest: desktop/requirements-model-security.txt' }
 if ($manifest.files | Group-Object path | Where-Object { $_.Count -gt 1 }) { throw "Duplicate transfer paths" }
 $prefix = [System.IO.Path]::GetFullPath($bundleRoot).TrimEnd('\') + '\'
 Write-Output "Checking transfer files..."

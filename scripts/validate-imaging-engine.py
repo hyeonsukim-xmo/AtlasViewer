@@ -25,10 +25,13 @@ def probe(name, device, engine_root):
     if struct.calcsize("P") != 8 or sys.version_info[:3] != (3, 12, 8):
         raise RuntimeError("The tested runtime is CPython 3.12.8 x64")
     versions = {}
-    for line in (ROOT/f"desktop/requirements-{name}.txt").read_text(encoding="utf8").splitlines():
+    requirements = (ROOT/f"desktop/requirements-{name}.txt").read_text(encoding="utf8")
+    if name in ('ct', 'mri', 'ap', 'lat'):
+        requirements += '\n' + (ROOT/'desktop/requirements-model-security.txt').read_text(encoding='utf8')
+    for line in requirements.splitlines():
         if not line.strip() or line.startswith("#"):
             continue
-        package, expected = line.split("==")
+        package, expected = line.split()[0].split("==")
         actual = importlib.metadata.version(package)
         # PEP 440 == without a local suffix accepts the wheel's CUDA suffix.
         if (actual if "+" in expected else actual.split("+")[0]) != expected:

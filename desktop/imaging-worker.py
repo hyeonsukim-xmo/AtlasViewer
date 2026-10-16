@@ -81,21 +81,28 @@ def load_image(path, volume=True, metadata_only=False):
         units = header.get("space units")
         if units is not None and any(str(u).strip('"') != "mm" for u in units):
             raise InputError("mm 단위 geometry만 지원합니다.")
-    reader = sitk.ImageFileReader()
-    reader.SetFileName(str(path))
-    reader.ReadImageInformation()
-    if reader.GetDimension() != 3 or math.prod(reader.GetSize()) > MAX_VOXELS:
-        raise InputError("지원하는 3D 영상 형식과 크기를 확인하세요.")
-    if metadata_only:
-        if reader.GetNumberOfComponents() != 1 or min(reader.GetSize()) < 2:
-            raise InputError("CT/MRI 분석에는 3D volume이 필요합니다.")
-        geometry = sitk.Image([1, 1, 1], sitk.sitkUInt8)
-        geometry.SetSpacing(reader.GetSpacing())
-        geometry.SetOrigin(reader.GetOrigin())
-        geometry.SetDirection(reader.GetDirection())
-        valid_geometry(geometry)
-        return reader
-    image = reader.Execute()
+    artifact_store = sys.modules.get('artifact_store')
+    store = artifact_store.current() if artifact_store else None
+    if store and store.encrypted(path):
+        if metadata_only:
+            raise InputError("보호된 결과 파일은 원본 영상으로 가져올 수 없습니다.")
+        image = sitk.ReadImage(str(path))
+    else:
+        reader = sitk.ImageFileReader()
+        reader.SetFileName(str(path))
+        reader.ReadImageInformation()
+        if reader.GetDimension() != 3 or math.prod(reader.GetSize()) > MAX_VOXELS:
+            raise InputError("지원하는 3D 영상 형식과 크기를 확인하세요.")
+        if metadata_only:
+            if reader.GetNumberOfComponents() != 1 or min(reader.GetSize()) < 2:
+                raise InputError("CT/MRI 분석에는 3D volume이 필요합니다.")
+            geometry = sitk.Image([1, 1, 1], sitk.sitkUInt8)
+            geometry.SetSpacing(reader.GetSpacing())
+            geometry.SetOrigin(reader.GetOrigin())
+            geometry.SetDirection(reader.GetDirection())
+            valid_geometry(geometry)
+            return reader
+        image = reader.Execute()
     valid_geometry(image)
     data = sitk.GetArrayViewFromImage(image)
     if not np.isfinite(data).all() or np.ptp(data) <= 0:
@@ -346,6 +353,12 @@ def inspect(message, root, classifier):
                 known = any(digest(root / "packages/EXMO_MRI" / c["input"]) == source_sha for c in read_json(root / "packages/EXMO_MRI/samples/manifest.json"))
                 record.update(confirmation=None if known else "water", source_sha256=source_sha)
             else:
+                if classifier is None:
+                    record.update(ready=False, classification={'status': 'license_required', 'route_to_segmentation': None},
+                                  error='방향 분류 권한 확인이 필요합니다. 영상과 메타데이터는 보존되었습니다.')
+                    write_json(directory / 'input.json', record)
+                    rows.append(record)
+                    continue
                 classification = classifier.process({"operation": "classify", "path": str(paths[0])}, classifier.pipeline)
                 record["classification"] = classification
                 raw_header = nrrd.read_header(str(source))
@@ -859,16 +872,47 @@ def main():
     spec = importlib.util.spec_from_file_location("exmo_classifier", Path(__file__).with_name("classifier-worker.py"))
     classifier = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(classifier)
-    classifier.engine.DEFAULT_DICOM_CACHE = classification / "models/dicom/training_features_4class_dicom_260711_corrected.npz"
-    classifier.engine.DEFAULT_NRRD_CACHE = classification / "models/nrrd/training_features_4class_nrrd_260711.npz"
-    classifier.pipeline = classifier.ViewClassificationPipeline(min_confidence=.4)
+    from model_security import ModelGuard, load_policy
+    model_guard = ModelGuard(load_policy(), args.engine_root)
+    protected = model_guard.policy or (classification.parent / 'model-package-xray-classifier.json').exists()
+    if not protected:
+        classifier.pipeline = classifier.load_vendor(classification)
     for line in sys.stdin:
         message = {}
         try:
             message = json.loads(line)
             operation = message["operation"]
-            if operation == "inspect":
-                result = inspect(message, args.engine_root, classifier)
+            if operation == 'storage_init':
+                import artifact_store
+                artifact_store.initialize(message)
+                continue
+            if model_guard.policy and operation in ('finalize', 'mesh'):
+                import artifact_store
+                if artifact_store.current() is None:
+                    raise InputError('결과 보호 저장소를 초기화하지 못했습니다.')
+            if operation == 'model_challenge':
+                result = model_guard.challenge(message['runId'], 'xray-classifier')
+            elif operation == 'model_discard':
+                model_guard.pending.pop(message['runId'], None)
+                result = None
+            elif operation == "inspect":
+                protection, active_classifier = None, classifier
+                try:
+                    if message['analysis'] == 'xray' and protected:
+                        active_classifier = None
+                        if message.get('authorization'):
+                            job = {'analysis': 'xray-classifier', 'paths': message['paths'], 'destination': message['destination']}
+                            protection = model_guard.admit(message['runId'], job, message.pop('authorization'))
+                            classifier.pipeline = classifier.load_vendor(classification, protection)
+                            active_classifier = classifier
+                    elif message.get('classificationDenied'):
+                        active_classifier = None
+                    result = inspect(message, args.engine_root, active_classifier)
+                finally:
+                    if protection:
+                        classifier.pipeline.models.clear()
+                        classifier.pipeline = None
+                        protection.close()
             elif operation == "extract":
                 result = extract_zip(message)
             elif operation == "preview":
