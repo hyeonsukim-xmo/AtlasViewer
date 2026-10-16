@@ -41,7 +41,7 @@
 
 | 항목 | 이번 설계 |
 | --- | --- |
-| Sentinel / CodeMeter 중심 후보 | YubiKey 5C Nano의 PIV 인증을 우선 검증한다. 상용 라이선스 플랫폼 계약은 기본 전제에서 제외한다. |
+| Sentinel / CodeMeter 중심 후보 | YubiKey 5C NFC / 5C Nano의 PIV 인증을 우선 검증한다. 상용 라이선스 플랫폼 계약은 기본 전제에서 제외한다. |
 | 동글 인증 방식 | USB 일련번호 대조 대신 내부 생성 ECDSA P-256 키로 challenge에 서명한다. |
 | 발급 권한 | EXMO 발급 키와 고객 YubiKey 인증 키를 분리한다. 고객 PC·동글에 발급 마스터 개인키를 넣지 않는다. |
 | 오프라인 우선 제안 | 최초 온라인 활성화·주기적 서버 갱신을 기본으로 한다. 유효한 서명 권한이 있을 때만 제한적인 오프라인 유예를 허용한다. |
@@ -108,7 +108,7 @@ GLB·Overlay는 원본 마스크 파일과 다르지만 해부학적 형태를 �
 
 ### 4.1 고객 키
 
-우선 대상은 일반 YubiKey 5C Nano다. 인증용 `9E` ECDSA P-256 키와 모델 키 봉투를 여는 `9D` ECDH P-256 키를 별도로 생성한다. `PIN=Never`, `Touch=Never`는 반복 분석 중 조작을 요구하지 않기 위한 제안이며 두 키에 명시적으로 설정하고 실제 장비에서 확인한다. 이 설정은 사용자 본인 확인이 아니라 키 소유 확인이므로 등록 PC 귀속을 함께 적용한다. 도난 키와 등록 PC를 함께 확보한 공격까지 막는 것은 아니다. 일부 FIPS 모델의 정책은 다르므로 이름이 비슷하다고 대체하지 않는다. [PIN·Touch 정책](https://docs.yubico.com/yesdk/users-manual/application-piv/pin-touch-policies.html)
+우선 대상은 구매한 일반 YubiKey 5C NFC(사용자 전달 firmware 5.8)이며 5C Nano도 지원한다. USB-C 전송을 사용하고, 허용된 form factor 두 가지의 인증서·실제 장치 일치를 함께 확인한다. 인증용 `9E` ECDSA P-256 키와 모델 키 봉투를 여는 `9D` ECDH P-256 키를 별도로 생성한다. `PIN=Never`, `Touch=Never`는 반복 분석 중 조작을 요구하지 않기 위한 제안이며 두 키에 명시적으로 설정하고 실제 장비에서 확인한다. 이 설정은 사용자 본인 확인이 아니라 키 소유 확인이므로 등록 PC 귀속을 함께 적용한다. 도난 키와 등록 PC를 함께 확보한 공격까지 막는 것은 아니다. 일부 FIPS 모델의 정책은 다르므로 이름이 비슷하다고 대체하지 않는다. [PIN·Touch 정책](https://docs.yubico.com/yesdk/users-manual/application-piv/pin-touch-policies.html)
 
 키 등록은 EXMO에서 다음 순서로 한다.
 
@@ -387,7 +387,7 @@ Electron 빌드는 `EnableEmbeddedAsarIntegrityValidation`과 `OnlyLoadAppFromAs
 ## 11. 구현 전 남은 결정
 
 1. **운영 수치와 판매 범위:** 온라인 우선 방향을 기준으로 오프라인 7일·정기 갱신 5분·challenge 60초 후보를 장애 대응과 회수 지연 관점에서 확정한다. 영구/구독 판매, installation 수, 지원 계약·업데이트 권리는 별도로 결정한다. 숫자가 미확정이라고 무제한 유예로 배포하지 않는다.
-2. **실물과 PC 키:** YubiKey 5C Nano의 실제 펌웨어·USB-C 사용 가능 여부, 두 slot의 무인 정책, CNG/TPM 및 JWE 호환성을 확인한다. TPM 없는 PC 지원 수준도 결정한다. 구매·초기화는 아직 수행하지 않았다.
+2. **실물과 PC 키:** YubiKey 5C NFC / 5C Nano의 실제 펌웨어·USB-C 사용 가능 여부, 두 slot의 무인 정책, CNG/TPM 및 JWE 호환성을 확인한다. TPM 없는 PC 지원 수준도 결정한다. 5C NFC는 사용자가 구매했으며 실물 초기화·연결 검증은 아직 수행하지 않았다.
 3. **기관 복구와 재발급 책임:** 결과 키 복구 주체·백업 위치·PC 이전·분실키 재발급 절차·서버 장애 대응 담당을 지정한다. 기존 lease가 남아 있는 PC의 회수 지연과 오프라인 시간 조작 한계를 계약·운영 정책에 반영한다.
 4. **허용되는 로컬 보호 수준:** YubiKey로 복제·사용권을 통제하되 고객 관리자에 의한 메모리 추출까지 절대 금지해야 한다면 로컬 GPU 방식의 보강만으로 요구를 충족했다고 판정하지 않는다. 그때는 EXMO가 통제하는 추론 환경을 별도 검토한다.
 

@@ -19,6 +19,7 @@ from yubikit.core.smartcard import ApduError, SW
 from yubikit.piv import KEY_TYPE, MANAGEMENT_KEY_TYPE, PIN_POLICY, SLOT, TOUCH_POLICY
 
 import yubikey_probe as probe
+import piv_support
 
 
 def certificate(subject, key, issuer, issuer_key, *, ca=False, expired=False, extensions=()):
@@ -101,7 +102,7 @@ class ProbeTests(unittest.TestCase):
 
     def attest(self, slot, key, **changes):
         extensions = {3: bytes(self.info.version), 7: bytes(Tlv(0x02, self.info.serial.to_bytes(4, "big"))),
-                      8: b"\x01\x01", 9: b"\x04"}
+                      8: b"\x01\x01", 9: bytes([int(self.info.form_factor)])}
         extensions.update(changes.pop("extensions", {}))
         return certificate(changes.pop("subject", f"YubiKey PIV Attestation {int(slot):02x}"),
                            key, self.factory.subject, changes.pop("issuer_key", self.factory_key),
@@ -118,6 +119,48 @@ class ProbeTests(unittest.TestCase):
         probe.compare_registration(proof, proof)
         self.assertNotIn("PRIVATE KEY", json.dumps(proof))
         self.assertEqual(self.session.writes, [])
+
+    def test_nfc_58_and_nano_54_use_the_same_verified_enrollment(self):
+        for form_factor, version in [(3, Version(5, 8, 0)), (4, Version(5, 4, 0))]:
+            with self.subTest(form_factor=form_factor):
+                self.info.form_factor, self.info.version = form_factor, version
+                proof = probe.collect_proof(self.session, self.info, [self.root], [])
+                self.assertEqual(proof['form_factor'], probe.FORM_FACTORS[form_factor])
+                record = {'serial': self.info.serial, 'firmware': list(version),
+                          'factoryCertificate': proof['factory_certificate_pem'],
+                          'attestations': {s: v['attestation_pem'] for s, v in proof['slots'].items()}}
+                with patch.object(piv_support, 'load_trust', return_value=([self.root], [])):
+                    self.assertEqual(set(piv_support.verify_record(record)), {'9e', '9d'})
+                    self.assertEqual(set(piv_support.verify_record(record, form_factor)), {'9e', '9d'})
+                    with self.assertRaises(probe.CheckFailed):
+                        piv_support.verify_record(record, 7 - form_factor)
+                self.assertEqual(self.session.writes, [])
+
+    def test_form_factor_mismatch_and_unsupported_devices_are_rejected(self):
+        self.info.form_factor = 3
+        wrong = self.attest(SLOT.CARD_AUTH, self.session.keys[SLOT.CARD_AUTH], extensions={9: b'\x04'})
+        with patch.object(self.session, 'attest_key', return_value=wrong), self.assertRaises(probe.CheckFailed):
+            probe.collect_proof(self.session, self.info, [self.root], [])
+        for factor in (0, 1, 2, 5, 0x83, 0x84):
+            self.info.form_factor = factor
+            with self.subTest(factor=factor), self.assertRaises(probe.CheckFailed):
+                probe.check_device(self.info)
+        self.info.form_factor, self.info.is_fips = 3, True
+        with self.assertRaises(probe.CheckFailed):
+            probe.check_device(self.info)
+        self.info.is_fips, self.info.version = False, Version(5, 3, 0)
+        with self.assertRaises(probe.CheckFailed):
+            probe.check_device(self.info)
+
+    def test_both_attested_slots_must_have_the_same_form_factor(self):
+        self.info.form_factor = 3
+        record = {'serial': self.info.serial, 'firmware': list(self.info.version),
+                  'factoryCertificate': self.factory.public_bytes(probe.serialization.Encoding.PEM).decode(),
+                  'attestations': {f'{int(s):02x}': self.attest(s, self.session.keys[s],
+                      extensions={9: bytes([3 if s == SLOT.CARD_AUTH else 4])})
+                      .public_bytes(probe.serialization.Encoding.PEM).decode() for s in probe.SLOTS}}
+        with patch.object(piv_support, 'load_trust', return_value=([self.root], [])), self.assertRaises(probe.CheckFailed):
+            piv_support.verify_record(record)
 
     def test_bundled_trust_is_pinned_and_has_no_test_roots(self):
         roots, intermediates = probe.load_trust()

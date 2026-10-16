@@ -137,9 +137,50 @@ node scripts/security/check-internal-package.cjs
 - 최종 내부 설치본의 등록·회수·DPAPI 재검증: `outputs/security-check/0f64ac73-bb5b-49c0-acfa-6c29a71ed1c8/verification.json`. 설치 파일 hash·미서명 상태·검사 수·남은 항목은 `outputs/security-implementation-status.json`에 기록했다. 전체 Node 보안 검사 31개, attestation 14개, 내부 JWE 1개, artifact 2개와 기존 영상/색상/상호작용 검사를 통과했다.
 - 암호화/복호화는 성능 보고서에 독립 항목으로 기록한다. `artifact_encrypt/decrypt`는 암호 연산 시간이며 파일 I/O 시간은 기존 save/read 단계에 남는다. 전체 payload 검증은 앱 시작 비용이며 추론 시간에 합산하지 않는다.
 
+## 0.1.26 시작 성능과 5C NFC 지원
+
+시작 지연 후속 작업은 [Desktop 성능 문서의 TODO](DESKTOP_PERFORMANCE.md)에 보류 항목으로 정리했다. 모델 5.31 GB와 나머지 실행 환경 17.47 GB의 검사 비용 분리부터 진행한다.
+
+시작 시 모든 서명·파일 목록·내용 해시·모델 연결 검사를 유지한다. 디렉터리 열거 시 얻은 파일 종류를 재사용해 중복 조회를 줄였다. 파일 크기·수정 시각만 믿는 캐시는 사용하지 않는다. 같은 크기·시각으로 변조한 파일, 추가 파일, junction, 잘못된 서명·모델 조합은 계속 거부한다.
+
+앱을 실행할 때 현재 프로필의 `userData/startup-performance.json`에 Electron 준비, helper 검증, payload의 index/목록/모델 연결/해시 검사, 결과 키 준비, 라이선스 초기화, 화면 준비 시간을 기록한다. 환자 정보·개인키·모델 내용은 넣지 않는다. 시간 단위는 ms이며 `totalMs`는 main 모듈 진입부터 첫 화면 표시까지다. OS가 실행 파일을 여는 시간은 포함하지 않는다. 진단 파일 저장 실패가 정상적인 앱 실행을 막지는 않는다.
+
+전체 payload만 따로 비교할 때:
+
+```powershell
+npm run performance:startup -- PAYLOAD ISSUER_PUBLIC.pem NEW_REPORT.json
+# 비교용으로 보관한 이전 verifier를 사용하려면 마지막 인자에 해당 payload.cjs 경로를 준다.
+# 같은 디렉터리에 그 버전의 payload-verifier.cjs와 공통 검증 모듈이 있어야 한다.
+npm run performance:startup -- PAYLOAD ISSUER_PUBLIC.pem BASELINE_REPORT.json BASELINE_VERIFIER.cjs
+# Node 단독 진단은 실제 Desktop 시간과 분리한다.
+npm run performance:startup -- --node PAYLOAD ISSUER_PUBLIC.pem NODE_REPORT.json
+```
+
+기본 명령은 앱과 같은 Electron으로 실행한다. 보고서는 CPU·메모리·Node/Electron 버전, verifier/worker SHA-256, payload 버전과 index SHA-256, 단계별 시간·worker별 처리량을 기록한다. 이전 verifier에 단계별 측정이 없으면 `wallMs`만 비교한다. 출력 경로는 새 파일이어야 한다. OS 파일 캐시를 비우지 않으므로 재부팅 직후/반복 실행 조건을 혼동하지 않는다. 다른 작업을 동시에 돌리지 않고 같은 payload·장비에서 순차 비교한다.
+
+2026-10-16 이 PC의 동일 payload(88,909개 파일, 22,786,400,359 bytes) 실험 기록:
+
+| 환경 / 변경 후보 | 전체 payload 검사 | 해석 |
+| --- | ---: | --- |
+| Node 단독, 기존 코드 | 34.87초 | Desktop 시작 시간으로 사용할 수 없음 |
+| Node 단독, 목록 조회·버퍼·파일 순서 변경 | 29.02초 | Electron에서 재검증 필요 |
+| Electron, 기존 코드 | 114.54초 | 같은 QA payload 경로의 대조 실행 |
+| Electron, 위 후보 및 original-fs | 119.59초 | 전체 개선 확인 안 됨 |
+| Electron, 비동기 파일 읽기 후보 | 118.75초 | 전체 개선 확인 안 됨 |
+
+Node의 개선율을 Desktop 개선율로 사용하지 않는다. 버퍼 재사용·큰 파일 우선 배분·original-fs·비동기 읽기는 최종 코드에서 제외했다. 단일 worker도 제한 시간 안에 끝나지 않아 제외했다. 5천 개 작은 파일만 검사한 미세 시험의 개선 역시 전체 실행 개선으로 환산하지 않는다. 최종 변경은 목록 열거 시 중복 조회 제거와 계측이다. 기존 177초 기록은 같은 실행 조건의 대조가 아니므로 직접 속도 배율을 계산하지 않는다. 각 값은 단일 실행이며 통계적 성능 보장이 아니다. 보고서는 `outputs/startup-{baseline-control,optimized-control,electron-original-baseline,electron-native-fs,electron-async}-20261016.json`에 있다.
+
+최종 0.1.26 ASAR의 실제 앱 검사에서는 첫 화면 표시까지 **166.48초**, payload 전체 검증 165.00초, 그중 목록 열거 1.41초·내용 해시 163.33초였다. 라이선스 초기화는 0.78초, 화면 준비는 0.21초였다. 앱 전체 실행과 별도 verifier 실행은 구분한다. **전체 시작 시간 개선은 확정하지 않았고, 해시 검증 지연은 남은 병목이다.** 별도 utility process 후보도 122.13초로 개선을 확인하지 못해 적용하지 않았다.
+
+최종 검증 기록: `outputs/security-check/9ba284d4-2ce7-4cb6-af80-f05863b2464d/{verification,startup-performance}.json`. 실제 ASAR에서 CNG 등록·온라인 승인·DPAPI·회수 후 결과 목록 접근과 같은 크기·수정 시각의 파일 변조 거부를 통과했다. Node 보안 검사 32개, PIV 합성 검사 17개, JWE 검사 1개, TypeScript 검사를 통과했다. 모델 추론 코드가 바뀌지 않아 환자 추론은 재실행하지 않았다.
+
+내부용 설치 파일은 `release/internal/EXMO-Atlas-Internal-Setup-0.1.26.exe`다. SHA-256: `937c48ffa4e78d3bcb9fdd143b14d0c15d871a1f037f730d700dbc629a95a461`. 미서명 내부 검증용이며 22.8GB 엔진은 이 설치 파일에 포함되지 않는다. 이번 검증은 기존 서명 엔진을 별도로 연결했다. 고객용 서명 설치본·새 PC 설치 검증과 혼동하지 않는다.
+
+5C NFC(사용자 전달 firmware 5.8)와 Nano의 공통 PIV 검사 및 합성 테스트 17개를 통과했다. 실제 인증서 chain·PC/SC·재연결은 장치 도착 후 검증한다. 서버는 제공된 뒤 SSH로 배포한다. 그때 호스트·SSH 계정/포트·운영 도메인·관리 권한·백업 위치를 확인하고 위 서버 배포/복구 절차를 실행한다. SSH 자격이나 운영 발급 개인키는 저장소에 넣지 않는다.
+
 ## 출시 전 실제 환경에서 남은 확인
 
-1. YubiKey 5C Nano 실물의 프로비저닝·9E 서명·9D ECDH·PC/SC 드라이버·재연결·절전 복귀. 현재 장치가 없어 실행하지 않았다.
+1. YubiKey 5C NFC / 5C Nano 실물의 프로비저닝·9E 서명·9D ECDH·PC/SC 드라이버·재연결·절전 복귀. 구매 장치는 5C NFC·firmware 5.8로 전달받았으며, USB-C keychain/Nano 공통 검증과 합성 테스트는 반영했다. 실물 연결 검증은 아직 수행하지 않았다.
 2. 실제 기관/서버의 HTTPS 인증서·방화벽·백업 보관·서버 시간·운영 계정·장애 복구. 배포할 서버 접근 정보가 없어 원격 배포하지 않았다.
 3. 실제 Authenticode 서명 인증서를 사용한 고객 NSIS, 완전히 새 PC에서 설치/업데이트/삭제/복구와 전체 환자 워크플로. 현재 인증서와 추가 PC가 없다.
 4. 고객 관리자 권한의 추출/변조 공격에 대한 별도 보안 평가. 로컬 실행 모델은 메모리와 GPU에 복호화 상태로 존재한다. CNG software KSP, Python/ASAR 검사와 동글 인증은 절대 추출 방지나 TPM 보장으로 표현하지 않는다.

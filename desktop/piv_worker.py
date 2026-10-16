@@ -38,7 +38,7 @@ def operate(message):
         else:
             record = message['hardware']
             require(info.serial == record['serial'] and list(info.version) == record['firmware'])
-        keys = verify_record(record)
+        keys = verify_record(record, int(info.form_factor))
         for slot in (SLOT.CARD_AUTH, SLOT.KEY_MANAGEMENT):
             metadata = session.get_slot_metadata(slot)
             require(metadata.generated and metadata.key_type == KEY_TYPE.ECCP256 and metadata.pin_policy == PIN_POLICY.NEVER and metadata.touch_policy == TOUCH_POLICY.NEVER)

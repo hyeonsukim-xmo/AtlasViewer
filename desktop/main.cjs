@@ -1,3 +1,4 @@
+const startupStarted=performance.now(),startupTimings={};
 const { app, BrowserWindow, dialog, Menu, net, protocol, session, ipcMain, safeStorage, powerMonitor } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -20,6 +21,7 @@ let licensing;
 let resultStorage;
 let protectedEngineRoot;
 let initializing = true;
+let startupRecorded = false;
 const preferences = { nodeIntegration: false, contextIsolation: true, sandbox: true };
 const csp =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
@@ -62,7 +64,20 @@ app.on("web-contents-created", (_, contents) => {
   );
 });
 
+function recordStartup(status) {
+  if(startupRecorded)return;
+  startupRecorded=true;
+  try {
+    fs.mkdirSync(app.getPath('userData'),{recursive:true});
+    require('./security/storage.cjs').atomicWrite(path.join(app.getPath('userData'),'startup-performance.json'),JSON.stringify({
+      schema:'exmo-startup-performance-v1',at:new Date().toISOString(),appVersion:require('../package.json').version,profile:securityBuild.profile,
+      status,totalMs:performance.now()-startupStarted,timings:startupTimings,
+    },null,2));
+  }catch{} // Diagnostics must not make otherwise readable results unavailable.
+}
+
 function createWindow() {
+  const rendererStarted=performance.now();
   const window = new BrowserWindow({
     title: applicationName,
     width: 1440,
@@ -101,8 +116,13 @@ function createWindow() {
     removeLicenseUi();
     imaging.dispose().catch(() => {});
   });
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => {
+    window.show();
+    startupTimings.rendererMs=performance.now()-rendererStarted;
+    recordStartup('ready');
+  });
   window.loadURL(origin + (process.argv.includes("--xray") ? "#xray" : "")).catch((error) => {
+    recordStartup('failed');
     dialog.showErrorBox("EXMO Atlas could not start", error.message);
     app.quit();
   });
@@ -112,8 +132,10 @@ app
   .whenReady()
   .then(async () => {
     if (!primaryInstance) return;
+    startupTimings.electronReadyMs=performance.now()-startupStarted;
     app.setAppUserModelId(internalBuild ? "com.exmo.atlas.internal" : "com.exmo.atlas");
     if (securityBuild.profile !== "development") {
+      let phaseStarted=performance.now();
       const hashes=JSON.parse(fs.readFileSync(path.join(__dirname,'security/runtime-integrity.json'),'utf8'));
       const resources=path.resolve(scriptsRoot,'..');
       const {hashFile,inventory}=require('./security/payload.cjs');
@@ -122,27 +144,32 @@ app
         if(hashFile(path.join(resources,relative)).sha256!==expected)throw Error('분석 실행 파일이 변경되었습니다. 설치본을 복구하세요.');
       }
       for(const relative of inventory(scriptsRoot))if(/\.(py|pyc|pyd|dll)$/i.test(relative) && !hashes['imaging/'+relative])throw Error('승인되지 않은 분석 실행 파일이 있습니다.');
+      startupTimings.helperIntegrityMs=performance.now()-phaseStarted;
       const payload=path.resolve(scriptsRoot,'../engine');
       if(securityBuild.profile==='customer' || fs.existsSync(path.join(payload,'payload.json'))) {
         const crypto=require('node:crypto');
         const progress=new BrowserWindow({width:440,height:160,resizable:false,closable:false,autoHideMenuBar:true,backgroundColor:'#100e26',webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
         await progress.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><style>body{background:#100e26;color:#e9e6f4;font:14px system-ui;margin:28px}p{color:#a7a2bb;font-size:12px}progress{width:100%;accent-color:#aaa0c7}</style><b>분석 실행 환경 확인</b><p>설치 파일과 모델의 무결성을 확인하고 있습니다.</p><progress max="100" value="0"></progress>'));
         let policy;
+        const payloadTimings=startupTimings.payload={};
         try {
           policy=await require('./security/payload.cjs').verifyPayloadAsync(payload,crypto.createPublicKey(securityBuild.issuerPublicKey),(done,total)=>{
             if(!progress.isDestroyed())void progress.webContents.executeJavaScript('document.querySelector("progress").value='+Math.round(done/total*100)).catch(()=>{});
-          });
+          },payloadTimings);
         }finally{if(!progress.isDestroyed())progress.destroy();}
         if(policy.profile!==securityBuild.profile)throw Error('분석 엔진의 제품 프로필이 일치하지 않습니다.');
         protectedEngineRoot=payload;
       }
+      phaseStarted=performance.now();
       resultStorage = openResultStorage(path.join(app.getPath('userData'), 'result-security'), safeStorage);
+      startupTimings.resultStorageMs=performance.now()-phaseStarted;phaseStarted=performance.now();
       licensing = await openLicensing({ build: securityBuild, directory: path.join(app.getPath("userData"), "licensing"), safeStorage,
         resultStorage,
         dongle:securityBuild.profile==='customer'?new (require('./security/dongle.cjs').Dongle)(
           path.join(protectedEngineRoot,'python','python.exe'),path.join(scriptsRoot,'piv_worker.py'),
           [path.join(scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(protectedEngineRoot,'envs/security/Lib/site-packages'),'--']):undefined,
         key: new WindowsKey(bundled ? path.resolve(__dirname, "../..", "security", "windows-key.ps1") : undefined) });
+      startupTimings.licensingMs=performance.now()-phaseStarted;
       powerMonitor.on("resume", () => licensing.refresh().catch(() => {}));
     }
     Menu.setApplicationMenu(null);
@@ -182,6 +209,7 @@ app
     });
   })
   .catch((error) => {
+    recordStartup('failed');
     dialog.showErrorBox("EXMO Atlas could not start", error.message);
     app.quit();
   });

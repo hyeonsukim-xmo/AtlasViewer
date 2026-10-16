@@ -1,6 +1,6 @@
 {
   "name": "exmo-segmentation-atlas",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "private": true,
   "description": "EXMO segmentation atlas desktop and web viewer",
   "license": "MIT",
@@ -9,6 +9,7 @@
   "main": "desktop/main.cjs",
   "scripts": {
     "performance:desktop": "node scripts/performance-desktop.cjs",
+    "performance:startup": "node scripts/security/benchmark-startup.cjs",
     "dev": "vite --host 127.0.0.1 --port 3016",
     "build": "vite build",
     "check": "tsc --noEmit",

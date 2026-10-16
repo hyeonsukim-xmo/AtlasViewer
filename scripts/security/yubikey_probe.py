@@ -25,7 +25,7 @@ from yubikit.piv import KEY_TYPE, MANAGEMENT_KEY_TYPE, PIN_POLICY, PivSession, S
 from yubikit.support import read_info
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "desktop"))
-from piv_support import (CheckFailed, check_admin_secrets, check_device, extension, fingerprint, load_trust, public_bytes, require, verify_attestation, verify_chain, TRUST, TRUST_FILES, SLOTS, SCHEMA, PROOF_TTL)
+from piv_support import (CheckFailed, check_admin_secrets, check_device, extension, fingerprint, load_trust, public_bytes, require, verify_attestation, verify_chain, TRUST, TRUST_FILES, SLOTS, SCHEMA, PROOF_TTL, FORM_FACTORS)
 
 
 
@@ -106,7 +106,7 @@ def collect_proof(session, info, roots, intermediates):
     certificates, keys = {}, {}
     for slot in SLOTS:
         certificate = session.attest_key(slot)
-        key = verify_attestation(certificate, factory, slot, info.serial, tuple(info.version), roots, intermediates)
+        key = verify_attestation(certificate, factory, slot, info.serial, tuple(info.version), roots, intermediates, int(info.form_factor))
         metadata = session.get_slot_metadata(slot)
         require(metadata.generated and metadata.key_type == KEY_TYPE.ECCP256, "Slot must contain an internally generated P-256 key")
         require(metadata.pin_policy == PIN_POLICY.NEVER and metadata.touch_policy == TOUCH_POLICY.NEVER,
@@ -129,7 +129,7 @@ def collect_proof(session, info, roots, intermediates):
         "schema": SCHEMA, "status": "hardware_proof_passed_not_a_license",
         "checked_at": datetime.now(timezone.utc).isoformat(), "serial": info.serial,
         "sdk_versions": sdk_versions(),
-        "firmware": str(info.version), "form_factor": "USB_C_NANO", "pin_policy": "NEVER", "touch_policy": "NEVER",
+        "firmware": str(info.version), "form_factor": FORM_FACTORS[int(info.form_factor)], "pin_policy": "NEVER", "touch_policy": "NEVER",
         "factory_certificate_pem": factory.public_bytes(serialization.Encoding.PEM).decode("ascii"),
         "slots": {f"{int(slot):02x}": {
             "public_key_sha256": fingerprint(keys[slot]),

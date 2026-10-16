@@ -19,6 +19,7 @@ TRUST_FILES = {
 SLOTS = (SLOT.CARD_AUTH, SLOT.KEY_MANAGEMENT)
 SCHEMA = "exmo-piv-enrollment-poc-v1"
 PROOF_TTL = 60
+FORM_FACTORS = {3: "USB_C_KEYCHAIN", 4: "USB_C_NANO"}
 
 class CheckFailed(Exception):
     pass
@@ -66,7 +67,7 @@ def extension(certificate, suffix):
     return value.value
 
 
-def verify_attestation(certificate, factory, slot, serial, version, roots, intermediates):
+def verify_attestation(certificate, factory, slot, serial, version, roots, intermediates, form_factor=None):
     verify_chain(certificate, [factory, *intermediates], roots)
     # Require this device's F9 as the immediate issuer, not merely any trusted path.
     certificate.verify_directly_issued_by(factory)
@@ -79,13 +80,16 @@ def verify_attestation(certificate, factory, slot, serial, version, roots, inter
     require(int.from_bytes(encoded_serial, "big") == serial, "Attested serial differs from selected device")
     require(extension(certificate, 3) == bytes(version), "Attested firmware differs from selected device")
     require(extension(certificate, 8) == bytes([PIN_POLICY.NEVER, TOUCH_POLICY.NEVER]), "Expected PIN Never and Touch Never")
-    require(extension(certificate, 9) == b"\x04", "Only non-FIPS YubiKey 5C Nano is in this PoC scope")
+    attested_form = extension(certificate, 9)
+    require(len(attested_form) == 1 and attested_form[0] in FORM_FACTORS,
+            "Expected a non-FIPS YubiKey 5C NFC or 5C Nano form factor")
+    require(form_factor is None or attested_form[0] == form_factor, "Attested form factor differs from selected device")
     return key
 
 
 def check_device(info):
     require(info.serial is not None and info.serial > 0, "Device has no usable serial")
-    require(int(info.form_factor) == 4 and not info.is_fips, "Select a non-FIPS YubiKey 5C Nano")
+    require(int(info.form_factor) in FORM_FACTORS and not info.is_fips, "Select a non-FIPS YubiKey 5C NFC or 5C Nano")
     require(tuple(info.version) >= (5, 4, 0), "This PoC requires firmware 5.4+ for metadata and AES management keys")
 
 
@@ -97,7 +101,7 @@ def check_admin_secrets(session):
     require(management.key_type == MANAGEMENT_KEY_TYPE.AES256, "Use an operator-managed AES256 management key")
 
 
-def verify_record(record):
+def verify_record(record, form_factor=None):
     require(isinstance(record, dict) and set(record) == {'serial', 'firmware', 'factoryCertificate', 'attestations'}, 'Invalid hardware enrollment')
     require(type(record['serial']) is int and 0 < record['serial'] < 2 ** 32, 'Invalid serial')
     version = record['firmware']
@@ -110,6 +114,7 @@ def verify_record(record):
     for slot in SLOTS:
         name = f'{int(slot):02x}'
         certificate = x509.load_pem_x509_certificate(record['attestations'][name].encode())
-        keys[name] = verify_attestation(certificate, factory, slot, record['serial'], tuple(version), roots, intermediates)
+        keys[name] = verify_attestation(certificate, factory, slot, record['serial'], tuple(version), roots, intermediates, form_factor)
+        form_factor = extension(certificate, 9)[0]
     require(public_bytes(keys['9e']) != public_bytes(keys['9d']), 'Hardware keys must be distinct')
     return keys

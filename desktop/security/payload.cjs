@@ -14,14 +14,19 @@ function hashFile(file) {
 }
 function inventory(root) {
   const result=[];
+  const stat=fs.lstatSync(root);P.check(stat.isDirectory() && !stat.isSymbolicLink(),'Payload root must be a real directory');
   function visit(relative){
-    const stat=fs.lstatSync(path.join(root,relative));P.check(!stat.isSymbolicLink(),'Payload reparse point prohibited');
-    if(stat.isDirectory())for(const name of fs.readdirSync(path.join(root,relative)).sort())visit(relative?relative+'/'+name:name);
-    else {P.check(stat.isFile());safeName(relative);if(!['payload.json','files.json'].includes(relative))result.push(relative);}
+    for(const entry of fs.readdirSync(path.join(root,relative),{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)){
+      P.check(!entry.isSymbolicLink(),'Payload reparse point prohibited');
+      const name=relative?relative+'/'+entry.name:entry.name;
+      if(entry.isDirectory())visit(name);
+      else {P.check(entry.isFile());safeName(name);if(!['payload.json','files.json'].includes(name))result.push(name);}
+    }
   }
   visit('');return result;
 }
-function inspectPayload(root,issuer,checkFile) {
+function inspectPayload(root,issuer,checkFile,timings={}) {
+  let started=performance.now();
   root=path.resolve(root);const document=path.join(root,'payload.json');P.check(fs.statSync(document).size<=M.LIMIT);
   const signed=JSON.parse(fs.readFileSync(document,'utf8'));P.fields(signed,['token']);
   const policy=M.verify(signed.token,issuer,'exmo-runtime-payload-v1');
@@ -30,7 +35,9 @@ function inspectPayload(root,issuer,checkFile) {
   const indexFile=path.join(root,'files.json');P.check(fs.statSync(indexFile).size<=64*1024**2);
   const data=fs.readFileSync(indexFile);P.check(M.hash(data)===policy.indexSha256,'Payload index signature mismatch');
   const records=JSON.parse(data);P.check(Array.isArray(records) && records.length>0 && records.length<=150000);
+  timings.indexMs=performance.now()-started;started=performance.now();
   const actual=inventory(root),names=new Set(),byName=new Map();P.check(actual.length===records.length,'Unexpected or missing runtime file');
+  timings.inventoryMs=performance.now()-started;started=performance.now();
   for(const record of records){
     P.fields(record,['path','size','sha256']);safeName(record.path);P.integer(record.size);P.digest(record.sha256);
     P.check(!names.has(record.path.toLowerCase()));names.add(record.path.toLowerCase());
@@ -53,21 +60,26 @@ function inspectPayload(root,issuer,checkFile) {
     }
   }
   P.check(!actual.some(name=>name.startsWith('packages/') && /\.(pth|safetensors|npz)$/i.test(name)),'Plaintext model in payload');
+  timings.bindingMs=performance.now()-started;
+  timings.files=records.length;timings.bytes=records.reduce((sum,r)=>sum+r.size,0);
   return {policy,records};
 }
 function checkFile(file,record){const value=hashFile(file);P.check(value.size===record.size && value.sha256===record.sha256,'Runtime file failed integrity verification: '+record.path);}
 function verifyPayload(root,issuer){return inspectPayload(root,issuer,checkFile).policy;}
-async function verifyPayloadAsync(root,issuer,onProgress=()=>{}){
+async function verifyPayloadAsync(root,issuer,onProgress=()=>{},timings={}){
   const {Worker}=require('node:worker_threads');
-  const {policy,records}=inspectPayload(root,issuer);
+  const started=performance.now();
+  const {policy,records}=inspectPayload(root,issuer,undefined,timings);
+  const hashStarted=performance.now();
   const workers=[],counts=[0,0,0,0];
+  timings.workers=[];
   try {
     await Promise.all(counts.map((_,index)=>new Promise((resolve,reject)=>{
       const worker=new Worker(path.join(__dirname,'payload-verifier.cjs'),{workerData:{root:path.resolve(root),records:records.filter((_,i)=>i%4===index)}});workers.push(worker);
       worker.on('error',reject);worker.on('exit',code=>code===0?resolve():reject(Error('Runtime integrity verification failed')));
-      worker.on('message',count=>{counts[index]=count;onProgress(counts.reduce((a,b)=>a+b,0),records.length);});
+      worker.on('message',value=>{counts[index]=value.completed;timings.workers[index]=value;onProgress(counts.reduce((a,b)=>a+b,0),records.length);});
     })));
     return policy;
-  }finally{await Promise.all(workers.map(w=>w.terminate()));}
+  }finally{await Promise.all(workers.map(w=>w.terminate()));timings.hashMs=performance.now()-hashStarted;timings.totalMs=performance.now()-started;}
 }
 module.exports={safeName,hashFile,inventory,verifyPayload,verifyPayloadAsync,checkFile};

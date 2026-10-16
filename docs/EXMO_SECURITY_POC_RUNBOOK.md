@@ -4,11 +4,11 @@
 - 앱 기준: `ac0998e` / `0.1.24`, 설계 기준 커밋: `d2c6700`
 - 작업 브랜치: `feat/desktop-security`
 - 설계: [Desktop 라이선스와 모델 보호](EXMO_DESKTOP_SECURITY_DESIGN.md)
-- 현재 상태: 개발용 검증 도구 구현. 실물 동글이 연결되지 않아 하드웨어 통과 판정은 보류.
+- 문서 범위: 1단계 개발용 검증 도구. 현재 제품 통합 상태는 [제품 보안 운영 문서](EXMO_PRODUCT_SECURITY_RUNBOOK.md)를 기준으로 한다. 실물 동글의 하드웨어 통과 판정은 보류.
 
 ## 1. 이번 산출물과 경계
 
-[yubikey_probe.py](../scripts/security/yubikey_probe.py)는 Windows 개발 PC에서 PIV 장치를 조회하고, 비어 있는 `9E`·`9D`에 키를 생성하며, 제조사 인증서와 실제 서명·ECDH 동작을 확인한다. 기존 Electron 앱·CT/MRI/AP/LAT 환경·분석 데이터에는 연결하지 않는다. 현재 고객 설치본에 라이선스 차단이나 모델 암호화가 적용된 것은 아니다.
+[yubikey_probe.py](../scripts/security/yubikey_probe.py)는 Windows 개발 PC에서 PIV 장치를 조회하고, 비어 있는 `9E`·`9D`에 키를 생성하며, 제조사 인증서와 실제 서명·ECDH 동작을 확인한다. 이 독립 도구는 기존 Electron 앱·CT/MRI/AP/LAT 환경·분석 데이터를 변경하지 않는다. 고객 설치본의 라이선스 차단·모델 암호화 연결은 후속 제품 통합에서 구현했으며 위 운영 문서에 기록했다.
 
 | 명령 | 하는 일 | 동글 변경 |
 | --- | --- | --- |
@@ -19,11 +19,13 @@
 
 이 도구의 JSON은 **서명되지 않은 개발용 공개 등록 기록**이다. EXMO 서버가 발급한 라이선스가 아니며, 파일만 수정해 앱 권한을 얻는 용도로 사용하면 안 된다. 매 검증은 기록 속 인증서·성공 표시를 신뢰하지 않고 연결된 장치에서 새 증명과 제조사 chain을 다시 확인한다. 실제 서버 등록에서는 기관 소유권·등록 허가·설치 키 증명을 추가해야 한다.
 
-Python SDK로 하드웨어 API와 실패 조건을 먼저 검증한다. 배포용 공통 native 모듈, CNG/TPM 귀속, JWE 모델 키 봉투, 온라인 갱신·유예 상태, 모델·결과 암호화는 후속 단계다. 이번 ECDH 검사는 공유 비밀 일치 확인이며 JWE 봉투 검증이 아니다.
+Python SDK로 하드웨어 API와 실패 조건을 먼저 검증한다. 이 단계의 ECDH 검사는 공유 비밀 일치 확인이며 JWE 봉투 검증이 아니다. CNG 귀속·JWE 모델 키 봉투·온라인 갱신·유예 상태·모델 및 결과 암호화의 후속 구현과 검증은 제품 보안 운영 문서를 참조한다.
 
 ## 2. 환경 준비
 
-지원 범위는 **Windows x64, CPython 3.12, 일반 YubiKey 5C Nano, firmware 5.4 이상**이다. AES256 관리 키와 슬롯/관리 metadata를 확인할 수 있는 범위로 제한한다. 실제 구매 동글의 펌웨어·무인 정책은 아직 검증하지 않았다. 다른 form factor·FIPS·구형 firmware를 자동으로 허용하지 않는다.
+지원 범위는 **Windows x64, CPython 3.12, 일반 YubiKey 5C NFC / 5C Nano, firmware 5.4 이상**이다. USB-C로 연결하며 NFC 전송은 이번 구현 범위에 없다. 사용자 구매 장치는 5C NFC·펌웨어 5.8이라고 전달받았으며 실물 검증은 아직 수행하지 않았다. AES256 관리 키와 슬롯/관리 metadata를 확인할 수 있는 범위로 제한한다. USB-C keychain(0x03)과 Nano(0x04) 형식을 허용하고, 두 slot의 인증서 형식과 실제 장치 형식이 일치해야 한다. 같은 form-factor 값을 사용하는 USB-C 모델의 상표/SKU까지 인증서로 구별하는 것은 아니다. 다른 form factor·FIPS·구형 firmware를 자동으로 허용하지 않는다.
+
+5.8 NFC와 5.4 Nano의 합성 서명·ECDH·등록 검사, 장치/인증서 형식 불일치, 두 slot의 형식 불일치, FIPS·구형 firmware 거부를 자동 검증한다. 이 검사는 실제 장치의 발급 CA chain·PC/SC 연결·절전 복귀 검증을 대신하지 않는다. [Yubico PIV 형식·펌웨어 문서](https://docs.yubico.com/hardware/yubikey/yk-tech-manual/yk5-apps-piv.html#form-factor)
 
 저장소 루트 PowerShell에서 실행한다. 기존 분석 환경에 패키지를 설치하지 않는다.
 

@@ -29,11 +29,24 @@ const timer=setTimeout(()=>{console.error('Internal Electron check timed out');a
     const build=JSON.parse(fs.readFileSync(path.join(appRoot,'desktop/security/build.json'),'utf8'));
     assert.equal(build.profile,'internal');assert.equal(build.allowLoopback,true);
     authority=new Authority(authorityRoot);assert.equal(authority.publicKey.export({format:'pem',type:'spki'}),build.issuerPublicKey);
+    const payloadVerifier=require(path.join(appRoot,'desktop/security/payload.cjs'));
+    const probe=path.join(output,'integrity-probe.bin'),original=Buffer.from('verified');fs.writeFileSync(probe,original);
+    const expected={path:'integrity-probe.bin',size:original.length,sha256:crypto.createHash('sha256').update(original).digest('hex')};
+    payloadVerifier.checkFile(probe,expected);const stamp=fs.statSync(probe);
+    fs.writeFileSync(probe,'VERIFIED');fs.utimesSync(probe,stamp.atime,stamp.mtime);
+    assert.throws(()=>payloadVerifier.checkFile(probe,expected));fs.unlinkSync(probe);
     server=createServer(authority);await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(Number(new URL(build.serverUrl).port),'127.0.0.1',resolve);});
     require(path.join(appRoot,'desktop/main.cjs'));
     await app.whenReady();const window=await until(()=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('atlas://app/')));
     const run=code=>window.webContents.executeJavaScript(code);
     await until(()=>run('Boolean(document.querySelector(".license-status"))'));
+    const startupFile=path.join(app.getPath('userData'),'startup-performance.json');
+    await until(()=>fs.existsSync(startupFile));
+    const startup=JSON.parse(fs.readFileSync(startupFile));
+    assert.equal(startup.status,'ready');assert.equal(startup.profile,'internal');assert.ok(startup.totalMs>0);
+    for(const name of ['electronReadyMs','helperIntegrityMs','resultStorageMs','licensingMs','rendererMs'])assert.ok(Number.isFinite(startup.timings[name]) && startup.timings[name]>=0);
+    if(fs.existsSync(path.resolve(appRoot,'../engine/payload.json')))assert.ok(startup.timings.payload.files>0 && startup.timings.payload.hashMs>0);
+    fs.copyFileSync(startupFile,path.join(output,'startup-performance.json'));
     const initial=await run('window.exmoDesktop.licenseStatus()');assert.equal(initial.state,'UNACTIVATED');
     assert.equal(app.getPath('userData'),path.join(output,'EXMO Atlas Internal'));
     assert.equal(window.webContents.getLastWebPreferences().sandbox,true);
@@ -51,7 +64,7 @@ const timer=setTimeout(()=>{console.error('Internal Electron check timed out');a
     assert.equal((await run('window.exmoDesktop.manageLicense()')).state,'REVOKED');
     assert.equal((await run('window.exmoDesktop.results("mri")')).ok,true);
     assert.equal(await run('typeof require'),'undefined');
-    fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({packaged:true,cng:true,dpapi:true,activation:true,revocation:true,readableResults:true,gpuInference:false},null,2));
+    fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({packaged:true,cng:true,dpapi:true,activation:true,revocation:true,readableResults:true,gpuInference:false,startupMs:startup.totalMs,payloadFiles:startup.timings.payload?.files ?? 0},null,2));
     console.log('PASS: packaged Internal UI, CNG enrollment, online approval, real DPAPI lease, revocation, readable results. '+output);
   } catch(error){code=1;console.error(error);}
   finally {

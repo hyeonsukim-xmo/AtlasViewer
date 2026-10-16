@@ -40,6 +40,10 @@ New mask artifacts are encrypted; institution recovery keys remain separate from
 Customer builds bind both PC and YubiKey keys and require a signed offline runtime payload.
 See the [product security runbook](docs/EXMO_PRODUCT_SECURITY_RUNBOOK.md) for provisioning, packaging,
 revocation, recovery and the hardware/server/code-signing checks still required before release.
+Version 0.1.26 accepts the USB-C keychain (5C NFC) and Nano PIV form factors with firmware 5.4+;
+physical 5C NFC firmware 5.8 verification is still pending. Startup records per-stage times in
+the profile's `startup-performance.json`; `npm run performance:startup -- PAYLOAD ISSUER_PUBLIC.pem NEW_REPORT.json`
+measures full runtime verification without loading inference models.
 Run `npm run test:model-security` for tamper/replay/worker checks and
 `node scripts/security/validate-protected-mri.cjs` for the actual MRI strict loader and a
 synthetic 128³ FP32 GPU comparison; this does not run patient cases.
