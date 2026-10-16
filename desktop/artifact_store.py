@@ -261,7 +261,8 @@ def install_image_io(store):
             basis, origin = affine[:3, :3], affine[:3, 3]
         else:
             array, header = read_nrrd(str(file), index_order='F')
-            basis, origin = np.asarray(header['space directions']).T, np.asarray(header['space origin'])
+            # Match SimpleITK's zero origin when the optional NRRD field is absent.
+            basis, origin = np.asarray(header['space directions']).T, np.asarray(header.get('space origin', [0., 0., 0.]))
             space = header.get('space')
             require(space in ('left-posterior-superior', 'right-anterior-superior', 'LPS', 'RAS'))
             if space in ('right-anterior-superior', 'RAS'):

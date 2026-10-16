@@ -8,20 +8,24 @@ const {app,BrowserWindow,dialog,safeStorage}=require('electron');
 const {Authority,createServer}=require('./license-server.cjs');
 const appRoot=path.resolve(process.argv[2] || 'release/internal/win-unpacked/resources/app.asar');
 const authorityRoot=path.resolve(process.argv[3] || 'work/security-internal-local/authority');
+const sampleRoot=process.argv[4]?path.resolve(process.argv[4]):null;
+const previousQa=process.argv[6]?path.resolve(process.argv[6]):null;
+if(previousQa)assert.equal(path.dirname(previousQa),path.resolve('outputs/security-check'),'Only an isolated QA store can be reopened');
 const output=path.resolve('outputs/security-check',crypto.randomUUID());fs.mkdirSync(output,{recursive:true});
 for(const event of ['uncaughtException','unhandledRejection'])process.on(event,error=>{
   fs.writeFileSync(path.join(output,'failure.txt'),String(error?.stack || error));console.error(error);app.exit(1);
 });
-app.setPath('appData',output);app.setPath('userData',path.join(output,'source'));
+app.setPath('appData',previousQa || output);app.setPath('userData',path.join(output,'source'));
 const requestFile=path.join(output,'enrollment.json'),activationFile=path.join(output,'activation.json');
 let choice=0,installationId,server,authority;
+let pickedFiles=[activationFile];
 dialog.showMessageBox=async(_window,options)=>{assert.notEqual(options.type,'error',options.message);return {response:choice};};
 dialog.showSaveDialog=async()=>({canceled:false,filePath:requestFile});
-dialog.showOpenDialog=async()=>({canceled:false,filePaths:[activationFile]});
+dialog.showOpenDialog=async()=>({canceled:false,filePaths:pickedFiles});
 dialog.showErrorBox=(title,detail)=>{throw Error(`${title}: ${detail}`);};
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(test){for(let i=0;i<3000;i++){const value=await test();if(value)return value;await wait(100);}throw Error('Packaged UI timed out');}
-const timer=setTimeout(()=>{console.error('Internal Electron check timed out');app.exit(1);},360000);
+const timer=setTimeout(()=>{console.error('Internal Electron check timed out');app.exit(1);},sampleRoot?3600000:360000);
 
 (async()=>{
   let code=0;
@@ -47,6 +51,13 @@ const timer=setTimeout(()=>{console.error('Internal Electron check timed out');a
     for(const name of ['electronReadyMs','helperIntegrityMs','resultStorageMs','licensingMs','rendererMs'])assert.ok(Number.isFinite(startup.timings[name]) && startup.timings[name]>=0);
     if(fs.existsSync(path.resolve(appRoot,'../engine/payload.json')))assert.ok(startup.timings.payload.files>0 && startup.timings.payload.hashMs>0);
     fs.copyFileSync(startupFile,path.join(output,'startup-performance.json'));
+    if(previousQa){
+      assert.ok(sampleRoot);
+      const samples=await require('./validate-analysis-samples.cjs').runSamples({sourceRoot:sampleRoot,storage:path.join(app.getPath('userData'),'imaging'),output,window,run,previousReport:path.join(previousQa,'analysis-samples.json'),...(process.argv[5]?{names:process.argv[5].split(',')}:{})});
+      assert.equal(samples.passed,true,'Saved result display check failed');
+      fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({packaged:true,savedRealResults:true,inferenceRerun:false,passed:true},null,2));
+      console.log('PASS: saved real results reopened. '+output);return;
+    }
     const initial=await run('window.exmoDesktop.licenseStatus()');assert.equal(initial.state,'UNACTIVATED');
     assert.equal(app.getPath('userData'),path.join(output,'EXMO Atlas Internal'));
     assert.equal(window.webContents.getLastWebPreferences().sandbox,true);
@@ -60,11 +71,22 @@ const timer=setTimeout(()=>{console.error('Internal Electron check timed out');a
     assert.ok(!encrypted.includes('token'));assert.ok(JSON.parse(safeStorage.decryptString(encrypted)).token);
     await until(()=>run('document.querySelector(".license-status")?.textContent.includes("인증됨") || document.querySelector(".license-status")?.textContent.includes("Authorized")'));
     fs.writeFileSync(path.join(output,'authorized.png'),(await window.webContents.capturePage()).toPNG());
+    let samples;
+    if(sampleRoot){
+      const {grant}=require('./model-package.cjs'),engine=path.resolve(appRoot,'../engine');
+      for(const name of ['ct','mri','ap','lat_lt','lat_rt','xray-classifier']){
+        const family=name==='ct'?'EXMO_CT':name==='mri'?'EXMO_MRI':'EXMO_XRAY';
+        fs.writeFileSync(activationFile,JSON.stringify(grant(authority,authorityRoot,binding.licenseId,request,path.join(engine,'packages',family),name)));
+        choice=2;assert.equal((await run('window.exmoDesktop.manageLicense()')).state,'VALID');
+      }
+      samples=await require('./validate-analysis-samples.cjs').runSamples({sourceRoot:sampleRoot,storage:path.join(app.getPath('userData'),'imaging'),output,window,run,pick:files=>{pickedFiles=files;},...(process.argv[5]?{names:process.argv[5].split(',')}:{})});
+    }
     authority.status(binding.licenseId,'revoked');choice=3;
     assert.equal((await run('window.exmoDesktop.manageLicense()')).state,'REVOKED');
     assert.equal((await run('window.exmoDesktop.results("mri")')).ok,true);
     assert.equal(await run('typeof require'),'undefined');
-    fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({packaged:true,cng:true,dpapi:true,activation:true,revocation:true,readableResults:true,gpuInference:false,startupMs:startup.totalMs,payloadFiles:startup.timings.payload?.files ?? 0},null,2));
+    if(samples)assert.equal(samples.passed,true,'Real sample pipeline failed; see analysis-samples.json');
+    fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({packaged:true,cng:true,dpapi:true,activation:true,revocation:true,readableResults:true,gpuInference:Boolean(samples?.passed),startupMs:startup.totalMs,payloadFiles:startup.timings.payload?.files ?? 0},null,2));
     console.log('PASS: packaged Internal UI, CNG enrollment, online approval, real DPAPI lease, revocation, readable results. '+output);
   } catch(error){code=1;console.error(error);}
   finally {

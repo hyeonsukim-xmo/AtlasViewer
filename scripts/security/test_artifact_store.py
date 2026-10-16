@@ -53,6 +53,19 @@ class Artifacts(unittest.TestCase):
             restored = sitk.ReadImage(str(file))
             self.assertTrue(np.array_equal(array, sitk.GetArrayFromImage(restored)))
             self.assertEqual(image.GetDirection(), restored.GetDirection()); self.assertEqual(image.GetOrigin(), restored.GetOrigin())
+            # Delivered LAT headers omit optional space origin; encryption must preserve native reader semantics.
+            for space in ('left-posterior-superior', 'right-anterior-superior'):
+                output = root / (space + '.nrrd')
+                payload = io.BytesIO()
+                nrrd.write(payload, array.transpose(2, 1, 0), {'space':space, 'space directions':np.diag([.8, 1.2, 3.])})
+                with A._open(output, 'wb') as stream: stream.write(payload.getvalue())
+                native = sitk.ReadImage(str(output))
+                store.atomic_write(output, payload.getvalue(), overwrite=True)
+                protected = sitk.ReadImage(str(output))
+                self.assertEqual(native.GetOrigin(), protected.GetOrigin())
+                self.assertEqual(native.GetSpacing(), protected.GetSpacing())
+                self.assertEqual(native.GetDirection(), protected.GetDirection())
+                self.assertTrue(np.array_equal(sitk.GetArrayFromImage(native), sitk.GetArrayFromImage(protected)))
             for encoding in ('gzip', 'raw'):
                 output = root / ('side-' + encoding + '.nrrd')
                 nrrd.write(str(output), array, {'encoding':encoding}, index_order='C')

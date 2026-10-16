@@ -2,7 +2,7 @@
 
 ## TODO: 보안 설치본 시작 지연 개선
 
-등록: 2026-10-16. 2026-10-17에 **`perf/slim-protected-runtime` 브랜치에서 배포 용량 축소 후보의 합성 입력·패키지 시작 검증을 완료**했다. 기존 기준점은 `ced6e8c`이며 원본 엔진과 0.1.26 설치 파일은 보존한다. 검사 시점 변경과 실제 환자 전체 분석 회귀 검증은 별도 미완료 항목이다.
+등록: 2026-10-16. 2026-10-17에 **`perf/slim-protected-runtime` 브랜치에서 배포 용량 축소 후보의 합성 입력·패키지 시작 검증과 제공 샘플 5종의 실제 GPU 추론·결과 화면 검증을 수행**했다. 기존 기준점은 `ced6e8c`이며 원본 엔진과 0.1.26 설치 파일은 보존한다. 샘플 시험에서 발견한 결과 읽기·표시 오류는 아래 후속 기록처럼 수정했다. 검사 시점 변경, 다양한 환자·입력 형식, 고객용 실물 동글·새 PC 검증은 미완료다.
 
 현재 내부용 0.1.26에 전체 보호 엔진을 연결한 단일 실측은 메인 모듈 진입부터 첫 화면 표시까지 **166.48초**다. 이 중 전체 파일 내용 해시 검사가 **163.33초**, 파일 목록 열거가 1.41초였다. 현재는 시작할 때마다 전체 payload를 검증하며, 보호 엔진을 연결한 내부용과 고객용이 이 경로를 공유한다. 소스 개발 모드와 구분한다.
 
@@ -30,7 +30,7 @@
 
 ### 2026-10-17: 배포 환경 축소 후보
 
-후보 앱 버전은 `0.1.27-runtime-slim.1`이다. 기본 `create` 경로를 자동 변경하지 않고, 이미 검증·서명된 payload에서 별도 후보를 만든다.
+아래 용량·시작 비교에 사용한 앱은 `0.1.27-runtime-slim.1`이다. 후속 샘플 시험 수정본은 `.2`이며 아래에 별도로 기록한다. 기본 `create` 경로를 자동 변경하지 않고, 이미 검증·서명된 payload에서 별도 후보를 만든다.
 
 ```powershell
 node scripts/security/payload.cjs slim AUTHORITY SOURCE_PAYLOAD NEW_PAYLOAD slim-v1
@@ -93,6 +93,45 @@ node scripts/security/validate-protected-models.cjs NEW_PAYLOAD cuda:0
 - 후보 앱: `release/internal/win-unpacked`, 기존 `EXMO-Atlas-Internal-Setup-0.1.26.exe` 보존. 신규 설치 파일 생성과 기존 브랜치 병합은 하지 않았다.
 
 시작 검사는 `node scripts/security/check-internal-package.cjs PATH_TO_APP_ASAR AUTHORITY`로 실행한다. ASAR 옆 `engine/`에 비교할 서명 payload가 있어야 하며, 같은 앱으로 payload만 바꿔 순서별 기록을 보존한다. 원본 엔진을 덮어쓰지 않는다.
+
+### 2026-10-17: 제공 샘플 입력부터 실제 출력까지
+
+합성 forward 검사만으로 전체 분석 완료를 판단하지 않고, 같은 축소 엔진과 RTX 3050에서 제공 샘플을 실제 패키지의 main/preload/IPC로 등록하고 GPU 추론했다. 테스트 전용 CNG 등록·온라인 승인·모델 권한 발급·DPAPI 저장을 사용했다. 파일 선택 대화상자만 자동화하며 분석 worker와 모델은 대체하지 않는다. 사용자 결과 저장소 대신 `outputs/security-check/<UUID>`에 격리한다.
+
+| 경로 | 실제 입력 (`work/modality-integration/packages/` 기준) | 수정 후 확인한 출력 |
+| --- | --- | --- |
+| CT | `EXMO_CT/samples/EXMO_CASE_001/input_ct.nii.gz` | 암호화 mask, 32개 구조 측정, 3방향 Overlay·슬라이스 이동, GLB 및 3D 화면 |
+| MRI | `EXMO_MRI/samples/sample_01/W.nrrd` | 암호화 mask, 28개 구조 측정, 3방향 Overlay·슬라이스 이동, GLB 및 3D 화면 |
+| AP | `EXMO_XRAY/samples/AP/AP_01/input.nrrd` | 분류 경로, 암호화 mask, 면적 측정, Overlay 화면 |
+| LAT-LT | `EXMO_XRAY/samples/LAT_LT/LAT_LT_01/input.nrrd` | 분류 경로, 암호화 mask, 면적 측정, Overlay 화면 |
+| LAT-RT | `EXMO_XRAY/samples/LAT_RT/LAT_RT_01/input.nrrd` | 분류 경로, 암호화 mask, 면적 측정, Overlay 화면 |
+
+첫 실행을 그대로 통과 처리하지 않았다. 5개 모델의 GPU 추론은 완료됐으나 CT/MRI는 3D 전달에서, LAT 양쪽은 결과 확정에서 실패했다. 다음 두 문제를 수정하고 `0.1.27-runtime-slim.2`로 다시 패키징했다.
+
+1. **긴 Windows 경로의 GLB 로딩:** 270자 결과 경로의 파일은 존재했지만 Chromium `file:` fetch가 `ERR_FILE_NOT_FOUND`를 반환했다. 등록된 결과 GLB만 Node 파일 스트림으로 전달한다. 기존 경로·origin·method 제한과 CSP를 유지하며 존재하지 않는 결과 404, POST 403도 검사했다.
+2. **LAT NRRD의 선택적 `space origin`:** 실제 모델 출력에 이 항목이 없어 암호화 reader가 실패했다. 일반 SimpleITK reader와 동일하게 생략 시 원점 `(0, 0, 0)`을 사용한다. LPS/RAS 각각에서 암호화 전후 origin·spacing·direction·voxel 일치 회귀 검사를 추가했고 artifact 검사 2개를 통과했다.
+
+완료된 GPU 추론은 다시 실행하지 않았다. LAT 두 건은 동일한 암호화 mask를 유지한 채 수정된 worker의 결과 확정만 수행했다. 이어서 수정된 앱에서 **5개 저장 결과 전부 측정·Overlay 화면을 열었고 CT/MRI의 실제 3D 화면까지 확인**했다. GLB의 크기·버전·mesh·vertex 존재, 측정값 유효성, 입력 해시 불변을 검사했다. MRI는 PP500·강화 후보의 Overlay와 3D 생성, Raw 암호문 불변 및 Raw 복귀도 통과했다. 따라서 수정본에서 신규 입력부터 추론까지 모두 한 번 더 반복한 기록과는 구분한다.
+
+재현 명령:
+
+```powershell
+# 새 격리 저장소에서 입력 등록부터 실제 모델 실행·결과 화면까지 (기본 5종)
+node scripts/security/check-internal-package.cjs PATH_TO_APP_ASAR AUTHORITY work/modality-integration
+# 완료된 QA 결과만 재검사: 추론은 재실행하지 않음
+node scripts/security/check-internal-package.cjs PATH_TO_APP_ASAR AUTHORITY work/modality-integration ct,mri,ap,lat_lt,lat_rt outputs/security-check/PREVIOUS_UUID
+```
+
+재검사 모드는 이전 QA 폴더만 허용하고 입력 해시·결과 ID를 대조한다. 누락된 결과를 자동 복구하는 제품 기능은 아니다. 검사 코드는 `scripts/security/validate-analysis-samples.cjs`다.
+
+로컬 근거(영상·mask·테스트 키는 Git에 넣지 않음):
+
+- 실제 추론 및 최초 실패 기록: `outputs/security-check/8bbff1b7-9651-4532-82a3-b0d53d9c1768/analysis-samples.json`.
+- LAT 결과 확정과 mask 불변 기록: 같은 폴더의 `recovered-finalization.json`.
+- 최종 5종 `complete: true`, `passed: true`: `outputs/security-check/fc6b3549-5f47-414f-a36f-d7570e5bb308/analysis-samples.json`. 같은 폴더에 `*-result-ui.png`, `ct-3d-ui.png`, `mri-3d-ui.png`를 보존했다.
+- 수정 앱: `work/security-runtime-slim-20261017/qa-slim-v2/resources/app.asar`, SHA256 `53a267653239e01c5cd68d04fa62df7753642151e9c6521b841e5a25bdf85fae`. 엔진과 가중치는 앞의 축소 후보 그대로다.
+
+이 시험은 NIfTI/NRRD 샘플 각 경로 1건의 기능 확인이며 임상 정확도나 다양한 환자의 전체 회귀 보장은 아니다. DICOM 폴더·ZIP 신규 입력, 실물 YubiKey 고객 프로필, 다른 PC 및 새 설치 파일 검증은 이번에 수행하지 않았다. 시작 A/B 수치는 위 `.1` 기록을 유지하며 이번 기능 시험을 새로운 성능 비교로 사용하지 않는다.
 
 [CT function-level timing diagnostics](EXMO_CT_TIMING_DIAGNOSTICS_2026-10-06.md)
 documents exclusive metadata/validation/cleanup timings and private start/end
