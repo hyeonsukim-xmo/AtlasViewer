@@ -96,7 +96,7 @@ test('encrypted MRI: real CNG envelope, signed admission, tamper/replay isolatio
     assert.notEqual(spawnSync(python,['-B','-S','-c',policyProbe],{cwd:legacy,windowsHide:true}).status,0,'Protected build refuses a missing policy');
     // Actual production dispatcher, with only the numerical engine stubbed: a rejected new run cannot kill CPU export.
     const serviceRoot=path.join(root,'service');fs.mkdirSync(serviceRoot);
-    for(const file of ['model-service.py','model_security.py'])fs.copyFileSync(path.join(repo,'desktop',file),path.join(serviceRoot,file));
+    for(const file of ['model-service.py','model_security.py','diagnostics.py'])fs.copyFileSync(path.join(repo,'desktop',file),path.join(serviceRoot,file));
     fs.copyFileSync(policy,path.join(serviceRoot,'model-policy.json'));
     for(const name of ['torch','numpy','SimpleITK','monai'])fs.writeFileSync(path.join(serviceRoot,name+'.py'),'# test-only import stub\n');
     fs.writeFileSync(path.join(serviceRoot,'artifact_store.py'),'# Separate artifact tests exercise the real storage adapter.\ndef current(): return object()\n');
@@ -136,13 +136,13 @@ def run_job(root, job, protection=None):
       let ready;const started=new Promise(resolve=>{ready=resolve});
       const first=service.request({operation:'run',job,authorization},{id:runId,timeout:15000,onEvent:event=>{if(event.stage==='cpu_ready')ready();}});
       await Promise.race([started,first.then(()=>{throw Error('Unexpected early completion')})]);
-      await assert.rejects(service.request({operation:'run',job},{timeout:10000}),/Model execution failed/);
+      await assert.rejects(service.request({operation:'run',job},{timeout:10000}),error=>error.diagnosticCode==='AUTHORIZATION');
       await assert.rejects(service.request({operation:'model_challenge',runId:'invalid'},{timeout:10000}));
       service.send({operation:'resume_cpu',id:runId});assert.equal((await first).complete,true);
-      await assert.rejects(service.request({operation:'run',job,authorization},{id:runId,timeout:10000}),/Model execution failed/);
+      await assert.rejects(service.request({operation:'run',job,authorization},{id:runId,timeout:10000}),error=>error.diagnosticCode==='AUTHORIZATION');
     } finally {await service.close();}
     const ctService=new AnalysisWorker({python,args:['-S','-X','utf8',path.join(serviceRoot,'model-service.py'),'--engine-root',engine],env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'},logPath:path.join(root,'ct-service.log')});
-    try {await assert.rejects(ctService.request({operation:'run',job:{...job,analysis:'ct'}},{timeout:10000}),/Model execution failed/);}
+    try {await assert.rejects(ctService.request({operation:'run',job:{...job,analysis:'ct'}},{timeout:10000}),error=>error.diagnosticCode==='AUTHORIZATION');}
     finally {await ctService.close();}
     const exportCheck=`$k=[System.Security.Cryptography.CngKey]::Open('EXMO.Atlas.Internal.${id}.Model');try{$null=$k.Export((New-Object System.Security.Cryptography.CngKeyBlobFormat('RSAPRIVATEBLOB')));exit 9}catch{[Console]::Write('blocked')}finally{$k.Dispose()}`;
     assert.equal(execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',exportCheck],{windowsHide:true,encoding:'utf8'}),'blocked');

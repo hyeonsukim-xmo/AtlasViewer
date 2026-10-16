@@ -1,6 +1,6 @@
 {
   "name": "exmo-segmentation-atlas",
-  "version": "0.1.27-runtime-slim.2",
+  "version": "0.1.27-runtime-slim.3",
   "private": true,
   "description": "EXMO segmentation atlas desktop and web viewer",
   "license": "MIT",
@@ -69,6 +69,7 @@
     "files": [
       "dist-desktop/**/*",
       "desktop/*.cjs",
+      "desktop/diagnostics.json",
       "desktop/security/*.cjs",
       "desktop/icon.*",
       "package.json",

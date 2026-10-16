@@ -8,6 +8,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
 const m=JSON.parse(line);
 if(m.operation==='crash')process.exit(7);
 if(m.operation==='hang')return;
+if(m.operation==='fail'){console.log(JSON.stringify({exmo:true,job_id:m.id,stage:'failed',errorCode:'GPU_MEMORY',error:'private stack must not reach UI'}));return;}
 if(m.operation==='handoff'){console.log(JSON.stringify({exmo:true,job_id:m.id,stage:'cpu_ready'}));return;}
 if(m.operation==='model')console.log(JSON.stringify({exmo:true,job_id:m.id,stage:'complete',value:m.value}));
 else console.log(JSON.stringify({id:m.id,result:m.value}));
@@ -17,6 +18,9 @@ const worker=()=>new AnalysisWorker({python:process.execPath,args:['-e',server],
   let w=worker();
   assert.deepEqual(await Promise.all([w.request({value:1}),w.request({value:2})]),[1,2]);
   assert.equal((await w.request({operation:'model',value:3})).value,3);
+  await assert.rejects(w.request({operation:'fail'}),error=>error.diagnosticCode==='GPU_MEMORY' && !error.publicMessage);
+  await assert.rejects(w.request({operation:'hang'},{timeout:50}),error=>error.diagnosticCode==='TIMEOUT');
+  await w.stop();w=worker();
   await assert.rejects(w.request({operation:'crash'}));
   assert.equal(await w.request({value:4}),4,'Unexpected process exit may restart');
   await w.close();assert.equal(w.child,null);

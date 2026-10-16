@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 const readline = require("node:readline");
 const fs = require("node:fs");
 const { randomUUID } = require("node:crypto");
+const { workerError } = require('./diagnostics.cjs');
 
 class AnalysisWorker {
   constructor({ python, args, env, logPath, artifactStorage }) {
@@ -14,10 +15,14 @@ class AnalysisWorker {
     const child = spawn(this.python, this.args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: this.env });
     this.child = child;
     const log = fs.createWriteStream(this.logPath, { flags: "a" });
+    log.on('error', error => {
+      for (const task of this.pending.values()) task.reject(error);
+      void this.stop();
+    });
     child.stderr.pipe(log, { end: false });
-    const fail = () => {
+    const fail = (cause) => {
       if (this.child !== child) return;
-      for (const task of this.pending.values()) task.reject(new Error("Analysis process stopped; see private engine log"));
+      for (const task of this.pending.values()) task.reject(workerError({error:'Analysis process stopped', errorCode:cause?.code === 'ENOENT' ? 'ENGINE_MISSING' : cause instanceof Error ? 'ENGINE_START' : 'ENGINE_STOPPED'}));
       this.pending.clear();
     };
     child.stdin.on("error", () => { fail(); void this.stop(); });
@@ -40,9 +45,9 @@ class AnalysisWorker {
           void this.stop();
         });
         if (event.stage === "complete") task.resolve(event);
-        if (event.stage === "failed") task.reject(new Error("Model execution failed; see private engine log"));
+        if (event.stage === "failed") task.reject(workerError(event));
       } else if (Object.hasOwn(event, "result") || event.error) {
-        event.error ? task.reject(new Error(event.error)) : task.resolve(event.result);
+        event.error ? task.reject(workerError(event)) : task.resolve(event.result);
       }
     });
   }
@@ -56,7 +61,11 @@ class AnalysisWorker {
     return new Promise((resolve, reject) => {
       let settled = false;
       const log = logPath ? fs.createWriteStream(logPath) : null;
-      const timer = timeout ? setTimeout(() => { void this.stop(); }, timeout) : null;
+      log?.on('error', error => { this.pending.get(id)?.reject(error); void this.stop(); });
+      const timer = timeout ? setTimeout(() => {
+        this.pending.get(id)?.reject(workerError({error:'Analysis timeout',errorCode:'TIMEOUT'}));
+        void this.stop();
+      }, timeout) : null;
       const finish = (handler, value) => { if (settled) return; settled = true; clearTimeout(timer); this.pending.delete(id); log?.end(); handler(value); };
       this.pending.set(id, { onEvent, log, resolve: value => finish(resolve, value), reject: error => finish(reject, error) });
       try { this.send({ ...message, id, requestId: id }); }

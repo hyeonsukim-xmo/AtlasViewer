@@ -25,12 +25,13 @@ import { tooltipPosition } from "./tooltip-position";
 import { sideFromTriangle, type Side } from "./model-side";
 
 type HoverTarget<Id extends string> = { id: Id; side: Side | null };
+export type SceneFailure = { code: string; reference?: string };
 
 interface Props<Id extends string> {
   state: SceneState<Id>;
   onSelect: (id: Id | null) => void;
   onProgress: (progress: number) => void;
-  onError: (message: string) => void;
+  onError: (message: string, failure?: SceneFailure) => void;
   onInteract: () => void;
   model?: {
     url: string;
@@ -122,6 +123,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
     } catch {
       current.current.onError(
         "WebGL is unavailable. Enable hardware acceleration or try another browser.",
+        {code:'GPU_RENDER'},
       );
       return;
     }
@@ -538,6 +540,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       changeHover(null);
       current.current.onError(
         "The graphics context was interrupted. Reload the model to continue.",
+        {code:'GPU_RENDER'},
       );
     };
     const imageMenu = (event: MouseEvent) => {
@@ -569,6 +572,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
     window.addEventListener("keydown", dismissHover);
 
     (async () => {
+      let failure: SceneFailure = {code:'MESH_READ'};
       try {
         current.current.onProgress(0);
         const response = await fetch(
@@ -577,7 +581,12 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
             signal: abort.signal,
           },
         );
-        if (!response.ok) throw new Error("The EXMO model could not be downloaded.");
+        failure.reference = response.headers.get('X-EXMO-Reference') || undefined;
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          if (body?.diagnostic) failure = {code:body.diagnostic.code, reference:body.diagnostic.reference};
+          throw new Error("The EXMO model could not be downloaded.");
+        }
         const expectedBytes = props.model?.bytes || 7660116;
         const reader = response.body?.getReader();
         if (!reader) throw new Error("This browser cannot read the model response.");
@@ -586,14 +595,17 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (received + value.byteLength > expectedBytes)
+          if (received + value.byteLength > expectedBytes) {
+            failure.code = 'MESH_INVALID';
             throw new Error("The model file has an unexpected size.");
+          }
           bytes.set(value, received);
           received += value.byteLength;
           if (!disposed) current.current.onProgress(Math.round((received / expectedBytes) * 85));
         }
-        if (received !== expectedBytes) throw new Error("The model download was incomplete.");
+        if (received !== expectedBytes) { failure.code = 'MESH_INVALID'; throw new Error("The model download was incomplete."); }
         if (disposed) return;
+        failure.code = 'MESH_INVALID';
         const gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
         gltf.scene.updateMatrixWorld(true);
         const sourceBounds = new T.Box3().setFromObject(gltf.scene);
@@ -726,6 +738,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
             mesh.material.transparent = transparent;
             mesh.material.needsUpdate = true;
           }
+          failure.code = 'GPU_RENDER';
           await renderer.compileAsync(scene, camera);
           if (disposed) return;
         }
@@ -735,6 +748,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
         if (!disposed)
           current.current.onError(
             error instanceof Error ? error.message : "The EXMO model could not be loaded.",
+            failure,
           );
       }
     })();

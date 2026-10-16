@@ -180,7 +180,7 @@ export default function Home({
               state={state}
               onSelect={choose}
               onProgress={setProgress}
-              onError={setError}
+              onError={message => setError(message)}
               onInteract={stopRotation}
             />
 

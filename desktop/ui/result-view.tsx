@@ -1,3 +1,4 @@
+import { failureText, sceneDiagnostic, type Diagnostic, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import AnatomyScene from "../../app/scene";
@@ -70,7 +71,7 @@ export default function ResultView({
   results: AnalysisResult[];
   onClose: () => void;
   onUpdate: (result: AnalysisResult) => void;
-  workspaceError?: string;
+  workspaceError?: Failure;
   heading?: string;
   description?: string;
   comparison?: ComparisonActions;
@@ -81,7 +82,10 @@ export default function ResultView({
   const [state, setState] = useState<SceneState<string>>({ ...INITIAL_STATE, group: "All" });
   const [linkedHover, setLinkedHover] = useState<{viewport: string; id: string} | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Failure>("");
+  const [caseErrors, setCaseErrors] = useState<Record<string, Failure>>({});
+  const [sceneErrors, setSceneErrors] = useState<Record<string, Diagnostic | undefined>>({});
+  const [sceneRetries, setSceneRetries] = useState<Record<string, number>>({});
   const [changing, setChanging] = useState(false);
   const [table, setTable] = useState<"metrics" | "qc">("metrics");
   const [ttaThreshold, setTtaThreshold] = useState(1.16);
@@ -97,11 +101,13 @@ export default function ResultView({
     void (async () => {
       try {
         for (const result of results.filter(needsPreparation)) {
+          try {
           const updated = unwrap(await window.exmoDesktop.variant(result.id, result.variant));
           if (!disposed) onUpdate(updated);
+          } catch (e) {
+            if (!disposed) setCaseErrors(previous => ({...previous,[result.id]:e as Error}));
+          }
         }
-      } catch (e) {
-        if (!disposed) setError((e as Error).message);
       } finally {
         if (!disposed) setPreparing(false);
       }
@@ -162,7 +168,7 @@ export default function ResultView({
     [results],
   );
   const can3d =
-    !preparing && results.every((result) => result.meshBytes && !needsPreparation(result));
+    !preparing && results.some((result) => result.meshBytes && !needsPreparation(result));
   const mode = requestedMode === "3d" && !can3d ? "overlay" : requestedMode;
   const paired = mode === "3d" && results.length === 1 && !!state.explode;
   const assembledState = useMemo(() => ({...state, explode: 0, isolate: false}), [state]);
@@ -187,10 +193,11 @@ export default function ResultView({
   async function changeVariant(result: AnalysisResult, variant: string) {
     setChanging(true);
     setError("");
+    setCaseErrors(previous => ({...previous,[result.id]:''}));
     try {
       onUpdate(unwrap(await window.exmoDesktop.variant(result.id, variant)));
     } catch (e) {
-      setError((e as Error).message);
+      setCaseErrors(previous => ({...previous,[result.id]:e as Error}));
     } finally {
       setChanging(false);
     }
@@ -276,12 +283,13 @@ export default function ResultView({
       </header>
       {(error || workspaceError) && (
         <p className="inline-error" role="alert">
-          {t(error || workspaceError)}
+          {failureText(error || workspaceError)}
         </p>
       )}
-      {results.filter(result => ["failed", "interrupted"].includes(result.meshState || "")).map(result => (
+      {mode === 'overlay' && results.filter(result => ["failed", "interrupted"].includes(result.meshState || "")).map(result => (
         <p className="inline-error" role="status" key={result.id}>
-          {result.metadata.caseName} · {t("3D 준비가 완료되지 않았습니다. 측정값과 Overlay는 사용할 수 있습니다.")}{" "}
+          {result.metadata.caseName} · {result.meshDiagnostic ? failureText('', result.meshDiagnostic)
+            : t("3D 준비가 완료되지 않았습니다. 측정값과 Overlay는 사용할 수 있습니다.")}{" "}
           <button className="clinical-button" disabled={changing}
             onClick={() => void changeVariant(result, result.variant)}>{t("3D 다시 준비")}</button>
         </p>
@@ -810,6 +818,8 @@ export default function ResultView({
           <div className={`case-canvases count-${viewports.length}`}>
             {viewports.map(({result, key, assembled}) => {
               const chosen = result.rows.filter((r) => selectedIds.includes(r.id) && (result.analysis !== "xray" || xrayApplicable(result, r)));
+              const sceneKey = `${key}:${result.variant}:${result.meshBytes}`;
+              const sceneError = sceneErrors[sceneKey];
               return (
                 <div
                   className="case-canvas"
@@ -843,6 +853,7 @@ export default function ResultView({
                       </span>
                     )}
                   </button>
+                  {caseErrors[result.id] && <p className="inline-error" role="alert">{failureText(caseErrors[result.id])}</p>}
                   {mode === "overlay" ? (
                     <ImagePreview
                       key={result.id}
@@ -852,9 +863,16 @@ export default function ResultView({
                       result
                       classIds={allSelected ? null : chosen.map((row) => row.label)}
                     />
+                  ) : !result.meshBytes || needsPreparation(result) ? (
+                    <div className="inline-error" role="status">{result.meshDiagnostic
+                      ? failureText('', result.meshDiagnostic) : t("3D 준비가 완료되지 않았습니다. 측정값과 Overlay는 사용할 수 있습니다.")}
+                      {['failed','interrupted'].includes(result.meshState || '') && <p><button className="clinical-button" disabled={changing}
+                        onClick={() => void changeVariant(result, result.variant)}>{t("3D 다시 준비")}</button></p>}
+                    </div>
                   ) : (
                     <div className="result-scene">
                       <AnatomyScene<string>
+                        key={`${sceneKey}:${sceneRetries[sceneKey] || 0}`}
                         model={models.get(result.id)}
                         state={paired && assembled ? assembledState : sceneState}
                         highlightedId={paired ? linkedHover?.id : undefined}
@@ -868,7 +886,11 @@ export default function ResultView({
                         }
                         onSelect={(id) => select(id, result.id, !assembled)}
                         onProgress={(value) => setProgress((p) => ({ ...p, [key]: value }))}
-                        onError={setError}
+                        onError={(_message, issue) => {
+                          const failure = sceneDiagnostic(issue?.code, issue?.reference);
+                          setSceneErrors(previous => ({...previous,[sceneKey]:failure}));
+                          void window.exmoDesktop.sceneFailure(result.id, failure.code, failure.reference).catch(() => {});
+                        }}
                         onInteract={() => {}}
                         onImageMenu={image => {
                           setError("");
@@ -876,7 +898,7 @@ export default function ResultView({
                             filename: `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${assembled ? "assembled" : "exploded"}_${state.view}.png`,
                             source: {kind:"result",id:result.id},
                             language,
-                          }).then(unwrap).catch(error => setError(error.message));
+                          }).then(unwrap).catch(error => setError(error));
                         }}
                         renderMeasurement={(structure, hoveredSide) => {
                           const row = result.rows.find((r) => r.id === structure.id)!;
@@ -910,7 +932,15 @@ export default function ResultView({
                           );
                         }}
                       />
-                      {(progress[key] ?? 0) < 100 && (
+                      {sceneError && <div className="scene-error" role="alert">
+                        <p>{failureText('', sceneError)}</p>
+                        <button className="clinical-button" onClick={() => {
+                          setSceneErrors(previous => ({...previous,[sceneKey]:undefined}));
+                          setProgress(previous => ({...previous,[key]:0}));
+                          setSceneRetries(previous => ({...previous,[sceneKey]:(previous[sceneKey] || 0)+1}));
+                        }}>{t("뷰 다시 열기")}</button>
+                      </div>}
+                      {!sceneError && (progress[key] ?? 0) < 100 && (
                         <div className="scene-loading">
                           {t("3D 준비 ")}
                           {progress[key] || 0}%

@@ -2,7 +2,7 @@ const startupStarted=performance.now(),startupTimings={};
 const { app, BrowserWindow, dialog, Menu, net, protocol, session, ipcMain, safeStorage, powerMonitor } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
-const { Readable } = require("node:stream");
+const { resultModelResponse } = require('./result-model-response.cjs');
 const { pathToFileURL } = require("node:url");
 const { installImaging } = require("./imaging.cjs");
 const { loadBuild, openLicensing } = require("./security/runtime.cjs");
@@ -186,18 +186,15 @@ app
           return new Response(null, { status: 403 });
         const model = /^\/result\/([a-f0-9-]{36})\.glb$/.exec(pathname);
         const modelPath = model ? desktopImaging?.mesh(model[1]) : null;
-        if (model && !modelPath) return new Response(null, { status: 404 });
         const file =
           modelPath ||
           path.resolve(contentRoot, "." + (pathname === "/" ? "/index.html" : pathname));
         const relative = path.relative(contentRoot, file);
         if (!modelPath && (relative.startsWith("..") || path.isAbsolute(relative)))
           return new Response(null, { status: 403 });
-        // Chromium file URLs fail on long Windows result paths; Node streams support them.
-        const response = modelPath
-          ? new Response(Readable.toWeb(fs.createReadStream(file)), { headers: {
-              "Content-Type": "model/gltf-binary", "Content-Length": String(fs.statSync(file).size),
-            } })
+        // Registered result paths use Node streams, including long Windows paths.
+        const response = model
+          ? resultModelResponse(modelPath, path.join(app.getPath('userData'), 'imaging'), model[1])
           : await net.fetch(pathToFileURL(file).href);
         const headers = new Headers(response.headers);
         headers.set("Content-Security-Policy", csp);

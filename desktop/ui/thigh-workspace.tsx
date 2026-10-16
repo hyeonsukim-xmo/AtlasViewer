@@ -1,3 +1,4 @@
+import { failureText, type Failure } from "./diagnostics";
 import { t, useLanguage, localeTag } from "./language";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ImagePreview from "./image-preview";
@@ -59,7 +60,7 @@ export default function ThighWorkspace({
       setActive(old => old || progress.rows![0].id);
     }
   }), [analysis]);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Failure>("");
   const [query, setQuery] = useState("");
   const [assignFiles, setAssignFiles] = useState<ImagingFile[]>([]);
   const [device, setDevice] = useState("cuda:0");
@@ -111,7 +112,7 @@ export default function ThighWorkspace({
         }
       },
       (e: Error) => {
-        if (!stale) setError(e.message);
+        if (!stale) setError(e);
       },
     );
     return () => {
@@ -155,7 +156,7 @@ export default function ThighWorkspace({
           }
         }
       } catch (e) {
-        if (!stale) setError((e as Error).message);
+        if (!stale) setError(e as Error);
       }
       if (!stale) timer = setTimeout(() => void refresh(), 1200);
     };
@@ -191,7 +192,7 @@ export default function ThighWorkspace({
     try {
       const reply = unwrap(await window.exmoDesktop.exportResults(analysis, selectedResultIds, language));
       if (reply.action === "save") setExportNotice(t("{{value0}}개 결과를 Excel로 저장했습니다.", {value0: reply.count || 0}));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(e as Error); }
     finally { setExporting(false); }
   }
   async function add(folder = false) {
@@ -213,7 +214,7 @@ export default function ThighWorkspace({
         setStep("input");
       }
     } catch (e) {
-      setError((e as Error).message);
+      setError(e as Error);
     } finally {
       setChanging(false);
       setImporting(false);
@@ -227,7 +228,7 @@ export default function ThighWorkspace({
     try {
       setJob(unwrap(await window.exmoDesktop.run(analysis, ids, confirmed, device)));
     } catch (e) {
-      setError((e as Error).message);
+      setError(e as Error);
     } finally {
       setChanging(false);
     }
@@ -244,7 +245,7 @@ export default function ThighWorkspace({
       setActive("");
       setStep("input");
     } catch (e) {
-      setError((e as Error).message);
+      setError(e as Error);
     } finally {
       setChanging(false);
     }
@@ -255,7 +256,7 @@ export default function ThighWorkspace({
       unwrap(await window.exmoDesktop.cancel(job!.analysis));
       setJob(unwrap(await window.exmoDesktop.job()));
     } catch (e) {
-      setError((e as Error).message);
+      setError(e as Error);
     } finally {
       setChanging(false);
     }
@@ -347,7 +348,7 @@ export default function ThighWorkspace({
       )}
       {error && (
         <p className="inline-error" role="alert">
-            {t(error)}
+            {failureText(error)}
         </p>
       )}
       {running && (
@@ -388,7 +389,7 @@ export default function ThighWorkspace({
         <div className="inline-error" role="alert">
           {job.failed.map((file) => (
             <p key={file.id}>
-              {file.name} · {t(file.error)}
+              {file.name} · {failureText(file.error, file.diagnostic)}
             </p>
           ))}
         </div>
@@ -521,7 +522,7 @@ export default function ThighWorkspace({
                     <span>{current.metadata.size.join(" × ")}</span>
                     <span>{current.metadata.spacing.map((n) => number(n, 3)).join(" × ")} mm</span>
                   </div>
-                  {current.error && <p className="inline-error">{t(current.error)}</p>}
+                  {current.error && <p className="inline-error">{failureText(current.error, current.diagnostic)}</p>}
                   {current.warnings?.map((warning) => (
                     <p className="muted-note" key={warning}>
                       {t(warning)}

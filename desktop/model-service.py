@@ -12,6 +12,7 @@ import threading
 import traceback
 import faulthandler
 import os
+from diagnostics import failure
 
 sys.dont_write_bytecode = True
 from model_security import ModelGuard, load_policy, model_id, package_file
@@ -90,9 +91,8 @@ def main():
             if control.cancelled:
                 raise RuntimeError("Analysis cancelled")
             runner.run_job(args.engine_root, job, protection=protection)
-        except Exception:
-            traceback.print_exc(file=sys.stderr)
-            runner.emit("failed")
+        except Exception as error:
+            runner.emit("failed", **failure(error, 'run', control.ident))
         finally:
             if protection is not None:
                 protection.close()
@@ -105,8 +105,12 @@ def main():
             runner._context.control = None
 
     for line in sys.stdin:
+        message = {}
         try:
-            message = json.loads(line)
+            parsed = json.loads(line)
+            if not isinstance(parsed, dict):
+                raise ValueError('Invalid model service request')
+            message = parsed
             if message['operation'] == 'storage_init':
                 import artifact_store
                 artifact_store.initialize(message)
@@ -115,8 +119,8 @@ def main():
             if message["operation"] == "model_challenge":
                 try:
                     reply = {'id': ident, 'result': model_guard.challenge(message['runId'], message.get('engine', 'mri'))}
-                except Exception:
-                    reply = {'id': ident, 'error': '암호화 MRI 패키지 또는 실행 정책을 확인할 수 없습니다.'}
+                except Exception as error:
+                    reply = {'id': ident, **failure(error, 'model_challenge', ident, code='AUTHORIZATION')}
                 with runner._emit_lock:
                     runner._stdout.write(json.dumps(reply) + '\n')
                     runner._stdout.flush()
@@ -137,8 +141,8 @@ def main():
                         if artifact_store.current() is None:
                             raise ValueError('Protected result storage was not initialized')
                         protection = model_guard.admit(ident, job, message.pop('authorization', None))
-                    except Exception:
-                        runner.emit('failed', job_id=ident)
+                    except Exception as error:
+                        runner.emit('failed', job_id=ident, **failure(error, 'run', ident, code='AUTHORIZATION'))
                         continue  # Denied new work must not terminate another job's CPU export.
                 if not initialized:
                     # Initialize native DLLs before a thread blocks on Windows stdin.
@@ -175,10 +179,10 @@ def main():
                 protection = None  # The admitted job owns cleanup even after expiry/revocation.
             else:
                 raise ValueError("Unknown model service operation")
-        except Exception:
+        except Exception as error:
             if locals().get('protection') is not None:
                 protection.close()
-            traceback.print_exc(file=sys.stderr)
+            runner.emit('failed', job_id=message.get('id'), **failure(error, message.get('operation'), message.get('id'), code='MODEL_LOAD'))
             # Protocol corruption is fatal, never silently wait for an absent result.
             break
     with guard:

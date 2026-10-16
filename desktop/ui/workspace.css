@@ -1501,3 +1501,6 @@
 .xray-input-layout .series-preview-panel { min-height: 0; overflow: auto; }
 .xray-input-layout .results-list { overflow: auto; }
 @media (max-width: 850px) { .xray-input-layout { grid-template-columns: 1fr; overflow: auto; } .xray-input-layout .series-preview-panel { min-height: 420px; } }
+.inline-error, [role="alert"] { white-space: pre-line; }
+.scene-error { position: absolute; inset: 1rem; z-index: 3; padding: 1rem; background: #111127; border: 1px solid #6b465a; border-radius: 10px; overflow: auto; height: fit-content; max-height: calc(100% - 2rem); font-size: 13px; font-weight: 400; line-height: 1.6; }
+.scene-error p { margin: 0 0 1rem; }

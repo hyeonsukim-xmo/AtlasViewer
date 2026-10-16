@@ -13,18 +13,20 @@ const { createExportIdentities } = require("./export-identities.cjs");
 const { exportResults } = require("./results-export.cjs");
 const { createPatientAssignments } = require("./patient-assignments.cjs");
 const { createSourceMetadata } = require("./source-metadata.cjs");
+const { diagnose, workerError, userError } = require('./diagnostics.cjs');
 
 function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette, analysisAuthorization, artifactStorage }) {
   if (analysisAuthorization !== undefined && typeof analysisAuthorization?.authorize !== "function")
-    throw new Error("분석 권한 확인 모듈을 초기화하지 못했습니다.");
+    throw userError("분석 권한 확인 모듈을 초기화하지 못했습니다.");
   async function authorize(runId, engine, signal) {
     if (!analysisAuthorization) return;
     const grant = await analysisAuthorization.authorize({ runId, engine, signal });
     if (grant?.runId !== runId || grant.engine !== engine || !["VALID", "GRACE"].includes(grant.state))
-      throw new Error("분석 권한을 확인하지 못했습니다. 신규 분석을 시작하지 않습니다.");
+      throw userError("분석 권한을 확인하지 못했습니다. 신규 분석을 시작하지 않습니다.");
     if (signal?.aborted) throw aborted();
   }
   fs.mkdirSync(storageRoot, { recursive: true });
+  const diagnostic = (error, stage, code, caseId) => diagnose(error, {stage, code, caseId, logRoot:storageRoot});
   const exportIdentities = createExportIdentities(storageRoot);
   const patientAssignments = createPatientAssignments(storageRoot);
   const sourceMetadata = createSourceMetadata(storageRoot);
@@ -111,9 +113,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     deferredValidation,
     warnings,
     error,
+    diagnostic,
   }) => withStudy({ id, name, analysis, metadata: metadata ? {...metadata,
     studyUid: metadata.studyUid || sourceProof?.study_uid, seriesUid: metadata.seriesUid || sourceProof?.series_uid} : metadata,
-    classification, confirmation, ready, deferredValidation, warnings, error });
+    classification, confirmation, ready, deferredValidation, warnings, error, diagnostic });
   function publishImport(rows = []) {
     if (!disposed && importProgress)
       window.webContents.send("exmo:imaging:importProgress", {
@@ -232,6 +235,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         await publishResult(updated, result);
       } catch (error) {
         const updated = { ...result, summary: { ...result.summary,
+          meshDiagnostic: diagnostic(error, 'mesh', signal?.aborted || disposed ? 'CANCELLED' : 'MESH_BUILD', result.summary.id),
           meshState: signal?.aborted || disposed ? "interrupted" : "failed" } };
         await publishResult(updated, result);
       } finally {
@@ -243,19 +247,19 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     });
   }
   function validateAnalysis(value) {
-    if (!["ct", "mri", "xray"].includes(value)) throw new Error("분석 작업을 먼저 선택하세요.");
+    if (!["ct", "mri", "xray"].includes(value)) throw userError("분석 작업을 먼저 선택하세요.");
   }
   function getFile(analysis, id) {
     validateAnalysis(analysis);
     const file = files.get(id);
     if (!file || file.analysis !== analysis || !file.input)
-      throw new Error("이 분석 작업에 영상을 다시 추가하세요.");
+      throw userError("이 분석 작업에 영상을 다시 추가하세요.");
     return withStudy(file);
   }
-  function stopWorker(message = "영상 확인 작업이 중단되었습니다. 다시 시도하세요.") {
+  function stopWorker(message = "영상 확인 작업이 중단되었습니다. 다시 시도하세요.", code = 'ENGINE_STOPPED') {
     const old = worker;
     worker = undefined;
-    pending?.reject(new Error(message));
+    pending?.reject(workerError({error:message,errorCode:code}));
     pending = undefined;
     if (old) {
       old.stdin.destroy();
@@ -284,7 +288,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   function startWorker() {
     if (worker) return worker;
     const command=runtime('ct',[path.join(scriptsRoot,'imaging-worker.py'),'--engine-root',engineRoot,'--palette',palette]);
-    if (!fs.existsSync(command.python)) throw new Error("로컬 분석 엔진을 준비해야 합니다.");
+    if (!fs.existsSync(command.python)) throw userError("로컬 분석 엔진을 준비해야 합니다.", 'ENGINE_MISSING');
     const process = spawn(
       command.python,
       command.args,
@@ -296,6 +300,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     );
     worker = process;
     const log = fs.createWriteStream(path.join(storageRoot, "preview-private.log"), { flags: "a" });
+    log.on('error', error => {
+      if (worker === process) { pending?.reject(error); stopWorker(); }
+    });
     process.stderr.pipe(log);
     process.stdin.on("error", () => {
       if (worker === process) stopWorker();
@@ -307,13 +314,13 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         if (response.id !== pending.id) return;
         const task = pending;
         pending = undefined;
-        response.error ? task.reject(new Error(response.error)) : task.resolve(response.result);
+        response.error ? task.reject(workerError(response)) : task.resolve(response.result);
       } catch {
         /* Third-party informational stdout is never an IPC response. */
       }
     });
     process.once("error", () => {
-      if (worker === process) stopWorker("영상 확인 프로세스를 시작하지 못했습니다.");
+      if (worker === process) stopWorker("영상 확인 프로세스를 시작하지 못했습니다.", 'ENGINE_START');
     });
     process.once("exit", () => {
       log.end();
@@ -326,12 +333,12 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     const task = queue.then(async () => {
       await workerShutdown;
       if (signal?.aborted) throw aborted();
-      if (disposed) throw new Error("앱이 종료되었습니다.");
+      if (disposed) throw userError("앱이 종료되었습니다.");
       const process = startWorker();
       return new Promise((resolve, reject) => {
         const id = randomUUID();
         const timer = setTimeout(
-          () => stopWorker("영상 처리 시간이 초과되었습니다. 다시 시도하세요."),
+          () => stopWorker("영상 처리 시간이 초과되었습니다. 다시 시도하세요.", 'TIMEOUT'),
           operation === "finalize" ? 20 * 60000 : 5 * 60000,
         );
         pending = {
@@ -348,8 +355,12 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         process.stdin.write(JSON.stringify({ ...values, operation, requestId: id }) + "\n");
       });
     });
-    queue = task.catch(() => {});
-    return task;
+    const checked = task.catch(error => {
+      diagnostic(error, operation, {inspect:'INPUT_READ',extract:'INPUT_READ',preview:'OVERLAY',prepare:'INPUT_READ',finalize:'RESULT_PROCESS',model_challenge:'AUTHORIZATION'}[operation], values.record?.id || values.id);
+      throw error;
+    });
+    queue = checked.catch(() => {});
+    return checked;
   }
   function handle(name, action) {
     const channel = "exmo:imaging:" + name;
@@ -365,15 +376,15 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         url.host !== "app" ||
         !["/", "/index.html"].includes(url.pathname)
       )
-        throw new Error("Desktop 분석 화면에서만 사용할 수 있습니다.");
+        throw userError("Desktop 분석 화면에서만 사용할 수 있습니다.");
       try {
         return { ok: true, value: await action(...args) };
       } catch (error) {
+        const issue = diagnostic(error, {choose:'입력 등록', preview:'영상·Overlay 표시', resultPreview:'영상·Overlay 표시', variant:'후처리', run:'분석 시작', exportResults:'결과 내보내기', imageMenu:'결과 내보내기'}[name] || name,
+          {choose:'INPUT_READ', preview:'OVERLAY', resultPreview:'OVERLAY', variant:'POSTPROCESS', exportResults:'RESULT_SAVE', imageMenu:'RESULT_SAVE'}[name]);
         return {
           ok: false,
-          error: error.code
-            ? "파일 접근 권한·저장 공간·로컬 엔진 상태를 확인하세요."
-            : error.message,
+          error: issue.message, diagnostic: issue,
         };
       }
     });
@@ -429,20 +440,20 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   });
   handle("assignXrayStudy", async (ids, study) => {
-    if (selecting || batch?.state === "running") throw new Error("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
+    if (selecting || batch?.state === "running") throw userError("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
     if (!Array.isArray(ids) || !ids.length || ids.length > 6000 ||
         ids.some(id => typeof id !== "string") || !study || typeof study !== "object")
-      throw new Error("촬영 정보와 선택 영상을 확인하세요.");
+      throw userError("촬영 정보와 선택 영상을 확인하세요.");
     const fields = ["patientId", "patientIssuer", "studyDate"];
     if (fields.some(key => typeof study[key] !== "string" || !study[key].trim() || study[key].length > 120))
-      throw new Error("환자번호·촬영일·기관을 입력하세요.");
+      throw userError("환자번호·촬영일·기관을 입력하세요.");
     const date = study.studyDate.replaceAll("-", "");
     const parsed = new Date(date.slice(0, 4) + "-" + date.slice(4, 6) + "-" + date.slice(6, 8) + "T00:00:00Z");
     if (!/^[0-9]{8}$/.test(date) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10).replaceAll("-", "") !== date)
-      throw new Error("유효한 촬영일을 입력하세요.");
+      throw userError("유효한 촬영일을 입력하세요.");
     for (const id of ids) {
       const record = files.get(id) || [...results.values()].find(r => r.record.id === id)?.record;
-      if (record?.analysis !== "xray" || !record.metadata) throw new Error("촬영 정보와 선택 영상을 확인하세요.");
+      if (record?.analysis !== "xray" || !record.metadata) throw userError("촬영 정보와 선택 영상을 확인하세요.");
     }
     const value = { patientId: study.patientId.trim(), patientIssuer: study.patientIssuer.trim(), studyDate: date };
     const task = catalogQueue.then(async () => {
@@ -456,18 +467,18 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     await task;
   });
   handle("assignPatientStudy", async (analysis, ids, study) => {
-    if (selecting || batch?.state === "running") throw new Error("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
+    if (selecting || batch?.state === "running") throw userError("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
     await patientAssignments.assign(analysis, ids, study,
       id => files.get(id) || [...results.values()].find(result => result.record.id === id)?.record);
   });
   handle("choose", async (analysis, folder = false, language = "ko") => {
     validateAnalysis(analysis);
-    if (typeof folder !== "boolean") throw new Error("잘못된 입력 선택입니다.");
+    if (typeof folder !== "boolean") throw userError("잘못된 입력 선택입니다.");
     if (language !== "ko" && language !== "en") throw new Error("Invalid language.");
     if (selecting) return [];
     if (batch?.state === "running")
-      throw new Error("실행 중인 분석을 완료하거나 취소한 뒤 영상을 추가하세요.");
-    if (!available(analysis)) throw new Error("로컬 분석 엔진을 준비해야 합니다.");
+      throw userError("실행 중인 분석을 완료하거나 취소한 뒤 영상을 추가하세요.");
+    if (!available(analysis)) throw userError("로컬 분석 엔진을 준비해야 합니다.");
     selecting = true;
     let importRoot;
     try {
@@ -485,7 +496,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       let sources = [];
       const visitedDirectories = new Set();
       async function collect(directory, depth = 0) {
-        if (depth > 12) throw new Error("폴더 깊이가 너무 큽니다. DICOM series 폴더를 선택하세요.");
+        if (depth > 12) throw userError("폴더 깊이가 너무 큽니다. DICOM series 폴더를 선택하세요.");
         const realDirectory = await fsp.realpath(directory);
         const key = process.platform === "win32" ? realDirectory.toLowerCase() : realDirectory;
         if (visitedDirectories.has(key)) return;
@@ -497,14 +508,14 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           else if (item.isFile() && !/\.(json|txt|md|csv|png|jpe?g|exe|py)$/i.test(item.name))
             sources.push(full);
           if (sources.length > 6000)
-            throw new Error("한 번에 6,000개 이하의 DICOM 파일을 선택하세요.");
+            throw userError("한 번에 6,000개 이하의 DICOM 파일을 선택하세요.");
         }
       }
       if (folder) {
         for (const directory of selection.filePaths) await collect(directory);
       }
       else sources.push(...selection.filePaths);
-      if (!sources.length) throw new Error("선택한 폴더에 영상 파일이 없습니다.");
+      if (!sources.length) throw userError("선택한 폴더에 영상 파일이 없습니다.");
       importProgress = { analysis, completed: 0, total: sources.length, current: "", phase: "copy", failed: 0 };
       publishImport();
       importRoot = path.join(storageRoot, "imports", randomUUID());
@@ -515,10 +526,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         const stat = await fsp.stat(source);
         total += stat.size;
         if (!stat.isFile() || stat.size > 2 * 1024 ** 3 || total > 20 * 1024 ** 3)
-          throw new Error("파일당 2 GB, 한 번에 20 GB 이하의 영상을 선택하세요.");
+          throw userError("파일당 2 GB, 한 번에 20 GB 이하의 영상을 선택하세요.");
       }
       const archives = sources.filter(source => /\.zip$/i.test(source));
       const extractedNames = new Map();
+      const imported = [];
       if (archives.length) {
         sources = sources.filter(source => !/\.zip$/i.test(source));
         let imageBytes = 0;
@@ -527,6 +539,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           importProgress.current = path.basename(archive);
           importProgress.phase = "extract";
           publishImport();
+          try {
           const snapshot = path.join(snapshots, randomUUID() + ".zip");
           await fsp.copyFile(archive, snapshot, fs.constants.COPYFILE_EXCL);
           const destination = path.join(importRoot, "extracted", randomUUID());
@@ -536,20 +549,26 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           });
           for (const entry of entries) {
             if (!inside(entry.path) || path.dirname(entry.path) !== destination)
-              throw new Error("ZIP 내부 경로가 올바르지 않습니다.");
+              throw userError("ZIP 내부 경로가 올바르지 않습니다.");
             sources.push(entry.path);
             extractedNames.set(entry.path, entry.name);
             imageBytes += entry.bytes;
           }
           await fsp.rm(snapshot, { force: true });
+          } catch (error) {
+            const id = randomUUID(), issue = diagnostic(error, 'extract', 'INPUT_READ', id);
+            const row = {id,analysis,name:path.basename(archive),ready:false,warnings:[],error:issue.message,diagnostic:issue};
+            files.set(id,row);imported.push(row);await saveCatalog();
+            importProgress.failed++;publishImport([row]);
+          }
         }
-        importProgress.total = sources.length;
+        importProgress.total = sources.length + imported.length;
+        importProgress.completed = imported.length;
       }
       const standalone = sources.filter(p => /\.(nrrd|nii|nii\.gz)$/i.test(p));
       const dicom = sources.filter(p => !standalone.includes(p));
       const groups = standalone.map(p => [p]);
       if (dicom.length) groups.push(dicom); // Never split a DICOM series into slices.
-      const imported = [];
       for (const sourcePaths of groups) {
         if (disposed) break;
         const paths = [], names = {};
@@ -590,10 +609,19 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           rows = await request("inspect", inspection);
         } catch (error) {
           if (disposed) break;
+          const issue = diagnostic(error, 'inspect', 'INPUT_READ');
           rows = [{ id: randomUUID(), analysis, name: extractedNames.get(sourcePaths[0]) || path.basename(sourcePaths[0]),
-            ready: false, warnings: [], error: error.message }];
+            ready: false, warnings: [], error: issue.message, diagnostic:issue }];
         }
-        for (const row of rows) files.set(row.id, row);
+        for (const row of rows) {
+          if (row.error && !row.diagnostic) {
+            const cause = row.errorCode ? workerError(row) : userError(row.error,
+              row.classification?.status === 'license_required' ? 'AUTHORIZATION' : 'INPUT_INVALID');
+            row.diagnostic = diagnostic(cause, row.classification ? '촬영 방향 분류' : '입력 확인', 'INPUT_READ', row.id);
+            row.error = row.diagnostic.message;
+          }
+          files.set(row.id, row);
+        }
         await saveCatalog();
         imported.push(...rows);
         importProgress.completed += sourcePaths.length;
@@ -638,7 +666,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       (value.opacity != null &&
         (!Number.isFinite(value.opacity) || value.opacity < 0 || value.opacity > 1))
     )
-      throw new Error("잘못된 preview 옵션입니다.");
+      throw userError("잘못된 preview 옵션입니다.");
     return {
       view: value.view,
       index: value.index,
@@ -653,7 +681,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   );
   handle("resultPreview", (id, value) => {
     const result = results.get(id);
-    if (!result) throw new Error("완료된 결과를 선택하세요.");
+    if (!result) throw userError("완료된 결과를 선택하세요.");
     return request("preview", {
       ...options(value),
       record: result.record,
@@ -661,6 +689,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       sideMask: result.sideMask,
       rows: result.summary.rows,
     });
+  });
+  handle('sceneFailure', (id, code, reference) => {
+    if (!results.has(id) || !['MESH_READ','MESH_INVALID','GPU_RENDER','FILE_MISSING','ACCESS_DENIED','PATH_TOO_LONG','MEMORY'].includes(code) || !/^[a-f0-9-]{36}$/.test(reference))
+      throw userError('잘못된 preview 옵션입니다.');
+    return diagnostic(Object.assign(new Error('Renderer reported a result display failure'), {diagnosticCode:code,reference}), '3D 표시', code, id);
   });
   const preparingResults = new Map();
   handle("variant", async (id, variant) => {
@@ -676,15 +709,15 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
             : []
       ).includes(variant)
     )
-      throw new Error("지원하는 결과 variant를 선택하세요.");
+      throw userError("지원하는 결과 variant를 선택하세요.");
     if (batch?.state === "running")
-      throw new Error("실행 중인 분석이 끝난 뒤 variant를 변경하세요.");
+      throw userError("실행 중인 분석이 끝난 뒤 variant를 변경하세요.");
     if (
       variant === prior.summary.variant &&
       prior.summary.laterality?.method === "femur_components_lps_v1"
     ) {
       if (["failed", "interrupted"].includes(prior.summary.meshState)) {
-        const retry = { ...prior, summary: { ...prior.summary, meshState: "pending" } };
+        const retry = { ...prior, summary: { ...prior.summary, meshState: "pending", meshDiagnostic:undefined } };
         await publishResult(retry, prior);
         queueMesh(retry);
         return retry.summary;
@@ -822,7 +855,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       if (signal.aborted) throw aborted();
       const resultPath = complete.result;
       if (!complete.complete || !inside(resultPath) || !resultPath.startsWith(directory + path.sep))
-        throw new Error("모델 결과 경로를 확인하지 못했습니다.");
+        throw userError("모델 결과 경로를 확인하지 못했습니다.", 'RESULT_INVALID');
       cpu?.release(); cpu = undefined;
       if (estimate.finalize) memory.resize(Math.min(estimate.cpu, estimate.finalize));
       taskState(task, { stage: "결과 준비 차례 대기", lane: "waiting", progress: null });
@@ -844,6 +877,13 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       finalize.release(); finalize = undefined;
       memory.release(); memory = undefined;
       queueMesh(result, pipelineController.signal, pipelineResources.memory);
+    } catch (error) {
+      const code = /권한/.test(task.stage) ? 'AUTHORIZATION' : /모델/.test(task.stage) ? 'MODEL_LOAD' :
+        /입력/.test(task.stage) ? 'INPUT_READ' : /복원|정규화/.test(task.stage) ? 'RESTORE' :
+        /검증/.test(task.stage) ? 'RESULT_INVALID' : /저장/.test(task.stage) ? 'RESULT_SAVE' :
+        /측정|결과/.test(task.stage) ? 'RESULT_PROCESS' : /후처리/.test(task.stage) ? 'POSTPROCESS' : 'INFERENCE';
+      diagnostic(error, task.stage, code, file.id);
+      throw error;
     } finally {
       controller.abort();
       pipelineController.signal.removeEventListener("abort", abortTask);
@@ -854,7 +894,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   handle("run", (analysis, ids, confirmedIds = [], device = "cuda:0") => {
     validateAnalysis(analysis);
     if (selecting || batch?.state === "running")
-      throw new Error("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
+      throw userError("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
     if (
       !Array.isArray(ids) ||
       ids.length < 1 ||
@@ -863,10 +903,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       !Array.isArray(confirmedIds) ||
       !["cuda:0", "cpu"].includes(device)
     )
-      throw new Error("등록된 영상 중 분석할 대상을 선택하세요.");
+      throw userError("등록된 영상 중 분석할 대상을 선택하세요.");
     const targets = ids.map((id) => getFile(analysis, id));
     if (targets.some((f) => !f.ready || (f.confirmation && !confirmedIds.includes(f.id))))
-      throw new Error("분석 조건과 입력 단위/sequence를 확인하세요.");
+      throw userError("분석 조건과 입력 단위/sequence를 확인하세요.");
     const powerBlocker = powerSaveBlocker.start("prevent-app-suspension");
     batchStarted = performance.now();
     cancelled = false;
@@ -892,7 +932,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         await runPipeline(targets, {
           signal: pipelineController.signal, concurrency: batch.concurrency,
           execute: file => execute(file, confirmedIds.includes(file.id), device),
-          failed: (file, error) => batch.failed.push({ id: file.id, name: file.name, error: error.message }),
+          failed: (file, error) => {
+            const issue = diagnostic(error, 'Segmentation', 'INFERENCE', file.id);
+            batch.failed.push({ id:file.id, name:file.name, error:issue.message, diagnostic:issue });
+          },
         });
         if (!cancelled) batch.stage = "3D 준비";
         await meshQueue;
@@ -926,7 +969,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   handle("cancel", cancel);
   handle("clear", async (analysis) => {
     validateAnalysis(analysis);
-    if (selecting) throw new Error("영상 가져오기가 끝난 뒤 목록을 비우세요.");
+    if (selecting) throw userError("영상 가져오기가 끝난 뒤 목록을 비우세요.");
     await cancel(analysis);
     await request("clear");
     for (const [id, file] of files) {

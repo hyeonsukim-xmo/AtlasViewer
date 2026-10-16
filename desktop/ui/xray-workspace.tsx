@@ -1,3 +1,4 @@
+import { failureText, type Failure } from "./diagnostics";
 import { useEffect, useRef, useState } from "react";
 import { t, useLanguage, localeTag } from "./language";
 import PatientGroupsView from "./patient-groups-view";
@@ -37,7 +38,7 @@ type Props = {
   busy: boolean;
   importing: boolean;
   importProgress: ImportProgress | null;
-  error: string;
+  error: Failure;
   visible: boolean;
   initialResult?: string;
   device: string;
@@ -98,7 +99,7 @@ export default function XrayWorkspace(p: Props) {
   const [opened, setOpened] = useState<string[]>([]);
   const [angle, setAngle] = useState<XrayView>("AP");
   const [versions, setVersions] = useState<Record<string, string>>({});
-  const [localError, setLocalError] = useState("");
+  const [localError, setLocalError] = useState<Failure>("");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [patientId, setPatientId] = useState("");
@@ -224,7 +225,7 @@ export default function XrayWorkspace(p: Props) {
       setCompared([]);
       setOpened([]);
     } catch (error) {
-      setLocalError((error as Error).message);
+      setLocalError(error as Error);
     } finally {
       setSaving(false);
     }
@@ -341,7 +342,7 @@ export default function XrayWorkspace(p: Props) {
       </div>
       {(p.error || localError) && (
         <p role="alert" className="inline-error">
-          {t(localError || p.error)}
+          {failureText(localError || p.error)}
         </p>
       )}
       {p.importing && (
@@ -376,7 +377,7 @@ export default function XrayWorkspace(p: Props) {
         <div className="inline-error">
           {p.job.failed.map((file) => (
             <p key={file.id}>
-              {file.name} · {t(file.error)}
+              {file.name} · {failureText(file.error, file.diagnostic)}
             </p>
           ))}
           <button
@@ -519,7 +520,7 @@ export default function XrayWorkspace(p: Props) {
                   aria-label={t("{{value0}} 분석 선택", {value0: seriesLabel(file)})} onClick={event => event.stopPropagation()}
                   onChange={event => pick(event.target.checked, !!(event.nativeEvent as MouseEvent).shiftKey)} /></td>
                 <td title={file.name}><strong>{seriesLabel(file)}</strong>
-                  {file.error && <small className="inline-error">{t(file.error)}</small>}</td>
+                  {file.error && <small className="inline-error">{failureText(file.error, file.diagnostic)}</small>}</td>
                 <td>{xrayView(file) ? viewLabel(xrayView(file)!) : "—"}</td>
                 <td>{stateOf(file)}</td>
               </tr>}
@@ -536,7 +537,7 @@ export default function XrayWorkspace(p: Props) {
                   </span>
                 </div>
                 <ImagePreview key={preview.id} analysis="xray" id={preview.id} />
-                {preview.error && <p className="inline-error">{t(preview.error)}</p>}
+                {preview.error && <p className="inline-error">{failureText(preview.error, preview.diagnostic)}</p>}
                 {preview.warnings.map((warning) => (
                   <p className="muted-note" key={warning}>
                     {t(warning)}
@@ -600,7 +601,7 @@ export default function XrayWorkspace(p: Props) {
               </div>
               {file.metadata ? <LazyXrayPreview id={file.id} /> : <p>{t("입력 검토 필요")}</p>}
               <div className="review-case-details">
-                {file.error && <p className="inline-error">{t(file.error)}</p>}
+                {file.error && <p className="inline-error">{failureText(file.error, file.diagnostic)}</p>}
                 {file.warnings.map(warning => <p className="muted-note" key={warning}>{t(warning)}</p>)}
                 {result && <div className="xray-completed-actions">
                   <button className="clinical-button" onClick={() => openResult(result)}>{t("결과 열기")}</button>

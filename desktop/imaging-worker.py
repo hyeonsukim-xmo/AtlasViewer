@@ -18,6 +18,10 @@ import uuid
 import stat
 import zipfile
 import zlib
+_diagnostics_spec = importlib.util.spec_from_file_location('exmo_diagnostics', Path(__file__).with_name('diagnostics.py'))
+_diagnostics = importlib.util.module_from_spec(_diagnostics_spec)
+_diagnostics_spec.loader.exec_module(_diagnostics)
+failure = _diagnostics.failure
 
 import nibabel as nib
 import nrrd
@@ -304,6 +308,7 @@ def inspect(message, root, classifier):
         names = message.get("names", {})
         name = names.get(str(paths[0]), paths[0].name)
         record = {"id": ident, "name": name, "analysis": analysis, "ready": False, "warnings": []}
+        operation = 'inspect'
         try:
             is_dicom = not paths[0].name.lower().endswith((".nrrd", ".nii", ".nii.gz"))
             metadata = {"format": "NRRD" if paths[0].suffix.lower() == ".nrrd" else "NIfTI", "caseName": name}
@@ -359,7 +364,9 @@ def inspect(message, root, classifier):
                     write_json(directory / 'input.json', record)
                     rows.append(record)
                     continue
+                operation = 'classify'
                 classification = classifier.process({"operation": "classify", "path": str(paths[0])}, classifier.pipeline)
+                operation = 'inspect'
                 record["classification"] = classification
                 raw_header = nrrd.read_header(str(source))
                 record["areaAvailable"] = "space directions" in raw_header and (not is_dicom or hasattr(pydicom.dcmread(paths[0], stop_before_pixels=True), "PixelSpacing"))
@@ -373,12 +380,8 @@ def inspect(message, root, classifier):
                 if not is_dicom and "space origin" not in nrrd.read_header(str(source)):
                     record["warnings"].append("원본에 origin 정보 없음 · projection 좌표로 표시")
             write_json(directory / "input.json", record)
-        except InputError as error:
-            record.update(ready=False, error=str(error))
-        except Exception:
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            record.update(ready=False, error="영상의 형식·metadata·geometry를 읽지 못했습니다. 원본 파일과 series 구성을 확인하세요.")
+        except Exception as error:
+            record.update(ready=False, **failure(error, operation, record['id'], input_error=isinstance(error, InputError)))
         rows.append(record)
     write_json(destination / "index.json", rows)
     return rows
@@ -932,12 +935,8 @@ def main():
             else:
                 raise InputError("지원하지 않는 작업입니다.")
             response = {"id": message["requestId"], "result": result}
-        except InputError as error:
-            response = {"id": message.get("requestId"), "error": str(error)}
-        except Exception:
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            response = {"id": message.get("requestId"), "error": "영상 처리 중 오류가 발생했습니다. 원본 geometry와 모델 입력 조건을 확인하세요."}
+        except Exception as error:
+            response = {"id": message.get("requestId"), **failure(error, message.get('operation'), message.get('requestId'), input_error=isinstance(error, InputError))}
         print(json.dumps(response, ensure_ascii=False, allow_nan=False), flush=True)
 
 

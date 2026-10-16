@@ -1,3 +1,4 @@
+import { failureText, type Failure } from "./diagnostics";
 import { useEffect, useRef, useState } from "react";
 import { t, useLanguage } from "./language";
 import { patientIdentifier } from "./patient-groups";
@@ -16,7 +17,7 @@ export default function PatientAssignment({analysis, files, onClose, onSaved}: {
   const [issuer, setIssuer] = useState(() => common("patientIssuer"));
   const [date, setDate] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Failure>("");
   useEffect(() => {dialog.current?.showModal();}, []);
   async function save(reset = false) {
     setSaving(true); setError("");
@@ -25,7 +26,7 @@ export default function PatientAssignment({analysis, files, onClose, onSaved}: {
         patientId, patientIssuer: issuer, studyDate: date,
       }));
       await onSaved(); onClose();
-    } catch (error) {setError((error as Error).message);}
+    } catch (error) {setError(error as Error);}
     finally {setSaving(false);}
   }
   return <dialog ref={dialog} className="comparison-dialog patient-assignment" aria-labelledby="patient-assignment-title"
@@ -38,7 +39,7 @@ export default function PatientAssignment({analysis, files, onClose, onSaved}: {
       <label>{t("기관 또는 데이터셋 이름")}<input required maxLength={120} value={issuer} disabled={saving} onChange={e => setIssuer(e.target.value)} /></label>
       <label>{t("촬영일 변경 (선택)")}<input type="date" value={date} disabled={saving} onChange={e => setDate(e.target.value)} /></label>
       <p>{t("촬영일을 비워두면 각 영상의 기존 날짜를 유지합니다. 원본 파일은 변경하지 않습니다.")}</p>
-      {error && <p className="inline-error" role="alert">{t(error)}</p>}
+      {error && <p className="inline-error" role="alert">{failureText(error)}</p>}
       <footer><button type="button" className="text-button" disabled={saving || !files.some(file => file.metadata?.patientAssigned)} onClick={() => void save(true)}>{t("원본 환자 정보로 복원")}</button>
         <button className="clinical-button primary" disabled={saving}>{saving ? t("저장 중") : t("적용")}</button></footer>
     </form>

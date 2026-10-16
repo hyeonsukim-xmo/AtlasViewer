@@ -18,7 +18,7 @@ const input = path.join(storageRoot, 'input.nii.gz');
 fs.writeFileSync(input, 'fixture');
 const record = {id:'one', analysis:'ct', input, name:'fixture', ready:true, metadata:{size:[8,8,8],spacing:[1,1,1]}};
 fs.writeFileSync(path.join(storageRoot, 'library.json'), JSON.stringify([record]));
-let releaseMesh, failMesh = false, workers = [], onModelRun, onInspect, onModelChallenge;
+let releaseMesh, failMesh = false, workers = [], onModelRun, onInspect, onModelChallenge, selectedPaths=[input];
 class FakeWorker {
   constructor() { this.closed=false; workers.push(this); }
   async request(message, options) {
@@ -58,8 +58,8 @@ function spawn() {
   child.stdin=new PassThrough();
   child.stdin.on('data', async data => {
     const message=JSON.parse(data.toString());
-    if(message.operation==='inspect')onInspect?.(message);
-    const result=message.operation==='inspect'?[]:message.operation==='prepare'?message.record:message.operation==='finalize'?
+    if(message.operation==='extract') {child.stdout.write(JSON.stringify({id:message.requestId,error:'Corrupt ZIP fixture',errorCode:'INPUT_INVALID',errorPublic:true})+'\n');return;}
+    const result=message.operation==='inspect'?(onInspect?.(message)||[]):message.operation==='prepare'?message.record:message.operation==='finalize'?
       await new FakeWorker().request(message):{image:'data:image/png;base64,test'};
     child.stdout.write(JSON.stringify({id:message.requestId,result})+'\n');
   });
@@ -69,7 +69,7 @@ function spawn() {
 function install(analysisAuthorization) {
   const handlers=new Map(), frame={url:'atlas://app/'};
   const window={webContents:{mainFrame:frame,send(){}}};
-  const electron={dialog:{showOpenDialog:async()=>({canceled:false,filePaths:[input]})},ipcMain:{handle:(key,fn)=>handlers.set(key,fn),removeHandler:key=>handlers.delete(key)},
+  const electron={dialog:{showOpenDialog:async()=>({canceled:false,filePaths:selectedPaths})},ipcMain:{handle:(key,fn)=>handlers.set(key,fn),removeHandler:key=>handlers.delete(key)},
     powerSaveBlocker:{start:()=>1,stop(){}}};
   const context={module:{exports:{}},process,console,setTimeout,clearTimeout,URL,AbortController,
     require:name=>name==='electron'?electron:name==='./analysis-worker.cjs'?{AnalysisWorker:FakeWorker}:
@@ -137,10 +137,18 @@ async function run(meshFailure=false,cancel=false) {
     const published=path.join(storageRoot,'runs',result.id,'published.json');
     assert.equal(JSON.parse(fs.readFileSync(published)).summary.meshState,'pending');
     assert.ok((await call('resultPreview',result.id,{})).image);
+    const reference=require('node:crypto').randomUUID();
+    assert.equal((await call('sceneFailure',result.id,'GPU_RENDER',reference)).reference,reference);
+    await assert.rejects(call('sceneFailure',result.id,'arbitrary-code',reference));
     if (cancel) await call('cancel','ct'); else releaseMesh();
     await until(async()=> (await call('job')).state!=='running');
     const done=(await call('results','ct')).find(r=>r.id===result.id);
     assert.equal(done.meshState,cancel?'interrupted':meshFailure?'failed':'ready');
+    if (meshFailure || cancel) {
+      assert.equal(done.meshDiagnostic.code,cancel?'CANCELLED':'MESH_BUILD');
+      assert.ok(done.meshDiagnostic.reference);
+      assert.equal(JSON.parse(fs.readFileSync(published)).summary.meshDiagnostic.reference,done.meshDiagnostic.reference);
+    }
     assert.equal((await call('job')).failed.length,0,'Meshing failure is not segmentation failure');
     assert.ok((await call('resultPreview',result.id,{})).image);
     if (meshFailure || cancel) {
@@ -188,7 +196,8 @@ async function runAuthorization() {
     for(let i=0;i<2;i++) {await until(()=>releaseMesh);const finish=releaseMesh;releaseMesh=undefined;finish();}
     await until(async()=>(await call('job')).state!=='running');
     const job=await call('job');assert.equal(job.completed.length,2);assert.equal(job.failed.length,1);
-    assert.equal(job.failed[0].id,'three');assert.match(job.failed[0].error,/REVOKED/);
+    assert.equal(job.failed[0].id,'three');assert.equal(job.failed[0].diagnostic.code,'LICENSE_REVOKED');
+    assert.ok(job.failed[0].diagnostic.reference);
     for(const result of job.completed) {
       assert.ok(result.timings.authorization>=0,'Authorization time is separate from model inference');
       assert.equal((await call('results','ct')).find(r=>r.id===result.id).meshState,'ready');
@@ -243,6 +252,22 @@ async function authorizeXrayClassification() {
     console.log('PASS: X-ray import cannot start classification without a fresh permitted grant');
   } finally {onInspect=undefined;fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify([record]));}
 }
+async function mixedArchiveImport() {
+  fs.writeFileSync(path.join(storageRoot,'verified-packages.json'),'{}');
+  const zip=path.join(storageRoot,'broken.zip');fs.writeFileSync(zip,'invalid archive');
+  selectedPaths=[zip,input];onInspect=()=>[{...record,id:'import-valid'}];
+  const {backend,call}=install();
+  try {
+    const rows=await call('choose','ct',false,'ko');
+    assert.equal(rows.length,2);assert.equal(rows[0].name,'broken.zip');
+    assert.equal(rows[0].diagnostic.code,'INPUT_INVALID');assert.equal(rows[0].ready,false);
+    assert.equal(rows[1].id,'import-valid');assert.equal(rows[1].ready,true);
+  } finally {
+    await backend.dispose();selectedPaths=[input];onInspect=undefined;
+    fs.writeFileSync(path.join(storageRoot,'library.json'),JSON.stringify([record]));
+  }
+  console.log('PASS: corrupt ZIP is a named failed input while another image still imports');
+}
 async function authorizeMriWorker() {
   fs.mkdirSync(path.join(storageRoot,'envs/mri/Scripts'),{recursive:true});
   fs.writeFileSync(path.join(storageRoot,'envs/mri/Scripts/python.exe'),'stub');
@@ -281,6 +306,7 @@ async function authorizeMriWorker() {
     await runAuthorization();
     await rejectInvalidGrants();
     await authorizeXrayClassification();
+    await mixedArchiveImport();
     await authorizeMriWorker();
     // A process exit during meshing must reopen the existing measurements as retryable.
     const directory=fs.readdirSync(path.join(storageRoot,'runs'))

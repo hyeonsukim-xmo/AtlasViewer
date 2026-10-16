@@ -1,6 +1,7 @@
 import type { Group } from "../../app/anatomy";
+import type { Diagnostic } from './diagnostics';
 export type Analysis = "ct" | "mri" | "xray";
-export type Reply<T> = { ok: true; value: T } | { ok: false; error: string };
+export type Reply<T> = { ok: true; value: T } | { ok: false; error: string; diagnostic?:Diagnostic };
 export type ModelStatus = {
   importProgress?: ImportProgress | null;
   reviewAvailable: boolean;
@@ -52,6 +53,7 @@ export type ImagingFile = {
   classification?: Classification;
   warnings: string[];
   error?: string;
+  diagnostic?: Diagnostic;
 };
 export type PreviewOptions = {
   view?: "axial" | "coronal" | "sagittal";
@@ -111,6 +113,7 @@ export type AnalysisResult = {
   route: string | null;
   meshBytes: number | null;
   meshState?: "pending" | "ready" | "empty" | "failed" | "interrupted";
+  meshDiagnostic?: Diagnostic;
   compute?: { device: string; accumulation: string; input_resident: string | null; accumulation_reason: string | null } | null;
   timings?: {
     model?: Record<string, number>;
@@ -166,7 +169,7 @@ export type Job = {
   stage: string;
   progress: number | null;
   completed: AnalysisResult[];
-  failed: { id: string; name: string; error: string }[];
+  failed: { id: string; name: string; error: string; diagnostic?:Diagnostic }[];
   total: number;
 };
 export type LicenseStatus = { profile: "development" | "internal" | "customer"; state: string; expiresAt: number | null };
@@ -188,6 +191,7 @@ declare global {
       ): Promise<Reply<ImagingFile[]>>;
       preview(analysis: Analysis, id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
       resultPreview(id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
+      sceneFailure(id: string, code: string, reference: string): Promise<Reply<Diagnostic>>;
       run(
         analysis: Analysis,
         ids: string[],
@@ -204,7 +208,7 @@ declare global {
   }
 }
 export function unwrap<T>(reply: Reply<T>): T {
-  if (!reply.ok) throw new Error(reply.error);
+  if (!reply.ok) throw Object.assign(new Error(reply.error), {diagnostic:reply.diagnostic});
   return reply.value;
 }
 export const number = (value: number | null | undefined, digits = 1) =>

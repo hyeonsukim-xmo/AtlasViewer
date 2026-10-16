@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld(
     preview: (analysis, id, options) =>
       ipcRenderer.invoke("exmo:imaging:preview", analysis, id, options),
     resultPreview: (id, options) => ipcRenderer.invoke("exmo:imaging:resultPreview", id, options),
+    sceneFailure: (id, code, reference) => ipcRenderer.invoke('exmo:imaging:sceneFailure', id, code, reference),
     run: (analysis, ids, confirmedIds, device) =>
       ipcRenderer.invoke("exmo:imaging:run", analysis, ids, confirmedIds, device),
     job: () => ipcRenderer.invoke("exmo:imaging:job"),

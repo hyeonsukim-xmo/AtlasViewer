@@ -1,3 +1,4 @@
+import { failureText, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
 import { schedulePreview } from "./preview-queue";
 import { useEffect, useRef, useState } from "react";
@@ -26,8 +27,8 @@ export default function ImagePreview({
   const [windowing, setWindow] = useState<"soft" | "bone">("soft");
   const [opacity, setOpacity] = useState(0.45);
   const [data, setData] = useState<Preview>();
-  const [error, setError] = useState("");
-  const [exportError, setExportError] = useState("");
+  const [error, setError] = useState<Failure>("");
+  const [exportError, setExportError] = useState<Failure>("");
   const [loading, setLoading] = useState(false);
   const area = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointer: number; y: number; index: number } | null>(null);
@@ -98,7 +99,7 @@ export default function ImagePreview({
           }
         } catch (error) {
           if (!disposed.current && request.identity === latestIdentity.current)
-            setError((error as Error).message);
+            setError(error as Error);
         }
       }
       inFlight.current = false;
@@ -163,7 +164,7 @@ export default function ImagePreview({
             filename: `${analysis.toUpperCase()}_${data.metadata.studyDate || "undated"}_${data.view}_${data.index + 1}${result ? "_overlay" : ""}.png`,
             source: {kind: result ? "result" : "input", id},
             language,
-          }).then(unwrap).catch(error => setExportError(error.message));
+          }).then(unwrap).catch(error => setExportError(error));
         }}
         ref={area}
         tabIndex={0}
@@ -225,7 +226,7 @@ export default function ImagePreview({
           <img src={data.image} alt={`${data.view} slice ${data.index + 1}`} draggable={false} />
         )}
         {error ? (
-          <p role="alert">{t(error)}</p>
+          <p role="alert">{failureText(error)}</p>
         ) : !data ? (
           <span className="preview-placeholder">{t("영상 준비 중")}</span>
         ) : null}
@@ -250,7 +251,7 @@ export default function ImagePreview({
         )}
         <span>{analysis === "xray" ? "2D" : "mm"}</span>
       </div>
-      {exportError && <p role="alert">{t(exportError)}</p>}
+      {exportError && <p role="alert">{failureText(exportError)}</p>}
       {result && !compact && (
         <label className="overlay-opacity">
           Overlay
