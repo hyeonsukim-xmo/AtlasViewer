@@ -99,6 +99,49 @@ const digest = (file) => createHash("sha256").update(fs.readFileSync(file)).dige
     assert.equal(folderReply.ok, true, folderReply.error);
     assert.equal(folderReply.value.length, 2);
     assert(folderReply.value.every((r) => r.ready));
+    for (const analysis of ["ct", "mri", "xray"]) {
+      const parent = path.join(fixtures.directory, `multi-folder-${analysis}`);
+      const first = path.join(parent, "first", "nested");
+      const second = path.join(parent, "second");
+      await fsp.mkdir(first, {recursive: true});
+      await fsp.mkdir(second, {recursive: true});
+      await fsp.copyFile(fixtures[analysis], path.join(first, "images.zip"));
+      // Distinct patient/series IDs: copying identical DICOMs would test duplicate
+      // slices in one series rather than multiple studies selected together.
+      require("node:child_process").execFileSync(path.join(engineRoot, "envs/ct/Scripts/python.exe"), ["-c", `
+import io, sys, zipfile, pydicom
+from pydicom.uid import generate_uid
+uids = {}
+with zipfile.ZipFile(sys.argv[1]) as source, zipfile.ZipFile(sys.argv[2], 'w') as target:
+    for name in source.namelist():
+        if name.endswith('/') or name == 'DICOMDIR': continue
+        ds = pydicom.dcmread(io.BytesIO(source.read(name)))
+        for key in ['StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID', 'FrameOfReferenceUID']:
+            if key in ds:
+                old = str(ds.get(key))
+                ds[key].value = uids.setdefault(old, generate_uid())
+        ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+        ds.PatientID = 'MULTI_FOLDER_SECOND'
+        buffer = io.BytesIO()
+        ds.save_as(buffer, enforce_file_format=True)
+        target.writestr(name, buffer.getvalue())
+`, fixtures[analysis], path.join(second, "images.zip")]);
+      choices = [path.dirname(first), second];
+      const multiple = await call("choose", analysis, true, "en");
+      assert.equal(multiple.ok, true, multiple.error);
+      const expected = analysis === "xray" ? 6 : 4;
+      assert.equal(multiple.value.length, expected, "Every selected directory is imported");
+      assert(multiple.value.some(row => row.metadata.patientId === "MULTI_FOLDER_SECOND"));
+      if (analysis !== "xray") assert(multiple.value.every(row => row.ready));
+      assert(dialogs.at(-1).properties.includes("openDirectory"));
+      assert(dialogs.at(-1).properties.includes("multiSelections"));
+      choices = [first, parent, second, parent];
+      const overlapping = await call("choose", analysis, true, "en");
+      assert.equal(overlapping.ok, true, overlapping.error);
+      assert.equal(overlapping.value.length, expected, "Parent/child selections are collected once");
+      if (analysis !== "xray") assert(overlapping.value.every(row => row.ready));
+      console.log(analysis.toUpperCase() + ": multiple and overlapping folders passed");
+    }
     const saved = await fsp.readFile(path.join(storageRoot, "library.json"), "utf8");
     choices = [fixtures.broken];
     const bad = await call("choose", "ct", false, "en");

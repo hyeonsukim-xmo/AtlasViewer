@@ -466,15 +466,20 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
           language === "en"
             ? `${analysis.toUpperCase()} · Add ${folder ? "DICOM folder" : "images"}`
             : `${analysis.toUpperCase()} · ${folder ? "DICOM 폴더" : "영상 파일"} 추가`,
-        properties: folder ? ["openDirectory"] : ["openFile", "multiSelections"],
+        properties: folder ? ["openDirectory", "multiSelections"] : ["openFile", "multiSelections"],
         ...(folder
           ? {}
           : { filters: [{ name: "Medical images", extensions: ["dcm", "nrrd", "nii", "gz", "zip"] }] }),
       });
       if (selection.canceled || disposed) return [];
       let sources = [];
+      const visitedDirectories = new Set();
       async function collect(directory, depth = 0) {
         if (depth > 12) throw new Error("폴더 깊이가 너무 큽니다. DICOM series 폴더를 선택하세요.");
+        const realDirectory = await fsp.realpath(directory);
+        const key = process.platform === "win32" ? realDirectory.toLowerCase() : realDirectory;
+        if (visitedDirectories.has(key)) return;
+        visitedDirectories.add(key);
         for (const item of await fsp.readdir(directory, { withFileTypes: true })) {
           if (item.isSymbolicLink()) continue;
           const full = path.join(directory, item.name);
@@ -485,7 +490,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette 
             throw new Error("한 번에 6,000개 이하의 DICOM 파일을 선택하세요.");
         }
       }
-      if (folder) await collect(selection.filePaths[0]);
+      if (folder) {
+        for (const directory of selection.filePaths) await collect(directory);
+      }
       else sources.push(...selection.filePaths);
       if (!sources.length) throw new Error("선택한 폴더에 영상 파일이 없습니다.");
       importProgress = { analysis, completed: 0, total: sources.length, current: "", phase: "copy", failed: 0 };
