@@ -30,7 +30,8 @@ function inspectPayload(root,issuer,checkFile,timings={}) {
   root=path.resolve(root);const document=path.join(root,'payload.json');P.check(fs.statSync(document).size<=M.LIMIT);
   const signed=JSON.parse(fs.readFileSync(document,'utf8'));P.fields(signed,['token']);
   const policy=M.verify(signed.token,issuer,'exmo-runtime-payload-v1');
-  P.fields(policy,['schema','version','profile','python','indexSha256','models']);P.id(policy.version);
+  P.fields(policy,['schema','version','profile','python','indexSha256','models',...(policy.layout!==undefined?['layout']:[])]);P.id(policy.version);
+  P.check(policy.layout===undefined || policy.layout==='xray-shared-v1','Unsupported runtime layout');
   P.check(['internal','customer'].includes(policy.profile) && policy.python==='3.12.8');P.digest(policy.indexSha256);
   const indexFile=path.join(root,'files.json');P.check(fs.statSync(indexFile).size<=64*1024**2);
   const data=fs.readFileSync(indexFile);P.check(M.hash(data)===policy.indexSha256,'Payload index signature mismatch');
@@ -45,6 +46,9 @@ function inspectPayload(root,issuer,checkFile,timings={}) {
     checkFile?.(path.join(root,record.path),record);
   }
   P.check(actual.every(name=>names.has(name.toLowerCase())));
+  const sharedTorch='envs/xray-common/Lib/site-packages/torch/__init__.py';
+  P.check(names.has(sharedTorch.toLowerCase())===(policy.layout==='xray-shared-v1'),'Shared runtime layout mismatch');
+  if(policy.layout)P.check(!actual.some(name=>/^envs\/(ap|lat)\/Lib\/site-packages\/torch\//.test(name)),'Mixed shared and private torch runtimes');
   for(const name of ['python/python.exe','verified-packages.json',...['ct','mri','ap','lat','security'].map(e=>`envs/${e}/Lib/site-packages/cryptography/__init__.py`)])P.check(names.has(name.toLowerCase()),'Required runtime missing: '+name);
   P.fields(policy.models,M.ENGINES);
   for(const engine of M.ENGINES){

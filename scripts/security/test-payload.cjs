@@ -1,11 +1,13 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto');
-const M=require('../../desktop/security/model-package.cjs'),{verifyPayload,verifyPayloadAsync,safeName,hashFile,inventory}=require('../../desktop/security/payload.cjs'),{seal}=require('./payload.cjs');
+const M=require('../../desktop/security/model-package.cjs'),{verifyPayload,verifyPayloadAsync,safeName,hashFile,inventory}=require('../../desktop/security/payload.cjs'),{seal,slim,compactLayout}=require('./payload.cjs');
 test('signed payload binds every runtime file, all six complete model deliveries and exact index',async t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'exmo-payload-'));t.after(()=>{assert.ok(root.startsWith(os.tmpdir()+path.sep));fs.rmSync(root,{recursive:true,force:true});});
  const pair=crypto.generateKeyPairSync('ed25519'),authority={key:pair.privateKey,publicKey:pair.publicKey,profile:'internal'};
  const write=(name,data)=>{const file=path.join(root,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,data);};
  for(const file of ['python/python.exe','verified-packages.json',...['ct','mri','ap','lat','security'].map(e=>`envs/${e}/Lib/site-packages/cryptography/__init__.py`)])write(file,'fixture');
+ for(const env of ['ap','lat'])for(const file of ['__init__.py','include/test.h','lib/development.lib','lib/runtime.dll','testing/__init__.py'])write(`envs/${env}/Lib/site-packages/torch/${file}`,'fixture');
+ for(const file of ['python/Lib/test/test_math.py','envs/ct/Lib/site-packages/numpy/core/tests/test_data.py','envs/ct/Lib/site-packages/numpy/testing/__init__.py','envs/ap/Lib/site-packages/torch-2.7.dist-info/LICENSE'])write(file,'fixture');
  for(const engine of M.ENGINES){
   const family=engine==='mri'?'EXMO_MRI':engine==='ct'?'EXMO_CT':'EXMO_XRAY',prefix='packages/'+family+'/',data=Buffer.from('fixture'),asset=Buffer.alloc(data.length+16,7);
   const files=[{path:'runtime.py',size:data.length,sha256:M.hash(data)}];write(prefix+'runtime.py',data);
@@ -16,6 +18,28 @@ test('signed payload binds every runtime file, all six complete model deliveries
   write(prefix+(engine==='mri'||engine==='ct'?'model-package.json':`model-package-${engine}.json`),JSON.stringify({token:M.sign(value,authority.key)}));
  }
  const result=seal(authority,root,'test');assert.ok(result.files>10);assert.equal(verifyPayload(root,authority.publicKey).version,'test');
+ const compact=root+'-compact';t.after(()=>{assert.ok(compact.startsWith(os.tmpdir()+path.sep));fs.rmSync(compact,{recursive:true,force:true});fs.rmSync(compact+'.report.json',{force:true});});
+ const report=slim(authority,root,compact,'compact-test');assert.ok(report.after.files<result.files);assert.ok(report.after.bytes<result.bytes);
+ assert.equal(verifyPayload(compact,authority.publicKey).version,'compact-test');
+ assert.equal(verifyPayload(compact,authority.publicKey).layout,'xray-shared-v1');
+ const compactManifest=path.join(compact,'payload.json'),originalManifest=fs.readFileSync(compactManifest);
+ const compactPolicy=verifyPayload(compact,authority.publicKey);
+ fs.writeFileSync(compactManifest,JSON.stringify({token:M.sign({...compactPolicy,layout:'unknown'},authority.key)}));
+ assert.throws(()=>verifyPayload(compact,authority.publicKey),/layout/);fs.writeFileSync(compactManifest,originalManifest);
+ assert.ok(fs.existsSync(path.join(compact,'envs/xray-common/Lib/site-packages/torch/lib/runtime.dll')));
+ assert.ok(fs.existsSync(path.join(compact,'envs/ct/Lib/site-packages/numpy/testing/__init__.py')));
+ assert.ok(fs.existsSync(path.join(compact,'envs/ap/Lib/site-packages/torch-2.7.dist-info/LICENSE')));
+ assert.ok(!fs.existsSync(path.join(compact,'envs/lat/Lib/site-packages/torch')));
+ assert.ok(!fs.existsSync(path.join(compact,'envs/xray-common/Lib/site-packages/torch/include')));
+ assert.equal(verifyPayload(root,authority.publicKey).version,'test');
+ assert.throws(()=>slim(authority,root,compact,'duplicate'));
+ assert.throws(()=>slim(authority,root,path.join(root,'nested'),'nested'));
+ assert.throws(()=>slim({...authority,profile:'customer'},root,root+'-wrong-profile','wrong-profile'),/profile mismatch/);
+ assert.ok(!fs.existsSync(root+'-wrong-profile'));
+ const records=JSON.parse(fs.readFileSync(path.join(root,'files.json')));
+ const changed=records.map(r=>r.path==='envs/lat/Lib/site-packages/torch/__init__.py'?{...r,size:r.size+1}:r);
+ assert.throws(()=>compactLayout(changed),/packages differ/);
+ assert.throws(()=>compactLayout(records.filter(r=>r.path!=='envs/lat/Lib/site-packages/torch/__init__.py')),/packages differ/);
  const progress=[],timings={};
  assert.equal((await verifyPayloadAsync(root,authority.publicKey,(done,total)=>progress.push([done,total]),timings)).version,'test');
  assert.deepEqual(progress.at(-1),[result.files,result.files]);

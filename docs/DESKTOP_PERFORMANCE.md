@@ -2,7 +2,7 @@
 
 ## TODO: 보안 설치본 시작 지연 개선
 
-등록: 2026-10-16. 상태: **보류 — 다음 개발 작업으로 추적**. 이번 요청은 할 일 정리이며 추가 구현·성능 시험은 진행하지 않는다.
+등록: 2026-10-16. 2026-10-17에 **`perf/slim-protected-runtime` 브랜치에서 배포 용량 축소 후보의 합성 입력·패키지 시작 검증을 완료**했다. 기존 기준점은 `ced6e8c`이며 원본 엔진과 0.1.26 설치 파일은 보존한다. 검사 시점 변경과 실제 환자 전체 분석 회귀 검증은 별도 미완료 항목이다.
 
 현재 내부용 0.1.26에 전체 보호 엔진을 연결한 단일 실측은 메인 모듈 진입부터 첫 화면 표시까지 **166.48초**다. 이 중 전체 파일 내용 해시 검사가 **163.33초**, 파일 목록 열거가 1.41초였다. 현재는 시작할 때마다 전체 payload를 검증하며, 보호 엔진을 연결한 내부용과 고객용이 이 경로를 공유한다. 소스 개발 모드와 구분한다.
 
@@ -27,6 +27,72 @@
 이미 시도한 비동기 읽기·버퍼 재사용·파일 순서 변경·단일 worker·utility process는 전체 Electron 실행의 개선을 입증하지 못했다. 근거 없이 같은 시험을 반복하지 않는다. 상세 기록과 재현 명령은 [제품 보안 운영 문서](EXMO_PRODUCT_SECURITY_RUNBOOK.md)를 참조한다.
 
 측정 근거: `outputs/security-check/9ba284d4-2ce7-4cb6-af80-f05863b2464d/startup-performance.json`. 용량 집계 근거: `work/security-delivery-v2/payload/files.json`의 `packages/**/*.enc`와 나머지 파일. 이 로컬 산출물은 Git에 포함되지 않으므로 위 기준 수치를 문서에 함께 보존한다.
+
+### 2026-10-17: 배포 환경 축소 후보
+
+후보 앱 버전은 `0.1.27-runtime-slim.1`이다. 기본 `create` 경로를 자동 변경하지 않고, 이미 검증·서명된 payload에서 별도 후보를 만든다.
+
+```powershell
+node scripts/security/payload.cjs slim AUTHORITY SOURCE_PAYLOAD NEW_PAYLOAD slim-v1
+node scripts/security/validate-portable-runtime.cjs NEW_PAYLOAD NEW_IMPORT_REPORT.json
+node scripts/security/validate-protected-models.cjs NEW_PAYLOAD cuda:0
+# 마지막 인자로 ct,mri,ap,lat_lt,lat_rt,xray-classifier 중 재검사할 항목만 지정할 수도 있다.
+```
+
+모델 암호문과 나머지 보존 파일은 원본의 서명된 해시와 복사 후 내용이 일치해야 한다. AP/LAT의 `torch` 전체가 동일한 경우에만 `envs/xray-common/Lib/site-packages/torch` 한 벌로 옮긴다. AP/LAT의 다른 패키지와 메타데이터는 각 환경에 유지한다. CT의 GPU 경로도 이 공통 PyTorch를 사용하며, CT CPU 및 MRI의 별도 PyTorch는 유지한다.
+
+| 항목 | 원본 | 후보 |
+| --- | ---: | ---: |
+| 전체 파일 | 88,909 | 40,904 |
+| 전체 bytes | 22,786,400,359 | 15,765,187,747 |
+| 암호화 모델 | 5.31 GB | 동일 |
+
+배포 payload에서 **7,021,212,612 bytes(30.81%)**, **48,005개 파일(54.0%)**이 줄었다. 원본과 후보를 함께 보존하므로 작업 PC에서 이만큼 디스크 공간이 확보됐다는 뜻은 아니다.
+
+중복 없이 집계한 제외 내역:
+
+| 분류 | 파일 수 | bytes |
+| --- | ---: | ---: |
+| PyTorch 개발용 include 및 lib/*.lib | 35,503 | 2,706,889,955 |
+| 개발용 파일 제외 후 LAT의 중복 torch | 2,091 | 4,146,428,643 |
+| NumPy/SciPy/pandas/SymPy의 tests 디렉터리 | 8,838 | 139,142,163 |
+| Python 표준 라이브러리 test 디렉터리 | 1,573 | 28,751,851 |
+
+`testing` 모듈, 라이선스, `.dist-info`, 실행 DLL, 다른 패키지는 일괄 삭제하지 않는다. 학습·C++ 확장 빌드·새로운 JIT 컴파일 용도로 이 축소 실행 환경을 사용하려면 별도 검증이 필요하다. 설치 위치에서 수동으로 삭제하는 방법은 사용하지 않는다.
+
+공통 구조는 서명 정책의 `layout: xray-shared-v1`로 표시한다. 새 앱은 기존 구조도 지원하고, 구버전 verifier는 새 정책을 거부하므로 새 엔진만 구버전 앱에 넣지 않는다. 후보는 새 앱과 함께 배포해야 한다. 전체 파일 해시와 모델 연결 검증은 계속 수행한다.
+
+원본 portable 환경의 실제 CT 모델 로딩 중 Python 3.12의 `distutils` 초기화 누락을 확인했다. 서명 검증이 끝난 `site-packages`에 표준 `site.addsitedir` 초기화를 적용해 `.pth` 설정을 실행한다. 기존 단순 import 검사는 MONAI까지 검사하지 않아 이 문제를 놓쳤으며, 이제 MONAI import와 실제 모델 로더 검사를 포함한다. 이 수정은 원본/후보 양쪽 비교에 동일하게 적용했다.
+
+검증 범위와 기록:
+
+- 원본: `outputs/security-models/cd21bf1d-1234-46da-8231-4544e5484a79/verification.json`.
+- 후보: `outputs/security-models/9abb191f-551e-4886-b620-4eba98ba6b96/verification.json`.
+- CT 96³, MRI 128³, AP 512×1024, LAT 좌우 각각 5 folds의 1792×768 합성 입력으로 RTX 3050에서 가중치 로딩과 GPU forward를 검사했다. 원본/후보의 logits 해시가 모두 같았다. 실제 환자의 전체 전처리·TTA·원본 복원 파이프라인 재실행은 아니다.
+- 분류기는 합성 NRRD·DICOM을 비교한다. 원본 분류 출력 해시 추가 기록: `outputs/security-models/8784bc1f-f4cf-4fa6-ae4b-98f63aeaafbf/verification.json`.
+- `outputs/security-slim-imports-20261017.json`: 5개 격리 Python 환경 및 실제 AP/LAT 공통 경로 확인.
+- `outputs/security-slim-results-20261017.json`: 합성 CT/MRI/AP/LAT 양쪽의 측정·Overlay·암호화 저장, CT/MRI의 deferred 3D, MRI 강화 후보와 Raw 보존 통과.
+- Node 보안 검사 32개, runtime 경로/초기화 검사 3개, 구버전 verifier의 새 구조 거부를 확인했다.
+
+앱 시작 시간은 같은 ASAR·PC에서 원본/후보를 A/B/B/A 순서로 측정했다. Ryzen 5 5600X, RAM 32 GB이며, 모델 추론 등 다른 검증 작업을 동시에 실행하지 않았다. 파일 캐시는 비우지 않았다. 메인 모듈 진입부터 첫 화면 표시까지의 시간이며 설치·모델 로딩·추론 시간과 구분한다.
+
+| 순서 | 환경 | 첫 화면 표시 | 파일 내용 해시 검사 |
+| --- | --- | ---: | ---: |
+| A1 | 원본 22.79 GB | 153.24초 | 149.71초 |
+| B1 | 축소 15.77 GB | 90.45초 | 87.10초 |
+| B2 | 축소 15.77 GB | 64.93초 | 62.32초 |
+| A2 | 원본 22.79 GB | 174.47초 | 170.50초 |
+
+이 조건에서 축소본이 빠르지만 여전히 1분 이상 걸린다. 2회씩의 소규모 비교이고 캐시 영향이 있으므로 재부팅 직후 시간이나 다른 PC의 속도로 일반화하지 않는다. 네 실행 모두 실제 패키지 main/preload, Windows CNG 등록, 온라인 승인, DPAPI 저장, 회수 상태와 결과 열람 검사를 통과했다. 실물 YubiKey를 사용하는 고객용 설치본 검증은 포함하지 않았다.
+
+- 반복 기록: `outputs/runtime-slim-startup-20261017-retry.json`.
+- 사용 ASAR SHA256: `a71bff7ea73fc6088b15acdd57f160fcc7380f2e0933ef964eea880c812d26c7`.
+- 최초 시도 `outputs/runtime-slim-startup-20261017.json`에서는 원본이 화면 대기 한도 180초를 초과해 실패했다. 정확한 완료 시간은 없으며 정상 측정값에 넣지 않았다. 이 기록을 보존하고 QA 도구의 화면 대기를 300초로 늘린 뒤 위 네 번을 실행했다. 앱 검사를 생략하거나 조건을 완화한 것은 아니다.
+- 후보 payload: `work/security-runtime-slim-20261017/payload`, 크기·제외 내역: `work/security-runtime-slim-20261017/payload.report.json`.
+- 출력 일치·패키지 소스 일치·시작 측정 종합 확인: `outputs/runtime-slim-status-20261017.json`.
+- 후보 앱: `release/internal/win-unpacked`, 기존 `EXMO-Atlas-Internal-Setup-0.1.26.exe` 보존. 신규 설치 파일 생성과 기존 브랜치 병합은 하지 않았다.
+
+시작 검사는 `node scripts/security/check-internal-package.cjs PATH_TO_APP_ASAR AUTHORITY`로 실행한다. ASAR 옆 `engine/`에 비교할 서명 payload가 있어야 하며, 같은 앱으로 payload만 바꿔 순서별 기록을 보존한다. 원본 엔진을 덮어쓰지 않는다.
 
 [CT function-level timing diagnostics](EXMO_CT_TIMING_DIAGNOSTICS_2026-10-06.md)
 documents exclusive metadata/validation/cleanup timings and private start/end

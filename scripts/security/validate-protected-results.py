@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'desktop'))
 import artifact_store as A
 
-engine = ROOT / 'work/security-delivery-v2/packages'
+engine = Path(sys.argv[1]).resolve() / 'packages' if len(sys.argv) > 1 else ROOT / 'work/security-delivery-v2/packages'
 spec = importlib.util.spec_from_file_location('worker', ROOT / 'desktop/imaging-worker.py')
 worker = importlib.util.module_from_spec(spec); spec.loader.exec_module(worker)
 palette = {row['id']: row for row in json.loads((ROOT / 'dist-desktop/imaging-palette.json').read_text())}

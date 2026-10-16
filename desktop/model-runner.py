@@ -321,14 +321,16 @@ def ct_torch(root, device):
     if device not in ("cpu", "cuda:0"):
         raise ValueError("Unsupported CT device")
     if device == "cuda:0":
-        site = str(root.parents[1] / "envs/ap/Lib/site-packages")
-        if not (Path(site) / "torch/__init__.py").is_file():
+        from runtime_bootstrap import runtime_paths
+        sites = runtime_paths(root.parents[1] / "envs/ap/Lib/site-packages")
+        if not any((Path(site) / "torch/__init__.py").is_file() for site in sites):
             raise RuntimeError("CT CUDA runtime is missing; CPU fallback is disabled")
-        sys.path.insert(0, site)
+        sys.path[:0] = sites
         try:
             import torch
         finally:
-            sys.path.remove(site)
+            for site in sites:
+                sys.path.remove(site)
         if not torch.cuda.is_available():
             raise RuntimeError("CT CUDA is unavailable; CPU fallback is disabled")
     else:

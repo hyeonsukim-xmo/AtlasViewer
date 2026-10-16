@@ -139,7 +139,7 @@ node scripts/security/check-internal-package.cjs
 
 ## 0.1.26 시작 성능과 5C NFC 지원
 
-시작 지연 후속 작업은 [Desktop 성능 문서의 TODO](DESKTOP_PERFORMANCE.md)에 보류 항목으로 정리했다. 모델 5.31 GB와 나머지 실행 환경 17.47 GB의 검사 비용 분리부터 진행한다.
+시작 지연 후속 작업은 [Desktop 성능 문서의 TODO와 축소 후보 기록](DESKTOP_PERFORMANCE.md)에 정리했다. `perf/slim-protected-runtime` 브랜치의 공통 PyTorch 구조는 새 앱이 필요하며 기존 배포본에 자동 적용하지 않는다.
 
 시작 시 모든 서명·파일 목록·내용 해시·모델 연결 검사를 유지한다. 디렉터리 열거 시 얻은 파일 종류를 재사용해 중복 조회를 줄였다. 파일 크기·수정 시각만 믿는 캐시는 사용하지 않는다. 같은 크기·시각으로 변조한 파일, 추가 파일, junction, 잘못된 서명·모델 조합은 계속 거부한다.
 

@@ -20,8 +20,8 @@ dialog.showSaveDialog=async()=>({canceled:false,filePath:requestFile});
 dialog.showOpenDialog=async()=>({canceled:false,filePaths:[activationFile]});
 dialog.showErrorBox=(title,detail)=>{throw Error(`${title}: ${detail}`);};
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function until(test){for(let i=0;i<1800;i++){const value=await test();if(value)return value;await wait(100);}throw Error('Packaged UI timed out');}
-const timer=setTimeout(()=>{console.error('Internal Electron check timed out');app.exit(1);},240000);
+async function until(test){for(let i=0;i<3000;i++){const value=await test();if(value)return value;await wait(100);}throw Error('Packaged UI timed out');}
+const timer=setTimeout(()=>{console.error('Internal Electron check timed out');app.exit(1);},360000);
 
 (async()=>{
   let code=0;

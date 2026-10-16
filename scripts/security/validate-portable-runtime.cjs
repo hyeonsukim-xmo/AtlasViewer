@@ -3,17 +3,22 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {spawnSync}=require('node:child_process');
 const root=path.resolve(process.argv[2] || 'work/security-delivery-v2/payload');
 const script=`import json, sys
-sys.path[:0] = [sys.argv[1], sys.argv[2]]
+sys.path.insert(0, sys.argv[1])
+from runtime_bootstrap import configure_runtime
+configure_runtime(sys.argv[2])
 import cryptography
 if sys.argv[3] == 'security':
  import piv_worker
 else:
  import numpy, nrrd, torch
+ if sys.argv[3] in ('ct', 'mri', 'ap'):
+  import monai
  if sys.argv[3] != 'ap':
   import SimpleITK
  if sys.argv[3] == 'lat':
   from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
-print(json.dumps({'python':sys.version.split()[0], 'environment':sys.argv[3], 'isolated':bool(sys.flags.isolated)}))`;
+print(json.dumps({'python':sys.version.split()[0], 'environment':sys.argv[3], 'isolated':bool(sys.flags.isolated),
+ 'torchPath':torch.__file__ if sys.argv[3] != 'security' else None}))`;
 const results=[];
 for(const env of ['ct','mri','ap','lat','security']){
  const result=spawnSync(path.join(root,'python/python.exe'),['-I','-B','-c',script,path.resolve('desktop'),path.join(root,'envs',env,'Lib/site-packages'),env],{encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:1024*1024});
@@ -24,4 +29,4 @@ const roundtrip=spawnSync(path.join(root,'python/python.exe'),['-I','-B','-X','u
  {input:JSON.stringify({operation:'unknown',requestId:'한글-경로-검증'})+'\n',encoding:'utf8',windowsHide:true,timeout:30000,maxBuffer:1024*1024});
 assert.equal(roundtrip.status,0,roundtrip.stderr);
 assert.deepEqual(JSON.parse(roundtrip.stdout.trim()),{id:'한글-경로-검증',error:'지원하지 않는 작업입니다.'});
-const output=path.resolve('outputs/security-portable-runtime.json');fs.writeFileSync(output,JSON.stringify({relocatableImports:results,patientDataUsed:false},null,2));console.log(output);
+const output=path.resolve(process.argv[3] || 'outputs/security-portable-runtime.json');fs.writeFileSync(output,JSON.stringify({relocatableImports:results,patientDataUsed:false},null,2));console.log(output);

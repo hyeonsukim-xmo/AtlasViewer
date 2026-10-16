@@ -12,13 +12,21 @@ sys.path.insert(0, str(ROOT / 'desktop'))
 from model_security import ModelGuard, read, digest
 
 
-def compare_loaders(source, protection):
+def compare_loaders(source, protection, device='cpu', forward=False):
     import gc
     import hashlib
-    import torch
     spec = importlib.util.spec_from_file_location('checked_runner', ROOT / 'desktop/model-runner.py')
     runner = importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)
     engine = protection.engine
+    if engine == 'ct' and device == 'cuda:0':
+        torch = runner.ct_torch(protection.root, device)
+    else:
+        import torch
+    torch.set_num_threads(2)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     def state_hash(states):
         h = hashlib.sha256(); count = 0
         for state in states:
@@ -26,6 +34,15 @@ def compare_loaders(source, protection):
                 h.update(name.encode()); h.update(str(tensor.dtype).encode()); h.update(str(tuple(tensor.shape)).encode())
                 h.update(tensor.detach().cpu().contiguous().numpy().tobytes()); count += 1
         return h.hexdigest(), count
+    def prediction(model, shape):
+        if not forward:
+            return None
+        import math
+        sample = torch.linspace(-1, 1, math.prod(shape), device=device).reshape(shape)
+        with torch.inference_mode():
+            output = model.eval().to(device)(sample)
+        assert torch.is_tensor(output) and torch.isfinite(output).all()
+        return digest(output.detach().cpu().contiguous().numpy().tobytes())
     def load(root, protected):
         api = runner.protected_torch(torch, protection) if protected else torch
         if engine == 'ct':
@@ -34,7 +51,7 @@ def compare_loaders(source, protection):
             if protected:
                 loader = runner.with_globals(loader, torch=api, sha256_file=lambda file:protection.assets[Path(file).relative_to(root).as_posix()]['sha256'])
             model, _ = loader(json.loads((root / 'configs/inference.json').read_text()), 'cpu')
-            return state_hash([model.state_dict()])
+            return state_hash([model.state_dict()]), prediction(model, (1, 1, 96, 96, 96))
         if engine == 'ap':
             sys.path.insert(0, str(root / 'code'))
             import InferenceLOWEX_slicer_nrrd as legacy
@@ -42,13 +59,18 @@ def compare_loaders(source, protection):
             model = legacy.build_model('vnet', len(names), size, 'AP')
             loader = runner.with_globals(legacy.load_checkpoint_to_model, torch=api)
             model, _ = loader(model, root / 'models/AP/model.pth', torch.device('cpu'))
-            return state_hash([model.state_dict()])
+            return state_hash([model.state_dict()]), prediction(model, (1, 1, *size))
         if engine.startswith('lat_'):
             from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
             predictor = nnUNetPredictor(device=torch.device('cpu'), perform_everything_on_device=False, allow_tqdm=False)
             loader = runner.with_globals(predictor.initialize_from_trained_model_folder, torch=api)
             loader(str(root / 'models' / engine.upper()), (0, 1, 2, 3, 4), checkpoint_name='checkpoint_final.pth')
-            return state_hash(predictor.list_of_parameters)
+            hashes = []
+            if forward:
+                for parameters in predictor.list_of_parameters:
+                    predictor.network.load_state_dict(parameters, strict=True)
+                    hashes.append(prediction(predictor.network, (1, 1, *predictor.configuration_manager.patch_size)))
+            return state_hash(predictor.list_of_parameters), hashes if forward else None
         raise ValueError('Unexpected loader')
     if engine == 'xray-classifier':
         spec = importlib.util.spec_from_file_location('checked_classifier', ROOT / 'desktop/classifier-worker.py')
@@ -61,11 +83,13 @@ def compare_loaders(source, protection):
                 target[suffix] = {key:result[key] for key in ('predicted_label', 'segmentation_view', 'confidence', 'probabilities')}
             pipeline.models.clear(); del pipeline; gc.collect()
         assert before == after
-        return {'predictionsIdentical':True, 'syntheticInputTypes':['NRRD', 'DICOM']}
+        return {'predictionsIdentical':True, 'syntheticInputTypes':['NRRD', 'DICOM'],
+                'predictionSha256':digest(json.dumps(after, sort_keys=True, separators=(',', ':')).encode())}
     before = load(source, False); gc.collect()
     after = load(protection.root, True); gc.collect()
     assert before == after
-    return {'weightsIdentical':True, 'stateSha256':after[0], 'tensors':after[1], 'folds':5 if engine.startswith('lat_') else 1}
+    return {'weightsIdentical':True, 'stateSha256':after[0][0], 'tensors':after[0][1], 'folds':5 if engine.startswith('lat_') else 1,
+            'syntheticForward':forward, 'logitsSha256':after[1], 'device':device, 'torch':torch.__version__}
 
 
 def compare(source, protected, protection, device):
@@ -123,6 +147,7 @@ def main():
     parser.add_argument('--engine', type=Path, required=True)
     parser.add_argument('--source', type=Path)
     parser.add_argument('--device', default='cpu', choices=['cpu', 'cuda:0'])
+    parser.add_argument('--forward', action='store_true')
     args = parser.parse_args()
     guard = ModelGuard(json.loads(args.policy.read_text()), args.engine)
     for line in sys.stdin:
@@ -143,7 +168,7 @@ def main():
                     value.update(compare(args.source, protection.root, protection, args.device))
                 if request['operation'] == 'compare-loaders':
                     del plain
-                    value.update(compare_loaders(args.source, protection))
+                    value.update(compare_loaders(args.source, protection, args.device, args.forward))
                     plain = None
                 del plain
             print(json.dumps({'id': request['id'], 'result': value}), flush=True)
