@@ -6,6 +6,15 @@ contextBridge.exposeInMainWorld(
   Object.freeze({
     licenseStatus: () => ipcRenderer.invoke("exmo:license:status"),
     manageLicense: () => ipcRenderer.invoke("exmo:license:manage"),
+    installations: () => ipcRenderer.invoke('exmo:installations:status'),
+    chooseInstallation: () => ipcRenderer.invoke('exmo:installations:choose'),
+    installSolutions: (id, analyses) => ipcRenderer.invoke('exmo:installations:install',id,analyses),
+    removeSolution: (analysis) => ipcRenderer.invoke('exmo:installations:remove',analysis),
+    rollbackSolution: (analysis) => ipcRenderer.invoke('exmo:installations:rollback',analysis),
+    onInstallationsChanged: (callback) => {
+      const listener=(_event,value)=>callback(value);ipcRenderer.on('exmo:installations:changed',listener);
+      return ()=>ipcRenderer.removeListener('exmo:installations:changed',listener);
+    },
     exportResults: (analysis, ids, language) => ipcRenderer.invoke("exmo:imaging:exportResults", analysis, ids, language),
     imageMenu: (payload) => ipcRenderer.invoke("exmo:imaging:imageMenu", payload),
     solutions: () => ipcRenderer.invoke("exmo:imaging:solutions"),

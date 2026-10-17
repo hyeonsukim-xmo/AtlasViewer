@@ -367,15 +367,18 @@ async function authorizeMriWorker() {
     fixed._snapshot={maskDigest:'1'.repeat(64),sideMaskDigest:'2'.repeat(64),snapshotDigest:'3'.repeat(64),variant:'pp500'};
     onSnapshot=message=>message.variant==='pp500'?structuredClone(fixed):null;
     onMutationChallenge=message=>{assert.equal(message.job.solutionId,'exmo.thigh.mri');assert.ok(message.job.source.analysisRevision);return {nonce:'4'.repeat(43)};};
-    let mutations=0,denied=false;
+    let mutations=0,denied=false,releaseMutation;
     const secured=install({authorize:async()=>{throw Error('Mutation must not acquire an inference grant');},authorizeMutation:async request=>{
       mutations++;assert.equal(request.job.variant,'strong');assert.equal(request.job.source.snapshotDigest,fixed._snapshot.snapshotDigest);
       if(denied)throw Error('Solution execution is not authorized');
+      await new Promise(resolve=>{releaseMutation=resolve;});
       return {testProof:'private-mutation-proof'};
     }});
     try {
       releaseMesh=undefined;
-      const strong=await secured.call('variant',fixed.summary.id,'strong');assert.equal(strong.variant,'strong');assert.equal(mutations,1);
+      const pendingMutation=secured.call('variant',fixed.summary.id,'strong');await until(()=>releaseMutation);
+      await assert.rejects(secured.call('run','mri',[fixed.record.id]),/현재 작업/);
+      releaseMutation();const strong=await pendingMutation;assert.equal(strong.variant,'strong');assert.equal(mutations,1);
       await until(()=>releaseMesh);releaseMesh();
       await until(async()=> (await secured.call('results','mri')).find(r=>r.id===fixed.summary.id).meshState==='ready');
       assert.ok(!fs.readFileSync(published,'utf8').includes('private-mutation-proof'));

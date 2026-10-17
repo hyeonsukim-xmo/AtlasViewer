@@ -84,7 +84,7 @@ function markdown(report) {
     cleanup:'Garbage collection',other:'Other model work',
     cpu_wait:'CPU admission wait',metricsOverlay:'Desktop measurements / laterality / Overlay preparation',
     resultTransport:'Result worker startup / IPC / publication overhead',mesh:'3D generation',
-    admissionWait:'Memory admission wait',gpuWait:'GPU admission wait',resultWait:'Result worker wait',meshWait:'3D queue wait'};
+    runtimeVerification:'Signed runtime verification',admissionWait:'Memory admission wait',gpuWait:'GPU admission wait',resultWait:'Result worker wait',meshWait:'3D queue wait'};
   for(const [key,label] of Object.entries(stages)){
     if(Object.values(report.cases).some(item=>item.summary?.[key]))
       lines.push('| '+label+' | '+Object.values(report.cases).map(item=>fmt(item.summary?.[key])).join(' | ')+' |');

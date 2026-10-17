@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const catalog = require('./diagnostics.json');
-const systemCodes = { ENOENT:'FILE_MISSING', ENOSPC:'DISK_FULL', EDQUOT:'DISK_FULL', EACCES:'ACCESS_DENIED', EPERM:'ACCESS_DENIED', ENAMETOOLONG:'PATH_TOO_LONG', ENOMEM:'MEMORY' };
+const systemCodes = { ENOENT:'FILE_MISSING', ENOSPC:'DISK_FULL', EDQUOT:'DISK_FULL', EACCES:'ACCESS_DENIED', EPERM:'ACCESS_DENIED', EBUSY:'FILE_BUSY', ENAMETOOLONG:'PATH_TOO_LONG', ENOMEM:'MEMORY' };
 const stages = { inspect:'입력 확인', extract:'ZIP 압축 해제', prepare:'입력 확인', preview:'영상·Overlay 표시', finalize:'측정·Overlay 준비', mesh:'3D 생성', model_challenge:'분석 권한 확인', run:'Segmentation' };
 function userError(message, code='INPUT_INVALID') { return Object.assign(new Error(message), { publicMessage:message, diagnosticCode:code }); }
 function workerError(response) {

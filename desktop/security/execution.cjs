@@ -14,7 +14,8 @@ function binding(job,{engineRoot,scriptsRoot,issuer},capability,modelDigest=null
   P.check(capability==='classify' ? engine==='xray-classifier' : engine!=='xray-classifier');
   if(capability==='result-mutation')P.check((engine==='mri'?['raw','pp500','strong']:engine==='ct'?['raw']:[]).includes(variant));
   const signed=JSON.parse(fs.readFileSync(path.join(engineRoot,'payload.json'),'utf8'));P.fields(signed,['token']);
-  M.verify(signed.token,issuer,'exmo-runtime-payload-v1');
+  const policy=M.verify(signed.token,issuer,['exmo-runtime-payload-v1','exmo-selected-payload-v1']);
+  if(policy.schema==='exmo-selected-payload-v1')checkSelection(job,signed.token,issuer,modelDigest);
   const files=fs.readdirSync(scriptsRoot).filter(n=>n.endsWith('.py')).sort().map(name=>{
     const file=path.join(scriptsRoot,name);P.check(!fs.lstatSync(file).isSymbolicLink() && fs.statSync(file).size<=16*1024**2);
     return {name,sha256:M.hash(fs.readFileSync(file))};
@@ -23,4 +24,16 @@ function binding(job,{engineRoot,scriptsRoot,issuer},capability,modelDigest=null
     recipeDigest:M.hash(Buffer.from(JSON.stringify({schema:'exmo-execution-recipe-v1',engine,capability,variant,files}))),
     packageSetDigest:M.hash(Buffer.from(signed.token))};
 }
-module.exports={scope,binding};
+function checkSelection(job,token,issuer,modelDigest){
+  const policy=require('./selection.cjs').selection(token,issuer);
+  P.check(policy.selection===(job.analysis==='xray-classifier'?'xray':job.analysis),'Wrong selected execution closure');
+  if(modelDigest!==null)P.check(policy.models[M.modelId(job)]===modelDigest,'Selected model differs');return policy;
+}
+function fromSelection(job,token,records,issuer,capability,modelDigest){
+  checkSelection(job,token,issuer,modelDigest);
+  const files=records.filter(r=>/^adapters\/[^/]+\.py$/.test(r.path)).map(r=>({name:r.path.slice(9),sha256:r.sha256})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+  P.check(files.some(f=>f.name==='imaging-worker.py') && files.some(f=>f.name==='model-runner.py'));
+  const engine=M.modelId(job),variant=capability==='result-mutation'?job.variant:null;
+  return {...scope(job),capability,engine,modelDigest,recipeDigest:M.hash(Buffer.from(JSON.stringify({schema:'exmo-execution-recipe-v1',engine,capability,variant,files}))),packageSetDigest:M.hash(Buffer.from(token))};
+}
+module.exports={scope,binding,fromSelection};

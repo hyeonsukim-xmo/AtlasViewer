@@ -29,13 +29,20 @@ for(const version of [2,3])test(`customer v${version}: HTTPS, both JWE recipient
   const access=M.sign({schema:'exmo-model-access-v2',binding,modelDigest:digest,recipient:P.fingerprint(rsa.publicKey),jwe:E.wrap(inner,rsa.publicKey,context)},authority.key);
   authority.db.prepare("INSERT INTO models VALUES (?,'active')").run(digest);authority.db.prepare('INSERT INTO model_grants VALUES (?,?,?)').run('test','ct',digest);
   const policyScope=require('../../desktop/security/execution.cjs'),job={analysis:'ct',...policyScope.scope({analysis:'ct'})};
+  let installation;
   if(version===3){
-    fs.writeFileSync(path.join(engine,'payload.json'),JSON.stringify({token:M.sign({schema:'exmo-runtime-payload-v1',profile:'customer'},authority.key)}));
+    const token=M.sign({schema:'exmo-selected-payload-v1',version:'test',profile:'customer',python:'3.12.8',selection:'ct',components:{common:'1'.repeat(64),gpu:'2'.repeat(64),ct:'3'.repeat(64)},models:{ct:digest}},authority.key);
+    fs.writeFileSync(path.join(engine,'payload.json'),JSON.stringify({token}));
+    installation={token,records:fs.readdirSync(path.join(root,'desktop')).filter(n=>n.endsWith('.py')).map(name=>({path:'adapters/'+name,sha256:M.hash(fs.readFileSync(path.join(root,'desktop',name)))}))};
     const ctx={engineRoot:engine,scriptsRoot:path.join(root,'desktop'),issuer:authority.publicKey};
     authority.solutions('test',{orgId:'customer-org',entitlements:[{entitlementId:'ct-only',solutionId:job.solutionId,validFrom:0,validUntil:null,state:'active',revision:1,
       capabilities:['analyze','result-mutation'],executions:[policyScope.binding(job,ctx,'analyze',digest),policyScope.binding({...job,variant:'raw'},ctx,'result-mutation')]}]});
   }
   await runtime.activate({binding,installationPublicKey:request.installationPublicKey,hardware:f.hardware,models:{ct:access}});
+  if(installation){
+    await runtime.authorizeInstallation(installation);
+    const changed=structuredClone(installation);changed.records[0].sha256='9'.repeat(64);await assert.rejects(runtime.authorizeInstallation(changed),/not authorized/);
+  }
   const policy=path.join(directory,'policy.json');fs.writeFileSync(policy,JSON.stringify({profile:'customer',issuerPublicKey:authority.publicKey.export({type:'spki',format:'pem'}),...(version===3?{licenseVersion:3}:{})}));
   worker=new AnalysisWorker({python:path.join(root,'work/modality-integration/envs/ct/Scripts/python.exe'),args:['-B',path.join(__dirname,'check-model-loader.py'),'--engine',engine,'--policy',policy],env:process.env,logPath:path.join(directory,'worker.log')});
   const runId=crypto.randomUUID(),challenge=await worker.request({operation:'challenge',runId,engine:'ct'}),authorization=await runtime.authorizeModel({runId,job,challenge});
@@ -44,7 +51,8 @@ for(const version of [2,3])test(`customer v${version}: HTTPS, both JWE recipient
   await assert.rejects(worker.request({operation:'assets',runId,job,authorization}));
   const mutation=await runtime.authorizeMutation({runId:crypto.randomUUID(),job:{...job,variant:'raw',source:{fixture:true}},challenge:{nonce:crypto.randomBytes(32).toString('base64url')}});
   assert.ok(crypto.verify('sha256',Buffer.from('EXMO/RESULT-MUTATION/v1/dongle/'+mutation.message),hardware['9e'],Buffer.from(mutation.dongleSignature,'base64url')));
-  removed=true;await assert.rejects(runtime.authorizeModel({runId,job,challenge}));removed=false;
+  removed=true;await assert.rejects(runtime.authorizeModel({runId,job,challenge}));if(installation)await assert.rejects(runtime.authorizeInstallation(installation));removed=false;
   authority.modelStatus(digest,'revoked');await runtime.refresh();await assert.rejects(runtime.authorizeModel({runId,job,challenge}));
+  if(installation)await assert.rejects(runtime.authorizeInstallation(installation),/not authorized/);
  }finally{await worker?.close();runtime?.close();await new Promise(resolve=>server.close(resolve));authority.close();https.globalAgent.options.ca=previousCA;assert.ok(directory.startsWith(os.tmpdir()+path.sep));fs.rmSync(directory,{recursive:true,force:true});}
 });

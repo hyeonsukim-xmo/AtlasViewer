@@ -26,7 +26,13 @@ def execution(job, root, issuer, capability, model_digest=None):
         require(variant in (('raw', 'pp500', 'strong') if engine == 'mri' else ('raw',) if engine == 'ct' else ()))
     package = json.loads(read(Path(root) / 'payload.json', 512 * 1024))
     fields(package, 'token')
-    require(signed(package['token'], issuer, MODEL_HEADER)['schema'] == 'exmo-runtime-payload-v1')
+    policy = signed(package['token'], issuer, MODEL_HEADER)
+    require(policy['schema'] in ('exmo-runtime-payload-v1', 'exmo-selected-payload-v1'))
+    if policy['schema'] == 'exmo-selected-payload-v1':
+        fields(policy, 'schema version profile python selection components models')
+        require(policy['selection'] == ('xray' if job['analysis'] == 'xray-classifier' else job['analysis']))
+        if model_digest is not None:
+            require(policy['models'].get(engine) == model_digest)
     files = [{'name': p.name, 'sha256': digest(read(p, 16 * 1024 ** 2))} for p in sorted(Path(__file__).parent.glob('*.py'))]
     recipe = {'schema': 'exmo-execution-recipe-v1', 'engine': engine, 'capability': capability, 'variant': variant, 'files': files}
     return {**identity, 'capability': capability, 'engine': engine, 'modelDigest': model_digest,

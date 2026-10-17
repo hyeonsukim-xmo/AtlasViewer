@@ -6,6 +6,13 @@ const {read,atomicWrite}=require('../../desktop/security/storage.cjs');
 const {validateBuild}=require('../../desktop/security/runtime.cjs');
 const {hashFile,verifyPayload}=require('../../desktop/security/payload.cjs');
 const M=require('../../desktop/security/model-package.cjs');
+const S=require('../../desktop/security/selection.cjs');
+function verifySelectionBundle(directory,issuer,profile){
+  const catalog=S.catalog(directory,issuer,profile),policy=S.selection(catalog.sets.reader,issuer,profile);
+  const component=S.component(path.join(directory,'components/common'),issuer,policy.components.common,'common',profile);
+  S.exactInventory(path.join(directory,'components/common/content'),component.records);
+  for(const r of component.records)require('../../desktop/security/payload.cjs').checkFile(path.join(directory,'components/common/content',r.path),r);
+}
 const root=path.resolve(__dirname,'../..');
 const protectedPython=['model-runner.py','model_security.py'];
 function frozenPython(name) {
@@ -35,7 +42,12 @@ async function main([profile,target,configFile,payloadRoot]) {
   P.check(['dir','nsis'].includes(target));
   const policy=releasePolicy(profile,configFile?JSON.parse(read(configFile)):undefined);
   if(profile==='customer' || policy.licenseVersion===3)P.check(payloadRoot,'Customer builds require a signed offline engine payload');
-  if(payloadRoot)P.check(verifyPayload(payloadRoot,require('node:crypto').createPublicKey(policy.issuerPublicKey)).profile===profile,'Payload belongs to another build profile');
+  const selected=payloadRoot && fs.existsSync(path.join(payloadRoot,'catalog.json'));
+  if(selected){P.check(policy.licenseVersion===3,'Selected packages require v3');verifySelectionBundle(payloadRoot,require('node:crypto').createPublicKey(policy.issuerPublicKey),profile);}
+  else if(payloadRoot)P.check(verifyPayload(payloadRoot,require('node:crypto').createPublicKey(policy.issuerPublicKey)).profile===profile,'Payload belongs to another build profile');
+  // Runtime executables are already covered by the issuer signature; re-signing would change their hashes.
+  const runtimeRecords=payloadRoot?JSON.parse(fs.readFileSync(path.join(payloadRoot,selected?'components/common/files.json':'files.json'))):[];
+  const signExts=[...new Set(runtimeRecords.filter(r=>r.path.endsWith('.exe')).map(r=>'!'+path.basename(r.path)))];
   if(profile==='customer' && target==='nsis')P.check(process.env.CSC_LINK || process.env.WIN_CSC_LINK || process.env.EXMO_SIGNING_CERTIFICATE_SHA1,'Customer installer requires an actual code-signing certificate; use customer dir for an unsigned QA candidate');
   const stage=path.join(root,'work/security-build');fs.mkdirSync(stage,{recursive:true});
   const lock=path.join(stage,'build.lock');const fd=fs.openSync(lock,'wx');
@@ -63,11 +75,11 @@ async function main([profile,target,configFile,payloadRoot]) {
       files:[{from:stage,to:'desktop/security',filter:['build.json','runtime-integrity.json']}],
       extraResources:[{from:stage,to:'imaging',filter:['model-policy.json',...protectedPython]},
         {from:path.join(root,'scripts/security/trust'),to:'imaging/trust',filter:['*.crt']},
-        ...(payloadRoot?[{from:path.resolve(payloadRoot),to:'engine',filter:['**/*']}]:[])],
+        ...(payloadRoot?[{from:path.resolve(payloadRoot),to:'engine',filter:selected?['catalog.json','components/*/component.json','components/*/files.json','components/common/content/**/*']:['**/*']}]:[])],
       electronFuses:{runAsNode:false,enableNodeOptionsEnvironmentVariable:false,enableNodeCliInspectArguments:false,
         enableEmbeddedAsarIntegrityValidation:true,onlyLoadAppFromAsar:true},
       forceCodeSigning:profile==='customer' && target==='nsis',
-      ...(process.env.EXMO_SIGNING_CERTIFICATE_SHA1?{win:{signtoolOptions:{certificateSha1:process.env.EXMO_SIGNING_CERTIFICATE_SHA1}}}:{}),
+      win:{signExts,...(process.env.EXMO_SIGNING_CERTIFICATE_SHA1?{signtoolOptions:{certificateSha1:process.env.EXMO_SIGNING_CERTIFICATE_SHA1}}:{})},
       nsis:{perMachine:profile==='customer',artifactName:profile==='internal'?'EXMO-Atlas-Internal-Setup-${version}.${ext}':'EXMO-Atlas-Setup-${version}.${ext}'},
     }});
     const directory=path.join(root,'release',profile,'win-unpacked');verifyPackage(directory,policy);
@@ -91,7 +103,10 @@ function verifyPackage(directory,policy) {
   for(const name of protectedPython)P.check(fs.readFileSync(path.join(directory,'resources/imaging',name),'utf8')===frozenPython(name),'Packaged protected worker differs');
   const integrity=JSON.parse(asar.extractFile(archive,path.join('desktop','security','runtime-integrity.json')));
   for(const [file,digest] of Object.entries(integrity))P.check(hashFile(path.join(directory,'resources',file)).sha256===digest,'Packaged worker integrity mismatch');
-  if(policy.profile==='customer' || policy.licenseVersion===3)verifyPayload(path.join(directory,'resources/engine'),require('node:crypto').createPublicKey(policy.issuerPublicKey));
+  if(policy.profile==='customer' || policy.licenseVersion===3){
+    const engine=path.join(directory,'resources/engine'),issuer=require('node:crypto').createPublicKey(policy.issuerPublicKey);
+    if(fs.existsSync(path.join(engine,'catalog.json')))verifySelectionBundle(engine,issuer,policy.profile);else verifyPayload(engine,issuer);
+  }
   console.log('Verified internal package: pinned build policy, CNG helper, no authority/simulated private keys.');
 }
 if(require.main===module)main(process.argv.slice(2)).catch(error=>{console.error(error.message);process.exit(1);});

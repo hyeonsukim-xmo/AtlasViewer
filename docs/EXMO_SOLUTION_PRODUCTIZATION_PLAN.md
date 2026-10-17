@@ -1,6 +1,6 @@
 # 솔루션별 제품화 구현·검증 계획
 
-기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계를 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md) 및 [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증과 P3~P8, acceptance matrix 전체가 완료된 것은 아니다.
+기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer를 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증과 P4~P8, acceptance matrix 전체가 완료된 것은 아니다.
 
 ## 1. 작업 범위와 보존 대상
 
@@ -67,6 +67,8 @@
 - 종료 조건: CT-only license로 MRI/X-ray/공유 모델 우회 불가. MRI만 만료·회수해도 CT는 동작. 대기/진행 job 정책 통과.
 
 ### P3 — 선택 설치·안전한 업데이트
+
+구현 및 실제 검증 범위: [P3 구현 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md). 폴더/NAS 서명 media 경로를 구현했으며, 실물 동글·운영 서버·새 PC acceptance는 별도 완료가 필요하다.
 
 - reader/security runtime을 항상 이용할 수 있는 공통 패키지로 분리하고 추론 환경의 실제 dependency graph를 산출한다.
 - 모델 제거 후에도 확정 snapshot과 과거 mesh recipe의 공용 reader 의존성을 보존한다. 확정 snapshot이 없는 중단 추론은 재추론 허가가 필요하다.

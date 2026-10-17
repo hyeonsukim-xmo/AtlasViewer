@@ -71,9 +71,13 @@ function inspectPayload(root,issuer,checkFile,timings={}) {
 function checkFile(file,record){const value=hashFile(file);P.check(value.size===record.size && value.sha256===record.sha256,'Runtime file failed integrity verification: '+record.path);}
 function verifyPayload(root,issuer){return inspectPayload(root,issuer,checkFile).policy;}
 async function verifyPayloadAsync(root,issuer,onProgress=()=>{},timings={}){
-  const {Worker}=require('node:worker_threads');
   const started=performance.now();
   const {policy,records}=inspectPayload(root,issuer,undefined,timings);
+  try{await verifyRecordsAsync(root,records,onProgress,timings);return policy;}
+  finally{timings.totalMs=performance.now()-started;}
+}
+async function verifyRecordsAsync(root,records,onProgress=()=>{},timings={}){
+  const {Worker}=require('node:worker_threads');
   const hashStarted=performance.now();
   const workers=[],counts=[0,0,0,0];
   timings.workers=[];
@@ -83,7 +87,6 @@ async function verifyPayloadAsync(root,issuer,onProgress=()=>{},timings={}){
       worker.on('error',reject);worker.on('exit',code=>code===0?resolve():reject(Error('Runtime integrity verification failed')));
       worker.on('message',value=>{counts[index]=value.completed;timings.workers[index]=value;onProgress(counts.reduce((a,b)=>a+b,0),records.length);});
     })));
-    return policy;
-  }finally{await Promise.all(workers.map(w=>w.terminate()));timings.hashMs=performance.now()-hashStarted;timings.totalMs=performance.now()-started;}
+  }finally{await Promise.all(workers.map(w=>w.terminate()));timings.hashMs=performance.now()-hashStarted;}
 }
-module.exports={safeName,hashFile,inventory,verifyPayload,verifyPayloadAsync,checkFile};
+module.exports={safeName,hashFile,inventory,verifyPayload,verifyPayloadAsync,verifyRecordsAsync,checkFile};

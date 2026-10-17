@@ -8,6 +8,8 @@ export type Solution = {
 export type SolutionIdentity = {solutionId?: string; workflowId?: string};
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: string; diagnostic?:Diagnostic };
 export type ModelStatus = {
+  installation?: string;
+  version?: string | null;
   importProgress?: ImportProgress | null;
   reviewAvailable: boolean;
   estimationAvailable: boolean;
@@ -129,6 +131,7 @@ export type AnalysisResult = SolutionIdentity & {
   timings?: {
     model?: Record<string, number>;
     admissionWait?: number;
+    runtimeVerification?: number;
     input?: number;
     gpuWait?: number;
     authorization?: number;
@@ -184,11 +187,19 @@ export type Job = SolutionIdentity & {
   total: number;
 };
 export type LicenseStatus = { profile: "development" | "internal" | "customer"; state: string; expiresAt: number | null };
+export type InstallationState = {supported: boolean; busy: boolean; solutions: {analysis: Analysis; solutionId: string; installed: boolean; canRollback: boolean; state: string; version?: string | null; completed?: number; total?: number}[]};
+export type InstallationChoice = {id: string; version: string; choices: {analysis: Analysis; bytes: number; authorized: boolean}[]};
 declare global {
   interface Window {
     exmoDesktop: {
       licenseStatus(): Promise<LicenseStatus>;
       manageLicense(): Promise<LicenseStatus>;
+      installations(): Promise<Reply<InstallationState>>;
+      chooseInstallation(): Promise<Reply<InstallationChoice | null>>;
+      installSolutions(id: string, analyses: Analysis[]): Promise<Reply<InstallationState>>;
+      removeSolution(analysis: Analysis): Promise<Reply<InstallationState>>;
+      rollbackSolution(analysis: Analysis): Promise<Reply<InstallationState>>;
+      onInstallationsChanged(callback: (state: InstallationState) => void): () => void;
       exportResults(analysis: string, ids: string[], language: "ko" | "en"): Promise<Reply<{action: "save" | "cancel"; count?: number}>>;
       imageMenu(payload: { image: string; filename: string; language: "ko" | "en"; source: {kind: "input" | "result"; id: string} }): Promise<Reply<{action: "save" | "copy" | "cancel" | "mapping"}>>;
       onImportProgress(callback: (progress: ImportProgress) => void): () => void;

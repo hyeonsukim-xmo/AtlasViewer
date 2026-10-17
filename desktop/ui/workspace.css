@@ -1504,3 +1504,11 @@
 .inline-error, [role="alert"] { white-space: pre-line; }
 .scene-error { position: absolute; inset: 1rem; z-index: 3; padding: 1rem; background: #111127; border: 1px solid #6b465a; border-radius: 10px; overflow: auto; height: fit-content; max-height: calc(100% - 2rem); font-size: 13px; font-weight: 400; line-height: 1.6; }
 .scene-error p { margin: 0 0 1rem; }
+.installation-dialog { max-width: 720px; max-height: 90vh; overflow: auto; background: #100f26; color: #e9e6f4; border: 1px solid #39354f; }
+.installation-dialog .clinical-table { margin-block: 12px; }
+.installation-actions { white-space: nowrap; }
+.installation-actions button + button { margin-left: 12px; }
+.installation-choice { display: grid; gap: 12px; padding: 16px; border: 1px solid #39354f; border-radius: 8px; }
+.installation-choice label { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.installation-choice label span { margin-left: auto; color: #a7a2bb; }
+.installation-dialog progress { display: block; width: 100%; accent-color: #aaa0c7; margin-top: 6px; }

@@ -29,7 +29,18 @@ function configure(authority,command,args){
 function main([command,directory,...args]){
   const authority=new Authority(directory);
   try{
-    if(command==='executions'){
+    if(command==='bundle-executions'){
+      P.check(args.length===2);const [root,output]=args,S=require('../../desktop/security/selection.cjs'),catalog=S.catalog(root,authority.publicKey,authority.profile),bindings=[];
+      for(const analysis of ['ct','mri','xray']){
+        const token=catalog.sets[analysis],policy=S.selection(token,authority.publicKey,authority.profile);
+        const records=Object.entries(policy.components).flatMap(([id,digest])=>S.component(path.join(root,'components',id),authority.publicKey,digest,id,authority.profile).records);
+        for(const engine of S.ENGINES[analysis]){
+          const job={analysis:engine==='xray-classifier'?engine:analysis,...E.scope({analysis}),...(analysis==='xray'?{route:{ap:'AP',lat_lt:'LAT_LT',lat_rt:'LAT_RT'}[engine]}:{})};
+          bindings.push(E.fromSelection(job,token,records,authority.publicKey,engine==='xray-classifier'?'classify':'analyze',policy.models[engine]));
+          if(['ct','mri'].includes(engine))for(const variant of engine==='mri'?['raw','pp500','strong']:['raw'])bindings.push(E.fromSelection({...job,variant},token,records,authority.publicKey,'result-mutation',null));
+        }
+      }fs.writeFileSync(output,JSON.stringify(bindings,null,2),{flag:'wx'});
+    }else if(command==='executions'){
       P.check(args.length===3);const [engineRoot,scriptsRoot,output]=args;
       const bindings=[];
       for(const engine of M.ENGINES){

@@ -547,6 +547,7 @@ export default function ResultView({
                         [t("라벨 데이터 해시"), (r: AnalysisResult) => r.timings?.model?.payload_hash],
                         [t("메모리 정리"), (r: AnalysisResult) => r.timings?.model?.cleanup],
                         [t("측정·Overlay 준비"), (r: AnalysisResult) => r.timings?.metricsOverlay],
+                        [t("설치 파일 검증"), (r: AnalysisResult) => r.timings?.runtimeVerification],
                         [t("3D 생성"), (r: AnalysisResult) => r.timings?.mesh],
                         [t("메모리·GPU·CPU·결과 준비 대기"), (r: AnalysisResult) => r.timings?.ready == null ? undefined :
                           (r.timings.admissionWait || 0) + (r.timings.gpuWait || 0) + (r.timings.resultWait || 0) + (r.timings.model?.cpu_wait || 0)],

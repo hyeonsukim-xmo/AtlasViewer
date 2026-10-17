@@ -51,6 +51,13 @@ def main():
         z, y, x = np.indices((9, 11, 13))
         phantom = sitk.GetImageFromArray((x + y * 100 + z * 10000).astype(np.float32))
         phantom.SetSpacing((1.5, 2.0, 3.0)); phantom.SetOrigin((-13., 21., -45.))
+        # The common reader has no vendor samples; this must require confirmation, not fail import.
+        for analysis, extension, confirmation in [('ct', '.nii.gz', 'hu'), ('mri', '.nrrd', 'water')]:
+            source = root / ('common-reader-' + analysis + extension)
+            sitk.WriteImage(phantom, str(source))
+            rows = worker.inspect({'analysis': analysis, 'paths': [str(source)], 'destination': str(root / ('import-' + analysis))}, root, None)
+            assert len(rows) == 1 and rows[0]['ready'], rows
+            assert rows[0]['confirmation'] == confirmation and not rows[0].get('evidence')
         for angle in (0, .27):
             c, s = np.cos(angle), np.sin(angle)
             phantom.SetDirection((c, -s, 0., s, c, 0., 0., 0., 1.))

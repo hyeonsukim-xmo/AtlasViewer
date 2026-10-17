@@ -22,9 +22,11 @@ contains neither the Desktop analysis UI nor its Python runtime/model files.
 specifies one Desktop app with PC/YubiKey-bound solution entitlements, selective installation,
 account-based institution result sharing, and read-only Web/tablet access. The first implementation
 adds the built-in solution registry and persistent local result identities. P2 adds per-solution v3
-execution authorization and separates new postprocessing from fixed-result reading. Account login,
-selective installation and server publishing remain planned. See the [P1 implementation record](docs/EXMO_SOLUTION_P1_IMPLEMENTATION.md),
+execution authorization and separates new postprocessing from fixed-result reading. P3 adds signed
+selective installation, an independent reader, pinned running versions and authorized rollback.
+Account login and server publishing remain planned. See the [P1 implementation record](docs/EXMO_SOLUTION_P1_IMPLEMENTATION.md),
 [P2 implementation and migration runbook](docs/EXMO_SOLUTION_P2_IMPLEMENTATION.md),
+[P3 installation and verification record](docs/EXMO_SOLUTION_P3_IMPLEMENTATION.md),
 [implementation and acceptance plan](docs/EXMO_SOLUTION_PRODUCTIZATION_PLAN.md)
 and the [standalone home-screen prototype](docs/prototypes/solution-home.html).
 

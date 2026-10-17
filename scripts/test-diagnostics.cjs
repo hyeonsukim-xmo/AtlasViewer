@@ -5,7 +5,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'exmo-diagnostics-'));
 (async()=>{
   const english=require('../desktop/ui/locales/en.json');
   for(const entry of Object.values(catalog)){assert.ok(english[entry.message]);assert.ok(english[entry.action]);}
-  for(const [osCode,expected] of Object.entries({ENOENT:'FILE_MISSING',ENOSPC:'DISK_FULL',EACCES:'ACCESS_DENIED',EPERM:'ACCESS_DENIED',ENAMETOOLONG:'PATH_TOO_LONG',ENOMEM:'MEMORY'})){
+  for(const [osCode,expected] of Object.entries({ENOENT:'FILE_MISSING',ENOSPC:'DISK_FULL',EACCES:'ACCESS_DENIED',EPERM:'ACCESS_DENIED',EBUSY:'FILE_BUSY',ENAMETOOLONG:'PATH_TOO_LONG',ENOMEM:'MEMORY'})){
     const issue=diagnose(Object.assign(Error('private patient path'),{code:osCode}),{stage:'finalize',caseId:'case-a',logRoot:root});
     assert.equal(issue.code,expected);assert.ok(!JSON.stringify(issue).includes('private patient path'));
     assert.equal(JSON.parse(fs.readFileSync(path.join(root,'diagnostics-private.jsonl'),'utf8').trim().split('\n').at(-1)).reference,issue.reference);

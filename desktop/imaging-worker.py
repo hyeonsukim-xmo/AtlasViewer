@@ -346,7 +346,8 @@ def inspect(message, root, classifier):
                 record.update(confirmation="hu", evidence=None)
             elif analysis == "ct":
                 source_sha = digest(source)
-                known = next((c for c in read_json(root / "packages/EXMO_CT/samples/manifest.json")["cases"] if c["input_sha256"] == source_sha), None)
+                manifest = root / "packages/EXMO_CT/samples/manifest.json"
+                known = next((c for c in (read_json(manifest)["cases"] if manifest.is_file() else []) if c["input_sha256"] == source_sha), None)
                 evidence = "DICOM_RESCALE_HU" if is_dicom else "BOUND_DELIVERY_SAMPLE" if known else None
                 record.update(confirmation=None if evidence else "hu", evidence=evidence, source_sha256=source_sha)
                 if known:
@@ -355,7 +356,8 @@ def inspect(message, root, classifier):
                         shutil.copyfile(sample.parent / filename, directory / filename)
             elif analysis == "mri":
                 source_sha = digest(source)
-                known = any(digest(root / "packages/EXMO_MRI" / c["input"]) == source_sha for c in read_json(root / "packages/EXMO_MRI/samples/manifest.json"))
+                manifest = root / "packages/EXMO_MRI/samples/manifest.json"
+                known = any(digest(root / "packages/EXMO_MRI" / c["input"]) == source_sha for c in (read_json(manifest) if manifest.is_file() else []))
                 record.update(confirmation=None if known else "water", source_sha256=source_sha)
             else:
                 if classifier is None:
@@ -806,6 +808,8 @@ def finalize(message, root, palette):
                "timings": {"model": completed.get("timings", {}),
                            "metricsOverlay": time.monotonic() - started}}
     publication = {"summary": summary, "record": record, "mask": str(mask_path), "sideMask": str(side_path) if side_path else None, "mesh": str(mesh_path) if mesh_bytes else None, "result": str(result)}
+    if message.get('readerId'):
+        publication['readerId'] = message['readerId']
     write_json(result / ("desktop-result-" + variant + ".json"), publication)
     from result_security import seal_snapshot
     return seal_snapshot(publication, make_mesh)
@@ -882,6 +886,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--engine-root", type=Path, required=True)
     parser.add_argument("--palette", type=Path, required=True)
+    parser.add_argument("--reader-id")
     args = parser.parse_args()
     palette = {row["id"]: row for row in read_json(args.palette)}
     classification = args.engine_root / "packages/EXMO_XRAY/classification"
@@ -894,7 +899,7 @@ def main():
     from result_security import MutationGuard, read_snapshot, admit_completion
     mutation_guard = MutationGuard(model_guard, make_mesh)
     protected = model_guard.policy or (classification.parent / 'model-package-xray-classifier.json').exists()
-    if not protected:
+    if not protected and classification.is_dir():
         classifier.pipeline = classifier.load_vendor(classification)
     for line in sys.stdin:
         message = {}
@@ -949,6 +954,8 @@ def main():
                 result = prepare(message)
             elif operation == "finalize":
                 clear_image_cache()
+                if args.reader_id:
+                    message['readerId'] = args.reader_id
                 result = read_snapshot(message['result'], message.get('variant', 'raw'), make_mesh)
                 if result is None:
                     if model_guard.policy:

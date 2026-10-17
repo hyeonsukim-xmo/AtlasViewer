@@ -18,7 +18,7 @@ const { diagnose, workerError, userError } = require('./diagnostics.cjs');
 const {solutions, resolveSolution, solutionFields, matchesSolution} = require('./solutions.cjs');
 const {createResultIdentities} = require('./result-identities.cjs');
 
-function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette, analysisAuthorization, artifactStorage, originStoreId }) {
+function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette, analysisAuthorization, artifactStorage, originStoreId, installations }) {
   if (analysisAuthorization !== undefined && typeof analysisAuthorization?.authorize !== "function")
     throw userError("분석 권한 확인 모듈을 초기화하지 못했습니다.");
   async function authorize(runId, engine, signal) {
@@ -37,7 +37,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   const channels = [],
     files = new Map(),
     results = new Map();
-  let worker,
+  let worker, workerContext,
     workerShutdown = Promise.resolve(),
     pending,
     disposed = false,
@@ -53,13 +53,28 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   let meshQueue = Promise.resolve(), publicationQueue = Promise.resolve();
   let resultRevision = 0;
   let batchStarted = 0;
-  const modelWorkers = new Map();
-  function runtime(name, args) {
-    const portable=path.join(engineRoot,'python','python.exe');
-    return fs.existsSync(portable)?{python:portable,args:['-I','-B','-X','utf8',path.join(scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(engineRoot,'envs',name,'Lib','site-packages'),'--',...args]}:
+  const modelWorkers = new Map(), scopedWorkers = new Map();
+  function runtime(name, args, context) {
+    const root=context?.engineRoot??engineRoot, scripts=context?.scriptsRoot??scriptsRoot;
+    const portable=path.join(root,'python','python.exe');
+    return fs.existsSync(portable)?{python:portable,args:['-I','-B','-X','utf8',path.join(scripts,'runtime_bootstrap.py'),'--site',path.join(root,'envs',name,'Lib','site-packages'),'--',...args]}:
       {python:python(name),args:['-X','utf8',...args]};
   }
-  function modelWorker(engine) {
+  function scopedWorker(context, engine, scope='') {
+    const key=context.engineRoot+':'+engine+scope;
+    let item=scopedWorkers.get(key);
+    if (!item || item.worker.closed) {
+      item?.release();
+      const reader=engine==='reader';
+      item={release:installations.retain(context),worker:new AnalysisWorker({
+        ...runtime(engine,[path.join(context.scriptsRoot,reader?'imaging-worker.py':'model-service.py'),'--engine-root',context.engineRoot,
+          ...(reader?['--palette',context.palette,'--reader-id',context.readerId]:[])],context),
+        env:workerEnv(),logPath:path.join(storageRoot,reader?'finalize-private.log':`model-${engine}-private.log`),artifactStorage,
+      })};scopedWorkers.set(key,item);
+    }return item.worker;
+  }
+  function modelWorker(engine,context) {
+    if(context)return scopedWorker(context,engine);
     if (!modelWorkers.has(engine) || modelWorkers.get(engine).closed) modelWorkers.set(engine, new AnalysisWorker({
       ...runtime(engine,[path.join(scriptsRoot, "model-service.py"), "--engine-root", engineRoot]),
       env: workerEnv(), logPath: path.join(storageRoot, `model-${engine}-private.log`),
@@ -67,7 +82,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     }));
     return modelWorkers.get(engine);
   }
-  function resultWorker() {
+  function resultWorker(context) {
+    if(context)return scopedWorker(context,'reader');
     if (!finalizer || finalizer.closed) finalizer = new AnalysisWorker({
       ...runtime('ct',[path.join(scriptsRoot, "imaging-worker.py"), "--engine-root", engineRoot, "--palette", palette]),
       env: workerEnv(), logPath: path.join(storageRoot, "finalize-private.log"),
@@ -79,6 +95,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     const workers = [...modelWorkers.values(), ...(finalizer ? [finalizer] : [])];
     await Promise.allSettled(workers.map(item => force ? item.stop() : item.close()));
     modelWorkers.clear(); finalizer = undefined;
+    await Promise.allSettled([...scopedWorkers.values()].map(async item=>{try{await (force?item.worker.stop():item.worker.close());}finally{item.release();}}));
+    scopedWorkers.clear();await installations?.collect();
   }
   function taskState(task, changes) {
     Object.assign(task, changes);
@@ -90,7 +108,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   };
   const python = (name) => path.join(engineRoot, "envs", name, "Scripts", "python.exe");
   const available = (analysis) =>
-    fs.existsSync(path.join(engineRoot, "verified-packages.json")) &&
+    installations ? Boolean(installations.status().solutions.find(row=>row.analysis===analysis)?.installed) : fs.existsSync(path.join(engineRoot, "verified-packages.json")) &&
     resolveSolution(analysis).runtimes.every((name) =>
       fs.existsSync(python(name)) || (fs.existsSync(path.join(engineRoot,'python','python.exe')) && fs.existsSync(path.join(engineRoot,'envs',name,'Lib','site-packages'))),
     );
@@ -149,6 +167,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       const result = JSON.parse(
         fs.readFileSync(path.join(runs, directory.name, "published.json"), "utf8"),
       );
+      if(installations && !result.readerId)result.readerId=installations.legacyReader();
       if (result.summary.analysis !== "xray")
         for (const row of [...result.summary.rows, ...(result.summary.parts || [])]) {
           const color = colors.get(row.structureId || row.id);
@@ -244,7 +263,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     if (result.summary.meshState !== "pending") return;
     const queued = performance.now();
     meshQueue = meshQueue.then(async () => {
-      let slot, memory;
+      let slot, memory, context;
       try {
         if (disposed || signal?.aborted) throw aborted();
         if (results.get(result.summary.id) !== result) return;
@@ -255,7 +274,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         slot = await resultLane.acquire(1, signal);
         if (results.get(result.summary.id) !== result) return;
         const meshWait = (performance.now() - queued) / 1000;
-        const updated = await resultWorker().request({ operation: "mesh", publication: result }, { timeout: 20 * 60000 });
+        if(installations)context=await installations.acquire('reader',result.readerId);
+        const updated = await resultWorker(context).request({ operation: "mesh", publication: result }, { timeout: 20 * 60000 });
         if (signal?.aborted || disposed) throw aborted();
         updated.summary.timings.meshWait = meshWait;
         await publishResult(updated, result);
@@ -265,7 +285,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           meshState: signal?.aborted || disposed ? "interrupted" : "failed" } };
         await publishResult(updated, result);
       } finally {
-        slot?.release(); memory?.release();
+        slot?.release(); memory?.release(); context?.release();
       }
     }).catch(error => {
       // Retain the early publication even if persisting mesh status fails.
@@ -284,6 +304,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   }
   function stopWorker(message = "영상 확인 작업이 중단되었습니다. 다시 시도하세요.", code = 'ENGINE_STOPPED') {
     const old = worker;
+    const context=workerContext;workerContext=undefined;
     worker = undefined;
     pending?.reject(workerError({error:message,errorCode:code}));
     pending = undefined;
@@ -297,7 +318,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         });
       } else old.kill();
     }
-    return workerShutdown;
+    workerShutdown=workerShutdown.finally(()=>context?.release());return workerShutdown;
   }
   function workerEnv() {
     const environment={...process.env};
@@ -311,9 +332,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       OPENBLAS_NUM_THREADS: "2",
     };
   }
-  function startWorker() {
+  function startWorker(context) {
     if (worker) return worker;
-    const command=runtime('ct',[path.join(scriptsRoot,'imaging-worker.py'),'--engine-root',engineRoot,'--palette',palette]);
+    const command=context?runtime('reader',[path.join(context.scriptsRoot,'imaging-worker.py'),'--engine-root',context.engineRoot,'--palette',context.palette,'--reader-id',context.readerId],context):runtime('ct',[path.join(scriptsRoot,'imaging-worker.py'),'--engine-root',engineRoot,'--palette',palette]);
     if (!fs.existsSync(command.python)) throw userError("로컬 분석 엔진을 준비해야 합니다.", 'ENGINE_MISSING');
     const process = spawn(
       command.python,
@@ -325,6 +346,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       },
     );
     worker = process;
+    workerContext=context;
     const log = fs.createWriteStream(path.join(storageRoot, "preview-private.log"), { flags: "a" });
     log.on('error', error => {
       if (worker === process) { pending?.reject(error); stopWorker(); }
@@ -355,11 +377,16 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     if (artifactStorage) process.stdin.write(JSON.stringify({operation:'storage_init',...artifactStorage})+'\n');
     return process;
   }
-  function request(operation, values = {}, signal) {
+  function request(operation, values = {}, signal, readerId) {
     const task = queue.then(async () => {
       await workerShutdown;
       if (signal?.aborted) throw aborted();
       if (disposed) throw userError("앱이 종료되었습니다.");
+      if(installations && (!worker || workerContext?.requestedReaderId!==(readerId??installations.reader()))){
+        await stopWorker();const context=await installations.acquire('reader',readerId);
+        context.requestedReaderId=readerId??installations.reader();
+        try{startWorker(context);}catch(error){context.release();throw error;}
+      }
       const process = startWorker();
       return new Promise((resolve, reject) => {
         const id = randomUUID();
@@ -450,9 +477,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   });
   handle("status", (analysis) => {
     validateAnalysis(analysis);
+    const installed=installations?.status().solutions.find(row=>row.analysis===analysis);
     return {
-      reviewAvailable: available(analysis),
-      estimationAvailable: available(analysis),
+      reviewAvailable: installations?Boolean(installations.reader()):available(analysis),
+      estimationAvailable: installed?installed.installed && installed.state!=='repair-required':available(analysis),
+      ...(installed?{installation:installed.state,version:installed.version}:{}),
       device: analysis === "xray" ? "GPU" : "GPU · FP32",
       release: "20260927",
       importProgress: importProgress?.analysis === analysis ? importProgress : null,
@@ -514,7 +543,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       throw userError("실행 중인 분석을 완료하거나 취소한 뒤 영상을 추가하세요.");
     if (!available(analysis)) throw userError("로컬 분석 엔진을 준비해야 합니다.");
     selecting = true;
-    let importRoot;
+    let importRoot, importContext;
     try {
       const selection = await dialog.showOpenDialog(window, {
         title:
@@ -527,6 +556,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           : { filters: [{ name: "Medical images", extensions: ["dcm", "nrrd", "nii", "gz", "zip"] }] }),
       });
       if (selection.canceled || disposed) return [];
+      if(installations && analysis==='xray')importContext=await installations.acquire(analysis);
+      const inspectRequest=(operation,values)=>importContext?resultWorker(importContext).request({operation,...values},{id:values.id??randomUUID(),timeout:5*60000}):request(operation,values);
       let sources = [];
       const visitedDirectories = new Set();
       async function collect(directory, depth = 0) {
@@ -629,19 +660,19 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
             const runId = randomUUID();
             try {
               if (analysisAuthorization?.authorizeModel) {
-                const challenge = await request('model_challenge', {runId});
+                const challenge = await inspectRequest('model_challenge', {runId});
                 const job = {analysis:'xray-classifier',...solutionFields({analysis:'xray'}),paths,destination:inspection.destination};
                 Object.assign(inspection,solutionFields({analysis:'xray'}));
-                inspection.authorization = await analysisAuthorization.authorizeModel({runId,job,challenge});
+                inspection.authorization = await analysisAuthorization.authorizeModel({runId,job,challenge,context:importContext});
                 inspection.runId = runId;
               } else await authorize(runId, "xray-classifier");
             } catch {
               inspection.classificationDenied = true;
-              if (analysisAuthorization?.authorizeModel) await request('model_discard', {runId});
+              if (analysisAuthorization?.authorizeModel) await inspectRequest('model_discard', {runId});
             }
           }
           if (disposed) break;
-          rows = await request("inspect", inspection);
+          rows = await inspectRequest("inspect", inspection);
         } catch (error) {
           if (disposed) break;
           const issue = diagnostic(error, 'inspect', 'INPUT_READ');
@@ -684,6 +715,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     } finally {
       selecting = false;
       importProgress = null;
+      importContext?.release();
+      if(importContext){const key=importContext.engineRoot+':reader',item=scopedWorkers.get(key);if(item){await item.worker.close();item.release();scopedWorkers.delete(key);}}
+      await installations?.collect();
     }
   });
   function options(value = {}) {
@@ -724,7 +758,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       mask: result.mask,
       sideMask: result.sideMask,
       rows: result.summary.rows,
-    });
+    },undefined,result.readerId);
   });
   handle('sceneFailure', (id, code, reference) => {
     if (!results.has(id) || !['MESH_READ','MESH_INVALID','GPU_RENDER','FILE_MISSING','ACCESS_DENIED','PATH_TOO_LONG','MEMORY'].includes(code) || !/^[a-f0-9-]{36}$/.test(reference))
@@ -762,8 +796,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     }
     const task = (async () => {
       // A saved variant is a read; only a new calculation needs a fresh authorization.
-      const saved = await request('snapshot', {result:prior.result,variant,adopt:true});
+      const saved = await request('snapshot', {result:prior.result,variant,adopt:true},undefined,prior.readerId);
       if (saved) {
+        if(installations && !saved.readerId)saved.readerId=prior.readerId;
         await publishResult(saved);
         queueMesh(saved);
         return saved.summary;
@@ -776,26 +811,34 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         createdAt: prior.summary.createdAt,
         deferMesh: true,
       };
+      const context=installations?await installations.acquire(prior.summary.analysis):undefined;
+      const mutationScope=':mutation:'+randomUUID();
+      const mutateRequest=(operation,values)=>context?scopedWorker(context,'reader',mutationScope).request({operation,...values},{id:values.id??randomUUID(),timeout:20*60000}):request(operation,values);
+      try {
       if (analysisAuthorization) {
         if (!analysisAuthorization.authorizeMutation) throw userError('새 후처리의 실행 권한을 확인하지 못했습니다.', 'AUTHORIZATION');
-        const fixed = await request('snapshot', {result:prior.result,variant:prior.summary.variant,adopt:true});
+        const fixed = await request('snapshot', {result:prior.result,variant:prior.summary.variant,adopt:true},undefined,prior.readerId);
         const identity = await identities.bindSnapshot(prior,fixed._snapshot.snapshotDigest);
         const source = {originStoreId:identity.originStoreId,originResultId:identity.originResultId,analysisRevision:identity.analysisRevision,...fixed._snapshot};
         const job = {analysis:prior.summary.analysis,...solutionFields(prior.record),...values,source};
-        const runId = randomUUID(), challenge = await request('mutation_challenge', {runId,job});
+        const runId = randomUUID(), challenge = await mutateRequest('mutation_challenge', {runId,job});
         let authorization;
-        try {authorization = await analysisAuthorization.authorizeMutation({runId,job,challenge});}
+        try {authorization = await analysisAuthorization.authorizeMutation({runId,job,challenge,context});}
         catch (error) {
-          await request('mutation_discard',{runId});
+          await mutateRequest('mutation_discard',{runId});
           diagnostic(error,'후처리','AUTHORIZATION',id);
           throw error;
         }
         Object.assign(values,{runId,mutationJob:job,authorization});
       }
-      const result = await request("finalize", values);
+      const result = await mutateRequest("finalize", values);
       await publishResult(result);
       queueMesh(result);
       return result.summary;
+      }finally{
+        if(context){const key=context.engineRoot+':reader'+mutationScope,item=scopedWorkers.get(key);
+          try{await item?.worker.close();}finally{item?.release();scopedWorkers.delete(key);context.release();await installations.collect();}}
+      }
     })();
     preparingResults.set(id, task);
     try {
@@ -838,12 +881,13 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     pipelineController.signal.addEventListener("abort", abortTask, { once: true });
     if (pipelineController.signal.aborted) controller.abort();
     const signal = controller.signal;
-    let memory, modelSlot, gpu, cpu, finalize;
+    let memory, modelSlot, gpu, cpu, finalize, context;
     const estimate = estimateMemory(file);
     try {
       memory = await pipelineResources.memory.acquire(estimate.gpu, signal);
       timings.admissionWait = (performance.now() - started) / 1000;
       if (signal.aborted) throw aborted();
+      if(installations){taskState(task,{stage:'설치 파일 검증',lane:'waiting'});const verificationStarted=performance.now();context=await installations.acquire(file.analysis);timings.runtimeVerification=(performance.now()-verificationStarted)/1000;}
       taskState(task, { stage: "입력 확인", lane: "prepare" });
       let phase = performance.now();
       file = await prepareInput(file, confirmed, signal);
@@ -869,14 +913,14 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         await authorize(id, engine, signal);
         timings.authorization = (performance.now() - authorizationStarted) / 1000;
       }
-      const model = modelWorker(engine);
+      const model = modelWorker(engine,context);
       let modelAuthorization;
       if (analysisAuthorization?.authorizeModel) {
         taskState(task, { stage: "분석 권한 확인", lane: "waiting", progress: null });
         const authorizationStarted = performance.now();
         const challenge = await model.request({ operation: "model_challenge", runId: id, engine: require('./security/model-package.cjs').modelId(job) }, { timeout: 15000 });
         try {
-          modelAuthorization = await analysisAuthorization.authorizeModel({ runId: id, job, challenge, signal });
+          modelAuthorization = await analysisAuthorization.authorizeModel({ runId: id, job, challenge, signal, context });
           if (signal.aborted) throw aborted();
         } catch (error) {
           model.send({ operation: "model_discard", id, runId: id });
@@ -926,7 +970,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       if (signal.aborted) throw aborted();
       taskState(task, { stage: "측정·Overlay 준비", lane: "cpu", progress: null });
       phase = performance.now();
-      const result = await resultWorker().request({
+      const result = await resultWorker(context).request({
         operation: "finalize", record: file, result: resultPath, id, createdAt: new Date().toISOString(), deferMesh: true,
       }, { id, timeout: 20 * 60000 });
       if (signal.aborted) throw aborted();
@@ -949,12 +993,13 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       controller.abort();
       pipelineController.signal.removeEventListener("abort", abortTask);
       modelSlot?.release(); gpu?.release(); cpu?.release(); finalize?.release(); memory?.release();
+      context?.release();
       batch.active = batch.active.filter(item => item !== task);
     }
   }
   handle("run", (analysis, ids, confirmedIds = [], device = "cuda:0") => {
     validateAnalysis(analysis);
-    if (selecting || batch?.state === "running")
+    if (selecting || preparingResults.size || batch?.state === "running")
       throw userError("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
     if (
       !Array.isArray(ids) ||

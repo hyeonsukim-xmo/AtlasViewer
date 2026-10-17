@@ -2,6 +2,7 @@ import { t, useLanguage, localeTag } from "./language";
 import {failureText} from "./diagnostics";
 import LanguageSelect from "./language-select";
 import LicenseStatusButton from "./license-status";
+import InstallationManager, {installationLabel} from './installation-manager';
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import Home from "../../app/page";
@@ -23,6 +24,14 @@ function Desktop() {
   const [catalogError, setCatalogError] = useState("");
   const [status, setStatus] = useState<Record<string, ModelStatus>>({});
   const [solutionErrors, setSolutionErrors] = useState<Record<string, string>>({});
+  const [installationRevision,setInstallationRevision]=useState(0);
+  useEffect(()=>{
+    let previous='';
+    return window.exmoDesktop.onInstallationsChanged?.(value=>{
+      const signature=JSON.stringify(value.solutions.map(s=>[s.analysis,s.installed,s.state,s.version]));
+      if(signature!==previous){previous=signature;setInstallationRevision(n=>n+1);}
+    });
+  },[]);
   useEffect(() => {
     let stale = false;
     window.exmoDesktop.solutions().then(unwrap).then(values => {if (!stale) setAnalyses(values);})
@@ -51,7 +60,7 @@ function Desktop() {
     return () => {
       stale = true;
     };
-  }, [view, analyses]);
+  }, [view, analyses, installationRevision]);
   const recentStudies = [
     ...recent.filter(result => result.analysis !== "xray").map(result => ({ key: result.id, items: [result] })),
     ...groupXrays(recent.filter(result => result.analysis === "xray")),
@@ -72,6 +81,7 @@ function Desktop() {
           </button>
           <span className="desktop-nav-label">Clinical imaging workspace</span>
           <LicenseStatusButton />
+          <InstallationManager />
           <button className="desktop-demo-link" onClick={() => setView("demo")}>
             {t("3D 데모")}
           </button>
@@ -133,7 +143,7 @@ function Desktop() {
                                 : "status-review"
                             }
                           >
-                            {status[analysis.id]?.estimationAvailable
+                            {status[analysis.id]?.installation?installationLabel(status[analysis.id]?.installation):status[analysis.id]?.estimationAvailable
                               ? t("연결됨")
                               : t("준비 필요")}
                           </span>

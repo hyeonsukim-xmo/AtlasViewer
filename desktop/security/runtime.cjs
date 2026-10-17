@@ -52,7 +52,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
   const version=build.licenseVersion??2;
   const minimumPath=path.join(directory,'protocol-version.json');
   if(fs.existsSync(minimumPath))P.check(JSON.parse(read(minimumPath)).version<=version,'This installation has migrated to v3; use a v3 build');
-  const execution=(job,capability,modelDigest)=>E3.binding(job,{engineRoot,scriptsRoot,issuer:crypto.createPublicKey(build.issuerPublicKey)},capability,modelDigest);
+  const execution=(job,capability,modelDigest,context)=>E3.binding(job,{engineRoot:context?.engineRoot??engineRoot,scriptsRoot:context?.scriptsRoot??scriptsRoot,issuer:crypto.createPublicKey(build.issuerPublicKey)},capability,modelDigest);
   const make=activation=>{
     P.check(identity && !error,'Installation key unavailable');
     P.fields(activation,['binding','installationPublicKey',...(activation.models?['models']:[]),...(activation.recovery?['recovery']:[]),...(build.profile==='customer'?['hardware']:[])]);P.binding(activation.binding);
@@ -118,11 +118,28 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
       if(build.profile==='customer')P.check(resultStorage?.hasRecovery(),'기관 결과 복구 키가 등록되어야 신규 분석을 시작할 수 있습니다.');
       return client.authorize(request);
     },
-    async authorizeMutation({runId,job,challenge,signal}) {
+    async authorizeInstallation({token,records}) {
+      P.check(version===3 && !error && client,'A v3 online activation is required before installing solutions');
+      const issuer=crypto.createPublicKey(build.issuerPublicKey),policy=require('./selection.cjs').selection(token,issuer,build.profile);
+      P.check(policy.selection!=='reader');
+      if(client.state()!=='VALID')await client.refresh();
+      let permitted=false;
+      for(const [engine,modelDigest] of Object.entries(policy.models)){
+        const job={analysis:engine==='xray-classifier'?engine:policy.selection,...E3.scope({analysis:policy.selection}),...(policy.selection==='xray'?{route:{ap:'AP',lat_lt:'LAT_LT',lat_rt:'LAT_RT'}[engine]}:{})};
+        const capability=engine==='xray-classifier'?'classify':'analyze',binding=E3.fromSelection(job,token,records,issuer,capability,modelDigest);
+        try{V3.allowed(client.receipt,binding,client.time());}catch{continue;}
+        P.check(models[engine],'Model approval is required before installation');
+        const access=M.envelope(models[engine],issuer,client.config.binding,identity.modelKeyPublicKey);P.check(access.modelDigest===modelDigest);
+        await client.authorize({runId:crypto.randomUUID(),engine:M.entitlement(engine),execution:binding});
+        if(capability==='analyze')permitted=true;
+      }
+      P.check(permitted,'This solution/version is not authorized for installation');
+    },
+    async authorizeMutation({runId,job,challenge,signal,context}) {
       P.check(!error && client && resultStorage?.ready(),'Result mutation authorization unavailable');
       if(build.profile==='customer')P.check(resultStorage.hasRecovery(),'기관 결과 복구 키가 필요합니다.');
       P.fields(challenge,['nonce']);P.nonce(challenge.nonce);
-      const binding=version===3?execution(job,'result-mutation',null):null;
+      const binding=version===3?execution(job,'result-mutation',null,context):null;
       await client.authorize({runId,engine:job.analysis,execution:binding,signal});
       const lease=client.token,now=Math.floor(client.time());
       const claims={schema:'exmo-result-mutation-v1',runId,...(binding??{...E3.scope(job),capability:'result-mutation',engine:job.analysis}),
@@ -134,7 +151,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
       P.check(client.token===lease && ['VALID','GRACE'].includes(client.state()) && client.time()<claims.exp && !signal?.aborted,'Mutation authorization changed');
       return {lease,installationPublicKey:identity.installationPublicKey,message,signature:signature.toString('base64url'),...hardwareProof};
     },
-    async authorizeModel({runId,job,challenge,signal}) {
+    async authorizeModel({runId,job,challenge,signal,context}) {
       const engine=M.modelId(job);
       P.check(!error && client,'Model analysis authorization unavailable');
       if(resultStorage)P.check(resultStorage.ready(),'결과 보호 키 복구가 필요합니다.');
@@ -143,7 +160,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
       P.check(models[engine],'암호화 모델 승인이 없습니다. 모델 권한이 포함된 승인 파일을 적용하세요.');
       const access=M.envelope(models[engine],crypto.createPublicKey(build.issuerPublicKey),client.config.binding,identity.modelKeyPublicKey);
       P.check(access.modelDigest===challenge.modelDigest,'Approved model differs from installed model');
-      const binding=version===3?execution(job,engine==='xray-classifier'?'classify':'analyze',access.modelDigest):null;
+      const binding=version===3?execution(job,engine==='xray-classifier'?'classify':'analyze',access.modelDigest,context):null;
       await client.authorize({runId,engine:M.entitlement(engine),execution:binding,signal});
       if(version===2)P.check(client.receipt.modelDigests.includes(access.modelDigest),'설치된 모델 버전의 권한이 회수되었거나 갱신이 필요합니다.');
       let plain;

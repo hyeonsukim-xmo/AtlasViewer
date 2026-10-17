@@ -107,7 +107,7 @@ def seal_snapshot(publication, mesh_function):
     return read_snapshot(result, publication['summary']['variant'], mesh_function)
 
 
-def read_snapshot(result, variant, mesh_function, adopt=False):
+def read_snapshot(result, variant, mesh_function, adopt=False, verify_recipe=True):
     result = anchored(result); file = snapshot_file(result, variant)
     if not file.exists():
         if not adopt: return None
@@ -126,7 +126,8 @@ def read_snapshot(result, variant, mesh_function, adopt=False):
     p = v['publication']
     require(v['schema'] == 'exmo-fixed-result-v1' and Path(p['result']).absolute() == result and p['summary']['variant'] == variant)
     require(v['maskDigest'] == file_hash(p['mask']) and v['sideMaskDigest'] == (file_hash(p['sideMask']) if p.get('sideMask') else None))
-    require(v['displayRecipe'] == digest(inspect.getsource(mesh_function).replace('\r\n', '\n').encode()))
+    if verify_recipe:
+        require(v['displayRecipe'] == digest(inspect.getsource(mesh_function).replace('\r\n', '\n').encode()))
     p['_snapshot'] = {'maskDigest': v['maskDigest'], 'sideMaskDigest': v['sideMaskDigest'], 'snapshotDigest': digest(canonical(v).encode()), 'variant': variant}
     return p
 
@@ -140,7 +141,7 @@ class MutationGuard:
         scope(job); require(job['record']['analysis'] == job['analysis'])
         source = job['source']
         fields(source, 'originStoreId originResultId analysisRevision maskDigest sideMaskDigest snapshotDigest variant')
-        prior = read_snapshot(job['result'], source['variant'], self.mesh_function, adopt=True)
+        prior = read_snapshot(job['result'], source['variant'], self.mesh_function, adopt=True, verify_recipe=False)
         require(prior is not None)
         require(all(source[k] == v for k, v in prior['_snapshot'].items()))
         require(prior['summary']['id'] == job['id'] and prior['record']['input'] == job['record']['input'] and prior['record']['id'] == job['record']['id'])

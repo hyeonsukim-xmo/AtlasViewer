@@ -21,6 +21,7 @@ let desktopImaging;
 let licensing;
 let resultStorage;
 let protectedEngineRoot;
+let installations;
 let initializing = true;
 let startupRecorded = false;
 const preferences = { nodeIntegration: false, contextIsolation: true, sandbox: true };
@@ -111,11 +112,14 @@ function createWindow() {
     analysisAuthorization: licensing,
     originStoreId: resultStorage?.id(),
     artifactStorage: resultStorage?.bootstrap(path.join(app.getPath('userData'), 'imaging', 'runs')),
+    installations,
   });
   const removeLicenseUi = installLicenseUi({ ipcMain, dialog, window, licensing, profile: securityBuild.profile, restart:()=>{app.relaunch();app.quit();} });
+  const removeInstallationUi=require('./security/installations-ui.cjs').installInstallationUi({ipcMain,dialog,window,installations,licensing,logRoot:path.join(app.getPath('userData'),'imaging')});
   const imaging = desktopImaging;
   window.once("closed", () => {
     removeLicenseUi();
+    removeInstallationUi();
     imaging.dispose().catch(() => {});
   });
   window.once("ready-to-show", () => {
@@ -148,28 +152,45 @@ app
       for(const relative of inventory(scriptsRoot))if(/\.(py|pyc|pyd|dll)$/i.test(relative) && !hashes['imaging/'+relative])throw Error('승인되지 않은 분석 실행 파일이 있습니다.');
       startupTimings.helperIntegrityMs=performance.now()-phaseStarted;
       const payload=path.resolve(scriptsRoot,'../engine');
-      if(securityBuild.profile==='customer' || fs.existsSync(path.join(payload,'payload.json'))) {
+      let selectedContext;
+      const selected=fs.existsSync(path.join(payload,'catalog.json'));
+      const progress=(selected || securityBuild.profile==='customer' || fs.existsSync(path.join(payload,'payload.json')))?new BrowserWindow({width:440,height:160,resizable:false,closable:false,autoHideMenuBar:true,backgroundColor:'#100e26',webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}}):null;
+      if(progress)await progress.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><style>body{background:#100e26;color:#e9e6f4;font:14px system-ui;margin:28px}p{color:#a7a2bb;font-size:12px}progress{width:100%;accent-color:#aaa0c7}</style><b>분석 실행 환경 확인</b><p>'+(selected?'공용 Viewer를 준비하고 설치 파일을 확인하고 있습니다.':'설치 파일과 모델의 무결성을 확인하고 있습니다.')+'</p><progress max="100"></progress>'));
+      const updateProgress=(done,total)=>{if(progress && !progress.isDestroyed() && total)void progress.webContents.executeJavaScript('document.querySelector("progress").value='+Math.round(done/total*100)).catch(()=>{});};
+      phaseStarted=performance.now();
+      try{
+      if(fs.existsSync(path.join(payload,'catalog.json'))){
+        if(securityBuild.licenseVersion!==3)throw Error('선택 설치에는 v3 빌드가 필요합니다.');
+        const issuer=require('node:crypto').createPublicKey(securityBuild.issuerPublicKey);
+        installations=require('./security/installations.cjs').openInstallations({root:path.join(app.getPath('userData'),'runtime-store'),issuer,profile:securityBuild.profile,
+          onChange:value=>{updateProgress(value.reader?.completed,value.reader?.total);for(const window of BrowserWindow.getAllWindows())if(!window.isDestroyed())window.webContents.send('exmo:installations:changed',value);}});
+        await installations.recover();
+        if(!installations.reader())await installations.install(payload,[],null,{commonOnly:true});
+        let reader;
+        try{reader=await installations.acquire('reader');}
+        catch{
+          // Restore a verified common reader so damaged runtime files cannot lock out repair UI.
+          await installations.install(payload,[],null,{commonOnly:true});
+          reader=await installations.acquire('reader');
+        }
+        selectedContext=reader;protectedEngineRoot=reader.engineRoot;
+        startupTimings.readerMs=performance.now()-phaseStarted;
+      }else if(securityBuild.profile==='customer' || fs.existsSync(path.join(payload,'payload.json'))) {
         const crypto=require('node:crypto');
-        const progress=new BrowserWindow({width:440,height:160,resizable:false,closable:false,autoHideMenuBar:true,backgroundColor:'#100e26',webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
-        await progress.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent('<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><style>body{background:#100e26;color:#e9e6f4;font:14px system-ui;margin:28px}p{color:#a7a2bb;font-size:12px}progress{width:100%;accent-color:#aaa0c7}</style><b>분석 실행 환경 확인</b><p>설치 파일과 모델의 무결성을 확인하고 있습니다.</p><progress max="100" value="0"></progress>'));
-        let policy;
         const payloadTimings=startupTimings.payload={};
-        try {
-          policy=await require('./security/payload.cjs').verifyPayloadAsync(payload,crypto.createPublicKey(securityBuild.issuerPublicKey),(done,total)=>{
-            if(!progress.isDestroyed())void progress.webContents.executeJavaScript('document.querySelector("progress").value='+Math.round(done/total*100)).catch(()=>{});
-          },payloadTimings);
-        }finally{if(!progress.isDestroyed())progress.destroy();}
+        const policy=await require('./security/payload.cjs').verifyPayloadAsync(payload,crypto.createPublicKey(securityBuild.issuerPublicKey),updateProgress,payloadTimings);
         if(policy.profile!==securityBuild.profile)throw Error('분석 엔진의 제품 프로필이 일치하지 않습니다.');
         protectedEngineRoot=payload;
       }
+      }finally{if(progress && !progress.isDestroyed())progress.destroy();}
       phaseStarted=performance.now();
       resultStorage = openResultStorage(path.join(app.getPath('userData'), 'result-security'), safeStorage);
       startupTimings.resultStorageMs=performance.now()-phaseStarted;phaseStarted=performance.now();
       licensing = await openLicensing({ build: securityBuild, directory: path.join(app.getPath("userData"), "licensing"), safeStorage,
-        resultStorage,engineRoot:protectedEngineRoot,scriptsRoot,
+        resultStorage,engineRoot:protectedEngineRoot,scriptsRoot:selectedContext?.scriptsRoot??scriptsRoot,
         dongle:securityBuild.profile==='customer'?new (require('./security/dongle.cjs').Dongle)(
-          path.join(protectedEngineRoot,'python','python.exe'),path.join(scriptsRoot,'piv_worker.py'),
-          [path.join(scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(protectedEngineRoot,'envs/security/Lib/site-packages'),'--']):undefined,
+          path.join(protectedEngineRoot,'python','python.exe'),path.join(selectedContext?.scriptsRoot??scriptsRoot,'piv_worker.py'),
+          [path.join(selectedContext?.scriptsRoot??scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(protectedEngineRoot,'envs/security/Lib/site-packages'),'--']):undefined,
         key: new WindowsKey(bundled ? path.resolve(__dirname, "../..", "security", "windows-key.ps1") : undefined) });
       startupTimings.licensingMs=performance.now()-phaseStarted;
       powerMonitor.on("resume", () => licensing.refresh().catch(() => {}));
@@ -223,7 +244,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (!desktopImaging) { licensing?.close(); return; }
+  if (!desktopImaging) { licensing?.close(); installations?.close(); return; }
   event.preventDefault();
   const imaging = desktopImaging;
   desktopImaging = undefined;

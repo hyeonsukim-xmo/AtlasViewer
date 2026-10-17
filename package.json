@@ -33,7 +33,8 @@
     "test:transfer": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-transfer-integrity.py",
     "test:imaging:desktop": "npm run build && npm run build:desktop && electron scripts/validate-imaging-desktop.cjs",
     "test:solutions": "node scripts/validate-solution-contracts.cjs",
-    "test:solution-security": "node --test scripts/security/test-solutions.cjs"
+    "test:solution-security": "node --test scripts/security/test-solutions.cjs",
+    "test:installations": "node --test scripts/security/test-installations.cjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

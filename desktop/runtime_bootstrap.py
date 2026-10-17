@@ -5,14 +5,20 @@ import runpy
 import site as python_site
 import sys
 
+def import_path(directory):
+    value = str(Path(directory).resolve(strict=True))
+    if sys.platform == 'win32' and not value.startswith('\\\\?\\'):
+        return '\\\\?\\UNC\\' + value[2:] if value.startswith('\\\\') else '\\\\?\\' + value
+    return value
+
 def runtime_paths(site):
     site = Path(site).resolve(strict=True)
-    if site.name != 'site-packages' or site.parent.name != 'Lib' or site.parent.parent.name not in ('ct', 'mri', 'ap', 'lat', 'security'):
+    if site.name != 'site-packages' or site.parent.name != 'Lib' or site.parent.parent.name not in ('reader', 'ct', 'mri', 'ap', 'lat', 'security'):
         raise ValueError('Unapproved runtime environment')
-    paths = [str(site)]
+    paths = [import_path(site)]
     shared = site.parents[2] / 'xray-common/Lib/site-packages'
     if site.parent.parent.name in ('ap', 'lat') and shared.is_dir():
-        paths.append(str(shared))
+        paths.append(import_path(shared))
     return paths
 
 
@@ -35,7 +41,7 @@ def main():
     if entry.parent != Path(__file__).resolve().parent or entry.name not in ('model-service.py', 'imaging-worker.py', 'piv_worker.py'):
         raise ValueError('Unapproved worker entrypoint')
     configure_runtime(args.site)
-    sys.path.insert(0, str(entry.parent))
+    sys.path.insert(0, import_path(entry.parent))
     sys.dont_write_bytecode = True
     sys.argv = args.arguments[1:]
     runpy.run_path(str(entry), run_name='__main__')
