@@ -1,5 +1,7 @@
 # EXMO Desktop 라이선스와 모델 보호 설계
 
+후속 제품화 설계(2026-10-17): [솔루션별 권한·선택 설치·계정·결과 동기화](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md). PC/YubiKey 분석 권한과 기관 계정의 서버 결과 접근권을 분리하는 **계획**이며, 아래 기존 구현이 이미 전환됐다는 뜻은 아니다.
+
 - 작성일: 2026-10-15
 - 검토 기준: `ac0998e`, 앱 `0.1.24`, Windows x64 / Electron / Python CT·MRI·AP·LAT 환경
 - 상태 (2026-10-16): 전체 모델 암호화·작업별 허가, 고객 PC+YubiKey 이중 키, 결과 보호·기관 복구, 서명 payload·설치본 검사·운영 CLI 구현. 실물 동글·실제 서버·코드 서명·신규 PC 현장 검증은 미완료. 최신 구현과 검증 증거는 [제품 보안 runbook](EXMO_PRODUCT_SECURITY_RUNBOOK.md)에 있다.
