@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const source=fs.readFileSync(require('node:path').join(__dirname,'../desktop/ui/thigh-workspace.tsx'),'utf8');
 const ts=require('typescript');
 const logic=source.slice(source.indexOf('  const runnable ='),source.indexOf('  const filtered ='));
-const run=source.slice(source.indexOf('  async function run()'),source.indexOf('  async function clear()'));
+const run=source.slice(source.indexOf('  async function run('),source.indexOf('  async function clear()'));
 const compile=code=>ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 (async()=>{
   const all=Array.from({length:116},(_,id)=>({id:String(id),ready:true,confirmation:'hu'}));
@@ -15,7 +15,7 @@ const compile=code=>ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTa
     {chosen:[{id:'ap',ready:true,confirmation:null}],confirmed:[],expected:['ap']},
   ]) {
     const calls=[];
-    const context={...fixture,busy:false,analysis:'ct',device:'cuda:0',
+    const context={...fixture,executionChosen:fixture.chosen,busy:false,analysis:'ct',scope:'ct',device:'cuda:0',
       setChanging(){},setError(message){assert.equal(message,'')},setJob(){},unwrap:x=>x,
       window:{exmoDesktop:{run:async(...args)=>{calls.push(args);return {};}}}};
     vm.createContext(context);vm.runInContext(compile(logic+run),context);

@@ -2,7 +2,7 @@
 
 작성: 2026-10-17. 기준 코드: `d474eea`, `feat/desktop-security`, Desktop `0.1.27-runtime-slim.3`.
 
-**이 문서는 다음 제품 구조의 설계다. 구현 완료 보고가 아니다.** 이번 작업에서 분석 코드·모델·라이선스 발급·기존 데이터는 변경하지 않는다. 실행 계획은 [구현·검증 계획](EXMO_SOLUTION_PRODUCTIZATION_PLAN.md), 홈 화면 검토용 모형은 [HTML](prototypes/solution-home.html)에 있다. 기존 구현/시험 사실은 [제품 보안 runbook](EXMO_PRODUCT_SECURITY_RUNBOOK.md), [성능 기록](DESKTOP_PERFORMANCE.md), [오류 처리](DESKTOP_DIAGNOSTICS.md)를 기준으로 한다. 이전 제품 문서의 오래된 구현 상태보다 현재 코드와 이 문서의 **현재/계획 구분**을 우선한다.
+**이 문서는 다음 제품 구조의 설계다. 제품 전체의 구현 완료 보고가 아니다.** 설계 작성 시점에는 분석 코드·모델·라이선스 발급·기존 데이터를 변경하지 않았다. 이후 첫 구현의 registry·로컬 결과 ID는 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md)에 별도로 기록한다. 실행 계획은 [구현·검증 계획](EXMO_SOLUTION_PRODUCTIZATION_PLAN.md), 홈 화면 검토용 모형은 [HTML](prototypes/solution-home.html)에 있다. 기존 구현/시험 사실은 [제품 보안 runbook](EXMO_PRODUCT_SECURITY_RUNBOOK.md), [성능 기록](DESKTOP_PERFORMANCE.md), [오류 처리](DESKTOP_DIAGNOSTICS.md)를 기준으로 한다. 이전 제품 문서의 오래된 구현 상태보다 현재 코드와 이 문서의 **현재/계획 구분**을 우선한다.
 
 ## 1. 사용자 요구와 결정
 

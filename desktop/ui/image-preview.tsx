@@ -6,6 +6,7 @@ import { type Analysis, type Preview, type PreviewOptions, unwrap } from "./imag
 
 export default function ImagePreview({
   analysis,
+  solutionId,
   id,
   result = false,
   classIds,
@@ -14,6 +15,7 @@ export default function ImagePreview({
   compact = false,
 }: {
   analysis: Analysis;
+  solutionId?: string;
   id: string;
   result?: boolean;
   classIds?: number[] | null;
@@ -22,6 +24,7 @@ export default function ImagePreview({
   compact?: boolean;
 }) {
   const language = useLanguage();
+  const scope = solutionId || analysis;
   const [view, setView] = useState<NonNullable<PreviewOptions["view"]>>("axial");
   const [index, setIndex] = useState<number | null>(null);
   const [windowing, setWindow] = useState<"soft" | "bone">("soft");
@@ -35,12 +38,12 @@ export default function ImagePreview({
   const current = useRef(data);
   current.current = data;
   const selection = classIds == null ? "all" : classIds.join(",");
-  const identity = `${analysis}:${id}:${revision}:${result}:${view}:${windowing}:${selection}:${side}`;
+  const identity = `${scope}:${id}:${revision}:${result}:${view}:${windowing}:${selection}:${side}`;
   const latestIdentity = useRef(identity);
   latestIdentity.current = identity;
   const pending = useRef<{
     identity: string;
-    analysis: Analysis;
+    scope: string;
     id: string;
     result: boolean;
     options: PreviewOptions;
@@ -64,7 +67,7 @@ export default function ImagePreview({
     // request, while completed slices remain visible during the gesture.
     pending.current = {
       identity,
-      analysis,
+      scope,
       id,
       result,
       options: {
@@ -88,7 +91,7 @@ export default function ImagePreview({
           const reply = await schedulePreview(
             () => request.result
               ? window.exmoDesktop.resultPreview(request.id, request.options)
-              : window.exmoDesktop.preview(request.analysis, request.id, request.options),
+              : window.exmoDesktop.preview(request.scope, request.id, request.options),
             () => !disposed.current && request.identity === latestIdentity.current,
           );
           if (!reply) continue;
@@ -105,7 +108,7 @@ export default function ImagePreview({
       inFlight.current = false;
       if (!disposed.current) setLoading(false);
     })();
-  }, [analysis, id, revision, result, view, index, windowing, selection, opacity, side]);
+  }, [scope, id, revision, result, view, index, windowing, selection, opacity, side]);
   useEffect(() => {
     const host = area.current;
     if (!host) return;

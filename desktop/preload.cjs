@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld(
     manageLicense: () => ipcRenderer.invoke("exmo:license:manage"),
     exportResults: (analysis, ids, language) => ipcRenderer.invoke("exmo:imaging:exportResults", analysis, ids, language),
     imageMenu: (payload) => ipcRenderer.invoke("exmo:imaging:imageMenu", payload),
+    solutions: () => ipcRenderer.invoke("exmo:imaging:solutions"),
     status: (analysis) => ipcRenderer.invoke("exmo:imaging:status", analysis),
     onImportProgress: (callback) => {
       const listener = (_event, progress) => callback(progress);

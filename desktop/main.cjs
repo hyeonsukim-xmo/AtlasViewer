@@ -109,6 +109,7 @@ function createWindow() {
     scriptsRoot,
     palette: path.join(bundled ? scriptsRoot : contentRoot, "imaging-palette.json"),
     analysisAuthorization: licensing,
+    originStoreId: resultStorage?.id(),
     artifactStorage: resultStorage?.bootstrap(path.join(app.getPath('userData'), 'imaging', 'runs')),
   });
   const removeLicenseUi = installLicenseUi({ ipcMain, dialog, window, licensing, profile: securityBuild.profile, restart:()=>{app.relaunch();app.quit();} });

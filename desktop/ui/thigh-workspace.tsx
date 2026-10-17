@@ -21,18 +21,21 @@ export type { Analysis } from "./imaging";
 
 export default function ThighWorkspace({
   analysis,
+  solutionId,
   name,
   visible,
   onBack,
   initialResult,
 }: {
   analysis: Analysis;
+  solutionId?: string;
   name: string;
   visible: boolean;
   onBack: () => void;
   initialResult?: string;
 }) {
   const language = useLanguage();
+  const scope = solutionId || analysis;
   const [model, setModel] = useState<ModelStatus>();
   const [files, setFiles] = useState<ImagingFile[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -53,13 +56,13 @@ export default function ThighWorkspace({
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   useEffect(() => window.exmoDesktop.onImportProgress(progress => {
-    if (progress.analysis !== analysis) return;
+    if (progress.analysis !== analysis || (solutionId && progress.solutionId && progress.solutionId !== solutionId)) return;
     setImportProgress(progress);
     if (progress.rows?.length) {
       setFiles(old => [...new Map([...old, ...progress.rows!].map(file => [file.id, file])).values()]);
       setActive(old => old || progress.rows![0].id);
     }
-  }), [analysis]);
+  }), [analysis, solutionId]);
   const [error, setError] = useState<Failure>("");
   const [query, setQuery] = useState("");
   const [assignFiles, setAssignFiles] = useState<ImagingFile[]>([]);
@@ -96,9 +99,9 @@ export default function ThighWorkspace({
     if (!visible) return;
     let stale = false;
     void Promise.all([
-      window.exmoDesktop.status(analysis).then(unwrap),
-      window.exmoDesktop.list(analysis).then(unwrap),
-      window.exmoDesktop.results(analysis).then(unwrap),
+      window.exmoDesktop.status(scope).then(unwrap),
+      window.exmoDesktop.list(scope).then(unwrap),
+      window.exmoDesktop.results(scope).then(unwrap),
     ]).then(
       ([status, inputs, previous]) => {
         if (stale) return;
@@ -118,7 +121,7 @@ export default function ThighWorkspace({
     return () => {
       stale = true;
     };
-  }, [analysis, visible, initialResult]);
+  }, [analysis, scope, visible, initialResult]);
   useEffect(() => {
     if (!visible && !running && !pendingMeshes) return;
     let stale = false;
@@ -149,7 +152,7 @@ export default function ThighWorkspace({
           (next.state !== "running" || next.completed.length > 0) &&
           receivedCompletion.current !== key)
         ) {
-          const completed = unwrap(await window.exmoDesktop.results(analysis));
+          const completed = unwrap(await window.exmoDesktop.results(scope));
           if (!stale) {
             receivedCompletion.current = key;
             setResults(completed);
@@ -165,7 +168,7 @@ export default function ThighWorkspace({
       stale = true;
       clearTimeout(timer);
     };
-  }, [analysis, visible, running, pendingMeshes]);
+  }, [analysis, scope, visible, running, pendingMeshes]);
   function include(id: string, value: boolean) {
     setSelected((old) => (value ? [...new Set([...old, id])] : old.filter((key) => key !== id)));
     if (!value) setRunSelected(old => old.filter(key => key !== id));
@@ -190,7 +193,7 @@ export default function ThighWorkspace({
     if (exporting || !selectedResultIds.length) return;
     setExporting(true); setError(""); setExportNotice("");
     try {
-      const reply = unwrap(await window.exmoDesktop.exportResults(analysis, selectedResultIds, language));
+      const reply = unwrap(await window.exmoDesktop.exportResults(scope, selectedResultIds, language));
       if (reply.action === "save") setExportNotice(t("{{value0}}개 결과를 Excel로 저장했습니다.", {value0: reply.count || 0}));
     } catch (e) { setError(e as Error); }
     finally { setExporting(false); }
@@ -203,7 +206,7 @@ export default function ThighWorkspace({
     setImportProgress(null);
     setError("");
     try {
-      const added = unwrap(await window.exmoDesktop.chooseFiles(analysis, folder, language));
+      const added = unwrap(await window.exmoDesktop.chooseFiles(scope, folder, language));
       setFiles((old) => [...new Map([...old, ...added].map(file => [file.id, file])).values()]);
       if (added.length) {
         setActive(added[0].id);
@@ -226,7 +229,7 @@ export default function ThighWorkspace({
     setChanging(true);
     setError("");
     try {
-      setJob(unwrap(await window.exmoDesktop.run(analysis, ids, confirmed, device)));
+      setJob(unwrap(await window.exmoDesktop.run(scope, ids, confirmed, device)));
     } catch (e) {
       setError(e as Error);
     } finally {
@@ -237,7 +240,7 @@ export default function ThighWorkspace({
     setChanging(true);
     setError("");
     try {
-      unwrap(await window.exmoDesktop.clear(analysis));
+      unwrap(await window.exmoDesktop.clear(scope));
       setFiles([]);
       setSelected([]);
       setRunSelected([]);
@@ -253,7 +256,7 @@ export default function ThighWorkspace({
   async function cancel() {
     setChanging(true);
     try {
-      unwrap(await window.exmoDesktop.cancel(job!.analysis));
+      unwrap(await window.exmoDesktop.cancel(job!.solutionId || job!.analysis));
       setJob(unwrap(await window.exmoDesktop.job()));
     } catch (e) {
       setError(e as Error);
@@ -264,13 +267,13 @@ export default function ThighWorkspace({
   const displayResults = opened
     .map((id) => results.find((result) => result.id === id))
     .filter((result): result is AnalysisResult => !!result);
-  const xrayWorkspace = analysis === "xray" ? <XrayWorkspace
+  const xrayWorkspace = analysis === "xray" ? <XrayWorkspace solutionId={solutionId}
     files={files} results={results} job={job} model={model} busy={busy} importing={importing}
     importProgress={importProgress} error={error} visible={visible} initialResult={initialResult} device={device} setDevice={setDevice}
     onAdd={folder => void add(folder)} onRun={ids => void run(ids)} onCancel={() => void cancel()}
     onClear={() => void clear()} onBack={onBack}
     onReload={async () => {
-      const [inputs, saved] = await Promise.all([window.exmoDesktop.list(analysis).then(unwrap), window.exmoDesktop.results(analysis).then(unwrap)]);
+      const [inputs, saved] = await Promise.all([window.exmoDesktop.list(scope).then(unwrap), window.exmoDesktop.results(scope).then(unwrap)]);
       setFiles(inputs); setResults(saved);
     }}
     onUpdate={result => setResults(old => old.map(row => row.id === result.id ? result : row))}
@@ -295,9 +298,9 @@ export default function ThighWorkspace({
     );
   return (
     <section className="thigh-workspace">
-      {assignFiles.length > 0 && <PatientAssignment analysis={analysis} files={assignFiles} onClose={() => setAssignFiles([])}
+      {assignFiles.length > 0 && <PatientAssignment analysis={scope} files={assignFiles} onClose={() => setAssignFiles([])}
         onSaved={async () => {
-          const [inputs, saved] = await Promise.all([window.exmoDesktop.list(analysis).then(unwrap), window.exmoDesktop.results(analysis).then(unwrap)]);
+          const [inputs, saved] = await Promise.all([window.exmoDesktop.list(scope).then(unwrap), window.exmoDesktop.results(scope).then(unwrap)]);
           setFiles(inputs); setResults(saved);
         }} />}
       <header className="workspace-heading">
@@ -517,7 +520,7 @@ export default function ThighWorkspace({
                     <strong title={current.name}>{seriesLabel(current)}</strong>
                     <span>{hovered ? "Hover preview" : t("현재 미리보기")}</span>
                   </div>
-                  <ImagePreview key={current.id} analysis={analysis} id={current.id} />
+                  <ImagePreview key={current.id} analysis={analysis} solutionId={solutionId} id={current.id} />
                   <div className="metadata-strip">
                     <span>{current.metadata.size.join(" × ")}</span>
                     <span>{current.metadata.spacing.map((n) => number(n, 3)).join(" × ")} mm</span>
@@ -635,7 +638,7 @@ export default function ThighWorkspace({
                     {t("제외")}
                   </button>
                 </div>
-                <ImagePreview analysis={analysis} id={file.id} compact />
+                <ImagePreview analysis={analysis} solutionId={solutionId} id={file.id} compact />
                 <div className="review-case-details">
                   <span title={file.name}>{seriesLabel(file)}</span>
                   <small>

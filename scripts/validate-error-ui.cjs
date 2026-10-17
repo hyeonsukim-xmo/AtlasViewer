@@ -19,7 +19,7 @@ ipcMain.handle=(channel,handler)=>original(channel,async(event,...args)=>{
  const op=channel.replace('exmo:imaging:','');let value;
  if(op==='status')value={reviewAvailable:true,estimationAvailable:true,device:'CPU'};
  else if(op==='list')value=[];
- else if(op==='results')value=args[0]==='ct'?cases:[];
+ else if(op==='results')value=['ct','exmo.thigh.ct'].includes(args[0])?cases:[];
  else if(op==='job')value=null;
  else if(op==='sceneFailure'){failures.push(args);value=diagnose(Object.assign(Error('renderer'),{reference:args[2],diagnosticCode:args[1]}),{stage:'3D display',caseId:args[0],logRoot:output});}
  else if(op==='resultPreview'){
@@ -40,7 +40,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));const deadline=setTimeout(()=>a
  if(wc.isLoading())await new Promise(r=>wc.once('did-finish-load',r));
  const run=fn=>wc.executeJavaScript(`(${fn})()`);
  const wait=async fn=>{for(let i=0;i<300;i++){if(await run(fn))return;await sleep(50);}throw Error('UI timeout: '+fn);};
- await wait(()=>document.querySelector('.protocol-table'));
+ await wait(()=>document.querySelector('.protocol-table tbody tr'));
  await run(()=>document.querySelector('.protocol-table tbody tr').click());
  await wait(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='분석 결과3'));
  await run(()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='분석 결과3').click());

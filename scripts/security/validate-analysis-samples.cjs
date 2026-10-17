@@ -24,7 +24,7 @@ async function runSamples({sourceRoot,storage,output,window,run,pick,names=Objec
     const [analysis,route,relative]=CASES[name],item=report.cases[name]={passed:false};
     try {
       const source=path.join(sourceRoot,'packages',relative);item.inputSha256=await hash(source);
-      await click('.desktop-brand');await until(()=>run('Boolean(document.querySelector(".protocol-table"))'));
+      await click('.desktop-brand');await until(()=>run('Boolean(document.querySelector(".protocol-table tbody tr"))'));
       await run(`Array.from(document.querySelectorAll('.protocol-table tbody tr')).find(row=>row.querySelector('.modality-label').textContent===${JSON.stringify({ct:'CT',mri:'MRI',xray:'X-ray'}[analysis])}).click()`);
       let result;
       if(previous){

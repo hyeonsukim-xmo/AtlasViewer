@@ -10,9 +10,10 @@ const calls=[]; let fail=false;
 const original=ipcMain.handle.bind(ipcMain);
 ipcMain.handle=(channel,handler)=>original(channel,async(event,...args)=>{
  let value;const operation=channel.replace('exmo:imaging:','');
+ if(operation==='status' && args[0]==='exmo.thigh.mri')return {ok:false,error:'Fixture MRI status failure'};
  if(operation==='status')value={reviewAvailable:true,estimationAvailable:true,device:'CPU'};
  else if(operation==='list')value=[];
- else if(operation==='results')value=args[0]==='ct'?cases:[];
+ else if(operation==='results')value=['ct','exmo.thigh.ct'].includes(args[0])?cases:[];
  else if(operation==='job')value=null;
  else if(operation==='exportResults'){calls.push(args);return fail?{ok:false,error:'Fixture export failure'}:{ok:true,value:{action:'save',count:args[1].length}};}
  else if(operation==='resultPreview')value={image:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=',index:8,count:16,view:args[1]?.view||'axial',sides:['R','L','A','P'],metadata,warnings:[]};
@@ -27,6 +28,8 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));const deadline=setTimeout(()=>a
  const run=fn=>wc.executeJavaScript(`(${fn})()`);
  const wait=async fn=>{for(let i=0;i<150;i++){if(await run(fn))return;await delay(50);}throw Error('UI timeout: '+fn);};
  await wait(()=>document.querySelector('button[aria-label="CT 허벅지 근육 분석"]'));
+ await wait(()=>document.querySelector('.protocol-table [role="alert"]')?.textContent.includes('Fixture MRI status failure'));
+ assert.equal(await run(()=>document.querySelectorAll('.recent-section tbody tr').length),6,'One failed solution does not hide healthy results');
  await run(()=>document.querySelector('button[aria-label="CT 허벅지 근육 분석"]').click());
  await wait(()=>[...document.querySelectorAll('button')].some(e=>e.textContent==='분석 결과6'));
  await run(()=>[...document.querySelectorAll('button')].find(e=>e.textContent==='분석 결과6').click());
@@ -36,6 +39,7 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));const deadline=setTimeout(()=>a
  await run(()=>[...document.querySelectorAll('button')].find(e=>e.textContent.startsWith('선택 결과 Excel')).click());
  await wait(()=>document.querySelector('.export-notice'));
  assert.deepEqual(calls[0][1],cases.map(r=>r.id));
+ assert.equal(calls[0][0],'exmo.thigh.ct');
  await run(()=>document.querySelector('.results-list tbody input').click());
  assert.ok(await run(()=>document.querySelector('.result-select-all input').indeterminate));
  fail=true;

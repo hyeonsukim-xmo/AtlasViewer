@@ -1,6 +1,11 @@
 import type { Group } from "../../app/anatomy";
 import type { Diagnostic } from './diagnostics';
 export type Analysis = "ct" | "mri" | "xray";
+export type Solution = {
+  id: string; analysis: Analysis; workflowId: string; name: string;
+  protocol: string; output: string; input: string; routes: string[]; runtimes: string[];
+};
+export type SolutionIdentity = {solutionId?: string; workflowId?: string};
 export type Reply<T> = { ok: true; value: T } | { ok: false; error: string; diagnostic?:Diagnostic };
 export type ModelStatus = {
   importProgress?: ImportProgress | null;
@@ -33,7 +38,7 @@ export type Classification = {
   confidence: number;
   probabilities: Record<string, number>;
 };
-export type ImportProgress = {
+export type ImportProgress = SolutionIdentity & {
   analysis: Analysis;
   completed: number;
   total: number;
@@ -42,7 +47,7 @@ export type ImportProgress = {
   failed: number;
   rows?: ImagingFile[];
 };
-export type ImagingFile = {
+export type ImagingFile = SolutionIdentity & {
   deferredValidation?: boolean;
   id: string;
   name: string;
@@ -101,7 +106,13 @@ export type MetricRow = {
     flags: string[];
   };
 };
-export type AnalysisResult = {
+export type AnalysisResult = SolutionIdentity & {
+  resultSchema?: string;
+  originStoreId?: string;
+  originResultId?: string;
+  analysisRevision?: string;
+  provenance?: {adapter: string; source: string};
+  identityDiagnostic?: Diagnostic;
   id: string;
   inputId: string;
   analysis: Analysis;
@@ -156,7 +167,7 @@ export type AnalysisResult = {
   seconds: number;
   createdAt: string;
 };
-export type Job = {
+export type Job = SolutionIdentity & {
   elapsedSeconds?: number;
   resultRevision?: number;
   active?: { id: string; name: string; stage: string; progress: number | null; lane: "waiting" | "prepare" | "gpu" | "cpu" }[];
@@ -178,32 +189,33 @@ declare global {
     exmoDesktop: {
       licenseStatus(): Promise<LicenseStatus>;
       manageLicense(): Promise<LicenseStatus>;
-      exportResults(analysis: Analysis, ids: string[], language: "ko" | "en"): Promise<Reply<{action: "save" | "cancel"; count?: number}>>;
+      exportResults(analysis: string, ids: string[], language: "ko" | "en"): Promise<Reply<{action: "save" | "cancel"; count?: number}>>;
       imageMenu(payload: { image: string; filename: string; language: "ko" | "en"; source: {kind: "input" | "result"; id: string} }): Promise<Reply<{action: "save" | "copy" | "cancel" | "mapping"}>>;
       onImportProgress(callback: (progress: ImportProgress) => void): () => void;
-      status(analysis: Analysis): Promise<Reply<ModelStatus>>;
-      list(analysis: Analysis): Promise<Reply<ImagingFile[]>>;
-      results(analysis: Analysis): Promise<Reply<AnalysisResult[]>>;
+      solutions(): Promise<Reply<Solution[]>>;
+      status(analysis: string): Promise<Reply<ModelStatus>>;
+      list(analysis: string): Promise<Reply<ImagingFile[]>>;
+      results(analysis: string): Promise<Reply<AnalysisResult[]>>;
       chooseFiles(
-        analysis: Analysis,
+        analysis: string,
         folder?: boolean,
         language?: "ko" | "en",
       ): Promise<Reply<ImagingFile[]>>;
-      preview(analysis: Analysis, id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
+      preview(analysis: string, id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
       resultPreview(id: string, options?: PreviewOptions): Promise<Reply<Preview>>;
       sceneFailure(id: string, code: string, reference: string): Promise<Reply<Diagnostic>>;
       run(
-        analysis: Analysis,
+        analysis: string,
         ids: string[],
         confirmedIds: string[],
         device: string,
       ): Promise<Reply<Job>>;
       job(): Promise<Reply<Job | null>>;
       assignXrayStudy(inputIds: string[], study: { patientId: string; studyDate: string; patientIssuer: string }): Promise<Reply<void>>;
-      assignPatientStudy(analysis: Analysis, inputIds: string[], study: {patientId: string; patientIssuer: string; studyDate?: string} | null): Promise<Reply<void>>;
+      assignPatientStudy(analysis: string, inputIds: string[], study: {patientId: string; patientIssuer: string; studyDate?: string} | null): Promise<Reply<void>>;
       variant(id: string, variant: string): Promise<Reply<AnalysisResult>>;
-      cancel(analysis: Analysis): Promise<Reply<void>>;
-      clear(analysis: Analysis): Promise<Reply<void>>;
+      cancel(analysis: string): Promise<Reply<void>>;
+      clear(analysis: string): Promise<Reply<void>>;
     };
   }
 }

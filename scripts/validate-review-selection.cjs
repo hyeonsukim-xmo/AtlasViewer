@@ -13,7 +13,7 @@ ipcMain.handle=(channel,handler)=>original(channel,async(event,...args)=>{
  const operation=channel.replace('exmo:imaging:','');
  let value;
  if(operation==='status')value={reviewAvailable:true,estimationAvailable:true,device:'CPU'};
- else if(operation==='list')value=args[0]==='ct'?files:[];
+ else if(operation==='list')value=['ct','exmo.thigh.ct'].includes(args[0])?files:[];
  else if(operation==='results')value=[];
  else if(operation==='job')value=null;
  else if(operation==='run'){calls.push(args);value=null;}
@@ -62,6 +62,7 @@ const deadline=setTimeout(()=>app.exit(1),60000);
  await run(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('Segmentation 실행')).click());
  await delay(100);
  assert.deepEqual(calls[1][1],files.slice(0,5).map(f=>f.id),'Select all never pulls in unreviewed library items');
+ assert(calls.every(call=>call[0]==='exmo.thigh.ct'),'New runs carry the selected solution ID');
  fs.writeFileSync(path.join(output,'report.json'),JSON.stringify({passed:true,submittedIds:calls.map(call=>call[1])},null,2));
  console.log('PASS: explicit selection, deselection retains cards, controls isolated, HU gate, pagination persistence, exact run IDs, scoped select-all, clear selection');
  clearTimeout(deadline);app.quit();

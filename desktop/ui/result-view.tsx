@@ -286,6 +286,11 @@ export default function ResultView({
           {failureText(error || workspaceError)}
         </p>
       )}
+      {results.filter(result => result.identityDiagnostic).map(result => (
+        <p className="inline-error" role="status" key={result.id + ':identity'}>
+          {result.metadata.caseName} · {failureText('', result.identityDiagnostic)}
+        </p>
+      ))}
       {mode === 'overlay' && results.filter(result => ["failed", "interrupted"].includes(result.meshState || "")).map(result => (
         <p className="inline-error" role="status" key={result.id}>
           {result.metadata.caseName} · {result.meshDiagnostic ? failureText('', result.meshDiagnostic)

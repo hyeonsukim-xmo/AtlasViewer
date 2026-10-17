@@ -15,7 +15,10 @@ const { createPatientAssignments } = require("./patient-assignments.cjs");
 const { createSourceMetadata } = require("./source-metadata.cjs");
 const { diagnose, workerError, userError } = require('./diagnostics.cjs');
 
-function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette, analysisAuthorization, artifactStorage }) {
+const {solutions, resolveSolution, solutionFields, matchesSolution} = require('./solutions.cjs');
+const {createResultIdentities} = require('./result-identities.cjs');
+
+function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette, analysisAuthorization, artifactStorage, originStoreId }) {
   if (analysisAuthorization !== undefined && typeof analysisAuthorization?.authorize !== "function")
     throw userError("분석 권한 확인 모듈을 초기화하지 못했습니다.");
   async function authorize(runId, engine, signal) {
@@ -30,6 +33,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   const exportIdentities = createExportIdentities(storageRoot);
   const patientAssignments = createPatientAssignments(storageRoot);
   const sourceMetadata = createSourceMetadata(storageRoot);
+  const identities = createResultIdentities(storageRoot, originStoreId);
   const channels = [],
     files = new Map(),
     results = new Map();
@@ -87,7 +91,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   const python = (name) => path.join(engineRoot, "envs", name, "Scripts", "python.exe");
   const available = (analysis) =>
     fs.existsSync(path.join(engineRoot, "verified-packages.json")) &&
-    (analysis === "xray" ? ["ct", "ap", "lat"] : ["ct", analysis]).every((name) =>
+    resolveSolution(analysis).runtimes.every((name) =>
       fs.existsSync(python(name)) || (fs.existsSync(path.join(engineRoot,'python','python.exe')) && fs.existsSync(path.join(engineRoot,'envs',name,'Lib','site-packages'))),
     );
   const studyAssignmentsPath = path.join(storageRoot, "xray-studies.json");
@@ -105,6 +109,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     id,
     name,
     analysis,
+    solutionId,
+    workflowId,
     metadata,
     sourceProof,
     classification,
@@ -114,7 +120,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     warnings,
     error,
     diagnostic,
-  }) => withStudy({ id, name, analysis, metadata: metadata ? {...metadata,
+  }) => withStudy({ id, name, analysis, ...solutionFields({analysis, solutionId, workflowId}), metadata: metadata ? {...metadata,
     studyUid: metadata.studyUid || sourceProof?.study_uid, seriesUid: metadata.seriesUid || sourceProof?.series_uid} : metadata,
     classification, confirmation, ready, deferredValidation, warnings, error, diagnostic });
   function publishImport(rows = []) {
@@ -193,11 +199,31 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     catalogQueue = task.catch(() => {});
     return task;
   }
+  async function publicSummary(result) {
+    const summary = {...result.summary, ...solutionFields(result.summary)};
+    // Identity migration is additive: a storage error must not hide a completed analysis.
+    delete summary.originStoreId; delete summary.originResultId; delete summary.analysisRevision;
+    delete summary.identityDiagnostic;
+    try {Object.assign(summary, await identities.get(result));}
+    catch (error) {summary.identityDiagnostic = diagnostic(error, '결과 식별 정보', 'RESULT_IDENTITY', summary.id);}
+    return withStudy(summary);
+  }
+  function getResult(id) {
+    const result = results.get(id);
+    if (result) {
+      const fields = solutionFields(result.summary);
+      if (!matchesSolution(result.record, fields.solutionId)) throw userError('결과의 솔루션과 입력 경로가 일치하지 않습니다.');
+    }
+    return result;
+  }
   function publishResult(result, expected) {
     const task = publicationQueue.then(async () => {
       const id = result.summary.id;
       // A late mesh for a previous variant must never replace the current result.
       if (expected && results.get(id) !== expected) return false;
+      result.summary = {...result.summary, ...solutionFields(result.record)};
+      result.summary = await publicSummary(result);
+      result.record = {...result.record, ...solutionFields(result.record)};
       const publication = path.join(runs, id, "published.json");
       const temporary = publication + "." + randomUUID() + ".tmp";
       await fsp.writeFile(temporary, JSON.stringify(result));
@@ -252,9 +278,9 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   function getFile(analysis, id) {
     validateAnalysis(analysis);
     const file = files.get(id);
-    if (!file || file.analysis !== analysis || !file.input)
+    if (!file || !matchesSolution(file, analysis) || !file.input)
       throw userError("이 분석 작업에 영상을 다시 추가하세요.");
-    return withStudy(file);
+    return withStudy({...file,...solutionFields(file)});
   }
   function stopWorker(message = "영상 확인 작업이 중단되었습니다. 다시 시도하세요.", code = 'ENGINE_STOPPED') {
     const old = worker;
@@ -378,6 +404,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       )
         throw userError("Desktop 분석 화면에서만 사용할 수 있습니다.");
       try {
+        if (['status','list','results','choose','preview','run','cancel','clear','exportResults','assignPatientStudy'].includes(name))
+          args[0] = resolveSolution(args[0]).analysis;
         return { ok: true, value: await action(...args) };
       } catch (error) {
         const issue = diagnostic(error, {choose:'입력 등록', preview:'영상·Overlay 표시', resultPreview:'영상·Overlay 표시', variant:'후처리', run:'분석 시작', exportResults:'결과 내보내기', imageMenu:'결과 내보내기'}[name] || name,
@@ -399,12 +427,14 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       studyUid:metadata.studyUid || record.sourceProof?.study_uid,
       seriesUid:metadata.seriesUid || record.sourceProof?.series_uid};
   }
+  handle("solutions", () => solutions);
   handle("imageMenu", payload => {
     const target = payload?.source;
     if (!target || !['input','result'].includes(target.kind)) throw new Error('Invalid image source.');
-    const publication = target.kind === 'result' ? results.get(target.id) : null;
+    const publication = target.kind === 'result' ? getResult(target.id) : null;
     const record = publication?.record || (target.kind === 'input' ? files.get(target.id) : null);
     if (!record) throw new Error('Image source not found.');
+    solutionFields(record);
     const source = sourceFor(record, publication);
     return showImageMenu(window, payload, {registry:exportIdentities,source});
   });
@@ -412,8 +442,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     validateAnalysis(analysis);
     if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string')) throw new Error('Select results to export.');
     const publications = [...new Set(ids)].map(id => {
-      const result = results.get(id);
-      if (!result || result.summary.analysis !== analysis) throw new Error('Selected result not found.');
+      const result = getResult(id);
+      if (!result || !matchesSolution(result.summary, analysis) || !matchesSolution(result.record, analysis)) throw new Error('Selected result not found.');
       return {record:result.record,summary:JSON.parse(JSON.stringify(withStudy(result.summary)))};
     });
     return exportResults(window, publications, {registry:exportIdentities,sourceFor,dialog,language});
@@ -430,14 +460,15 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   });
   handle("list", (analysis) => {
     validateAnalysis(analysis);
-    return [...files.values()].filter((f) => f.analysis === analysis).map(publicFile);
+    return [...files.values()].filter((f) => matchesSolution(f, analysis)).map(publicFile);
   });
-  handle("results", (analysis) => {
-    validateAnalysis(analysis);
-    return [...results.values()]
-      .map((r) => withStudy(r.summary))
-      .filter((r) => r.analysis === analysis)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  handle("results", async (analysis) => {
+    const summaries = [];
+    for (const result of results.values()) {
+      if (matchesSolution(result.summary, analysis) && matchesSolution(result.record, analysis))
+        summaries.push(await publicSummary(result));
+    }
+    return summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   });
   handle("assignXrayStudy", async (ids, study) => {
     if (selecting || batch?.state === "running") throw userError("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
@@ -453,7 +484,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       throw userError("유효한 촬영일을 입력하세요.");
     for (const id of ids) {
       const record = files.get(id) || [...results.values()].find(r => r.record.id === id)?.record;
-      if (record?.analysis !== "xray" || !record.metadata) throw userError("촬영 정보와 선택 영상을 확인하세요.");
+      if (!record || !matchesSolution(record, "xray") || !record.metadata) throw userError("촬영 정보와 선택 영상을 확인하세요.");
     }
     const value = { patientId: study.patientId.trim(), patientIssuer: study.patientIssuer.trim(), studyDate: date };
     const task = catalogQueue.then(async () => {
@@ -469,7 +500,10 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   handle("assignPatientStudy", async (analysis, ids, study) => {
     if (selecting || batch?.state === "running") throw userError("현재 작업을 완료하거나 취소한 뒤 실행하세요.");
     await patientAssignments.assign(analysis, ids, study,
-      id => files.get(id) || [...results.values()].find(result => result.record.id === id)?.record);
+      id => {
+        const record = files.get(id) || [...results.values()].find(result => result.record.id === id)?.record;
+        return record && matchesSolution(record, analysis) ? record : undefined;
+      });
   });
   handle("choose", async (analysis, folder = false, language = "ko") => {
     validateAnalysis(analysis);
@@ -516,7 +550,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       }
       else sources.push(...selection.filePaths);
       if (!sources.length) throw userError("선택한 폴더에 영상 파일이 없습니다.");
-      importProgress = { analysis, completed: 0, total: sources.length, current: "", phase: "copy", failed: 0 };
+      importProgress = { analysis, ...solutionFields({analysis}), completed: 0, total: sources.length, current: "", phase: "copy", failed: 0 };
       publishImport();
       importRoot = path.join(storageRoot, "imports", randomUUID());
       const snapshots = path.join(importRoot, "snapshots");
@@ -558,7 +592,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           } catch (error) {
             const id = randomUUID(), issue = diagnostic(error, 'extract', 'INPUT_READ', id);
             const row = {id,analysis,name:path.basename(archive),ready:false,warnings:[],error:issue.message,diagnostic:issue};
-            files.set(id,row);imported.push(row);await saveCatalog();
+            Object.assign(row,solutionFields(row));files.set(id,row);imported.push(row);await saveCatalog();
             importProgress.failed++;publishImport([row]);
           }
         }
@@ -620,6 +654,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
             row.diagnostic = diagnostic(cause, row.classification ? '촬영 방향 분류' : '입력 확인', 'INPUT_READ', row.id);
             row.error = row.diagnostic.message;
           }
+          Object.assign(row,solutionFields(row));
           files.set(row.id, row);
         }
         await saveCatalog();
@@ -680,7 +715,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     request("preview", { ...options(value), record: getFile(analysis, id) }),
   );
   handle("resultPreview", (id, value) => {
-    const result = results.get(id);
+    const result = getResult(id);
     if (!result) throw userError("완료된 결과를 선택하세요.");
     return request("preview", {
       ...options(value),
@@ -698,7 +733,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   const preparingResults = new Map();
   handle("variant", async (id, variant) => {
     if (preparingResults.has(id)) await preparingResults.get(id);
-    const prior = results.get(id);
+    const prior = getResult(id);
     if (
       !prior ||
       !(
@@ -722,7 +757,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
         queueMesh(retry);
         return retry.summary;
       }
-      return prior.summary;
+      return publicSummary(prior);
     }
     const task = (async () => {
       const result = await request("finalize", {
@@ -915,6 +950,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     batch = {
       id: randomUUID(),
       analysis,
+      ...solutionFields({analysis}),
       state: "running",
       current: "",
       stage: "대기",
@@ -973,10 +1009,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     await cancel(analysis);
     await request("clear");
     for (const [id, file] of files) {
-      if (file.analysis !== analysis) continue;
+      if (!matchesSolution(file, analysis)) continue;
       files.delete(id);
       if (
         file.input &&
+        ![...files.values()].some(other => other.input && path.dirname(other.input) === path.dirname(file.input)) &&
         ![...results.values()].some((result) => path.dirname(result.record.input) === path.dirname(file.input))
       ) {
         const directory = path.dirname(file.input);
@@ -987,7 +1024,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
   });
   return {
     mesh(id) {
-      const result = results.get(id);
+      const result = getResult(id);
       return result?.mesh && inside(result.mesh) ? result.mesh : null;
     },
     async dispose() {

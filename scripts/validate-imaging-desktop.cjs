@@ -151,7 +151,7 @@ const deadline = setTimeout(() => {
     }
   });
   await sleep(150);
-  await wait(() => document.querySelector(".protocol-table"));
+  await wait(() => document.querySelector(".protocol-table tbody tr"));
   assert.equal(await run(() => typeof window.require), "undefined");
   assert.equal(
     await run(() => document.body.textContent.includes("어떤 영상으로 분석할까요")),
@@ -652,7 +652,7 @@ const deadline = setTimeout(() => {
   await click("← 결과 목록으로");
   await wait(() => document.querySelector(".desktop-workspace:not([hidden]) .results-list"));
   await click("← 분석 선택으로");
-  await wait(() => document.querySelector(".protocol-table"));
+  await wait(() => document.querySelector(".protocol-table tbody tr"));
   await run(() => document.querySelector(".desktop-brand").click());
   await run(() => document.querySelector('button[aria-label="X-ray 허벅지 근육 분석"]').click());
   await wait(() =>

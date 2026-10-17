@@ -99,7 +99,7 @@ async function checkResultPolling() {
   for(const [next,pending,key,expected] of [[null,'old:raw','',1],[{...job,analysis:'mri'},'old:pp500','',1],
       [job,'','batch:complete:0:1',1],[job,'','batch:complete:0:2',0]]) {
     let calls=0,updates=0,release;const timers=new Set();
-    const context={analysis:'ct',visible:true,running:false,pendingMeshes:pending,receivedCompletion:{current:key},
+    const context={analysis:'ct',scope:'ct',visible:true,running:false,pendingMeshes:pending,receivedCompletion:{current:key},
       unwrap:reply=>reply.value,setJob(){},setError:assert.fail,setResults(){updates++;},
       setTimeout(fn){timers.add(fn);return fn;},clearTimeout(fn){timers.delete(fn);},
       window:{exmoDesktop:{job:async()=>({value:next}),results:()=>{
@@ -122,18 +122,35 @@ async function until(predicate) {
   const deadline=Date.now()+5000;
   while (!await predicate()) { assert.ok(Date.now()<deadline,'Timed out'); await tick(); }
 }
+async function sharedInputIsolation() {
+  const catalog=path.join(storageRoot,'library.json'), original=fs.readFileSync(catalog);
+  const directory=path.join(storageRoot,'shared-inputs');fs.mkdirSync(directory);
+  const current={...record,id:'current',input:path.join(directory,'current.nrrd')};
+  const future={...record,id:'future',solutionId:'exmo.future.ct',input:path.join(directory,'future.nrrd')};
+  fs.writeFileSync(current.input,'current');fs.writeFileSync(future.input,'future');
+  fs.writeFileSync(catalog,JSON.stringify([current,future]));
+  const {backend,call}=install();
+  try {
+    await call('clear','exmo.thigh.ct');
+    assert.equal(fs.readFileSync(future.input,'utf8'),'future','Clearing one solution must retain another solution\'s shared input directory');
+    assert.deepEqual(JSON.parse(fs.readFileSync(catalog)).map(row=>row.id),['future']);
+  } finally {await backend.dispose();fs.writeFileSync(catalog,original);}
+  console.log('PASS: clearing one solution retains inputs referenced by another solution');
+}
 async function run(meshFailure=false,cancel=false) {
   failMesh=meshFailure; releaseMesh=undefined;
   const {backend,call}=install();
   try {
     const prior=new Set((await call('results','ct')).map(r=>r.id));
-    await call('run','ct',['one'],[],'cpu');
+    await call('run','exmo.thigh.ct',['one'],[],'cpu');
     await until(()=>releaseMesh);
     const job=await call('job');
     assert.equal(job.state,'running'); assert.equal(job.completed.length,1);
     const result=(await call('results','ct')).find(r=>!prior.has(r.id));
     assert.equal(result.meshState,'pending'); assert.equal(result.meshBytes,null);
     assert.ok(result.timings.ready >= 0);
+    assert.equal(result.solutionId,'exmo.thigh.ct');assert.ok(result.analysisRevision);
+    assert.equal(result.provenance.source,'solution-registry');
     const published=path.join(storageRoot,'runs',result.id,'published.json');
     assert.equal(JSON.parse(fs.readFileSync(published)).summary.meshState,'pending');
     assert.ok((await call('resultPreview',result.id,{})).image);
@@ -143,6 +160,7 @@ async function run(meshFailure=false,cancel=false) {
     if (cancel) await call('cancel','ct'); else releaseMesh();
     await until(async()=> (await call('job')).state!=='running');
     const done=(await call('results','ct')).find(r=>r.id===result.id);
+    assert.equal(done.analysisRevision,result.analysisRevision,'Mesh completion or failure keeps the measurement revision');
     assert.equal(done.meshState,cancel?'interrupted':meshFailure?'failed':'ready');
     if (meshFailure || cancel) {
       assert.equal(done.meshDiagnostic.code,cancel?'CANCELLED':'MESH_BUILD');
@@ -302,6 +320,7 @@ async function authorizeMriWorker() {
 (async()=>{
   try {
     await checkResultPolling();
+    await sharedInputIsolation();
     await run(); await run(true); await run(false,true);
     await runAuthorization();
     await rejectInvalidGrants();
@@ -321,6 +340,11 @@ async function authorizeMriWorker() {
     finally {await backend.dispose();}
     // A retried mesh must not overwrite a newer variant when it finishes late.
     saved.summary.analysis='mri'; saved.summary.qc={}; saved.record.analysis='mri';
+    // This fixture becomes a different analysis, not a migration of the CT snapshot.
+    for (const value of [saved.summary,saved.record]) {
+      value.solutionId='exmo.thigh.mri';value.workflowId='thigh-mri-water-v1';
+    }
+    fs.unlinkSync(path.join(storageRoot,'runs',directory,'identity.json'));
     fs.mkdirSync(path.join(saved.result,'raw'),{recursive:true});
     fs.writeFileSync(path.join(saved.result,'raw/metrics.json'),JSON.stringify({classes:[]}));
     fs.writeFileSync(published,JSON.stringify(saved));

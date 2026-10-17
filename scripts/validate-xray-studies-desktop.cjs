@@ -148,8 +148,8 @@ const timeout = setTimeout(() => {
     }));
   };
   handle("status", () => ({ reviewAvailable: true, estimationAvailable: true, device: "GPU" }));
-  handle("list", (analysis) => (analysis === "xray" ? files : []));
-  handle("results", (analysis) => (analysis === "xray" ? results : []));
+  handle("list", (analysis) => (["xray","exmo.lower-extremity.xray"].includes(analysis) ? files : []));
+  handle("results", (analysis) => (["xray","exmo.lower-extremity.xray"].includes(analysis) ? results : []));
   handle("job", () => job);
   handle("run", (_, ids) => {
     runIds = ids;

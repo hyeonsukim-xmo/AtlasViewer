@@ -28,6 +28,7 @@ function openResultStorage(directory,safeStorage) {
   return {
     bootstrap(root){return value?{root,key:value.key}:undefined;},
     ready(){return Boolean(value);},
+    id(){const id=JSON.parse(read(marker)).id;P.id(id);return id;},
     hasRecovery(){try{return Boolean(value?.recoveryDigest) && M.hash(read(path.join(directory,'result-recovery.json')))===value.recoveryDigest;}catch{return false;}},
     async restore(token,issuer,identity,unwrap){
       P.check(!value,'이미 열리는 결과 키는 복구 파일로 덮어쓰지 않습니다.');

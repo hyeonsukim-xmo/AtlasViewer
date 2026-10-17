@@ -1,6 +1,6 @@
 # 솔루션별 제품화 구현·검증 계획
 
-기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 아래 파일명 중 **신규**는 제안 경로이고 아직 구현하지 않았다. 체크 항목은 계획이며 통과 표시가 아니다. 이번 작업은 문서와 독립 HTML 모형만 만든다.
+기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID를 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md)을 따른다. 아래 P2~P8과 acceptance matrix 전체가 완료된 것은 아니다.
 
 ## 1. 작업 범위와 보존 대상
 
@@ -21,7 +21,7 @@
 | 영역 | 기존 경로 | 필요한 변경/신규 경계 |
 | --- | --- | --- |
 | 솔루션 목록 | `desktop/ui/main.tsx`, `desktop/ui/imaging.ts` | 고정 분석 목록 → registry 조회. `analysis`는 modality 의미 유지, solution/workflow ID 추가 |
-| Registry | 신규 `desktop/solutions.cjs`와 데이터 JSON | 승인된 built-in adapter·입력·결과 계약·dependency 매핑; 서버 데이터로 임의 코드 실행 금지 |
+| Registry | `desktop/solutions.cjs` (P1 구현) | 승인된 built-in adapter·입력·결과 계약·dependency 매핑; 별도 JSON 없이 고정 목록 유지; 서버 데이터로 임의 코드 실행 금지 |
 | 홈/설치/상태 | `desktop/ui/main.tsx`, `license-status.tsx`, `workspace.css` | clinical table 유지, 상품 상태/설치/로그인/게시 분리. 상태 로딩은 항목별 실패 처리 |
 | 실행/읽기 | `desktop/imaging.cjs`, `imaging-worker.py`, `model-runner.py`, `runtime_bootstrap.py` | main이 solution을 adapter/model로 해석. `variant/finalize/queueMesh`를 새 Mask 계산과 확정 결과 표시로 구분. reader runtime 독립. 기존 runner 계산 함수 유지 |
 | 허가 | `desktop/security/license-protocol.cjs`, `license-client.cjs`, `runtime.cjs`, `model-package.cjs` | v3 파서·개별 entitlement·정확한 recipe/model 결합. v2를 별도 호환 경로로 유지 |
@@ -30,7 +30,7 @@
 | 패키지 | `scripts/security/package.cjs`, `payload.cjs`, `desktop/security/payload.cjs`, `main.cjs` | 선택형 signed manifest, dependency closure, staging/journal, use-before-verify 방지 |
 | 로그인 | 신규 `desktop/security/account.cjs`, `desktop/ui/account.tsx` | main OIDC flow·OS 보호 token, renderer에는 계정 DTO만. license client와 수명 분리 |
 | IPC | `desktop/preload.cjs`, `desktop/ui/imaging.ts` | 좁은 solution/install/account/publish API. 기존 origin/frame/입력 검증 유지 |
-| 결과 계약 | 신규 `desktop/result-publication.cjs` | 안정된 origin/revision snapshot·contentDigest·allowlist. 원문 identity와 전송 manifest 분리. 대표 영상 privacyReview는 최종 사본 hash에 결합 |
+| 결과 계약 | `desktop/result-identities.cjs` (P1 구현), 게시 snapshot은 P5 | 로컬 origin/revision은 구현. 원문 contentDigest·게시 allowlist·전송 manifest·최종 사본 privacyReview는 P5 |
 | 전송 | 신규 `desktop/sync.cjs`와 전용 outbox 저장소 | 게시자/org/origin 고정, 현재 uploader와 attemptId 분리. 재개/재암호화/취소/CAS; imaging 실행 queue와 독립 |
 | 로컬 보호 | `desktop/security/result-storage.cjs`, `artifact_store.py` | 기존 읽기/복구 보존. 게시용 키 wrapping을 추가하되 전체 로컬 DEK를 공개하지 않음 |
 | 서버 | 신규 서버 패키지(배치 경로는 구현 시 확정) | OIDC 검증, org/ACL, 결과 DB/object store, mask worker 격리, 감사/운영 |

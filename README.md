@@ -20,8 +20,10 @@ contains neither the Desktop analysis UI nor its Python runtime/model files.
 
 [Solution productization and result-sharing design](docs/EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)
 specifies one Desktop app with PC/YubiKey-bound solution entitlements, selective installation,
-account-based institution result sharing, and read-only Web/tablet access. This is a design,
-not implemented product behavior. See the [implementation and acceptance plan](docs/EXMO_SOLUTION_PRODUCTIZATION_PLAN.md)
+account-based institution result sharing, and read-only Web/tablet access. The first implementation
+adds the built-in solution registry and persistent local result identities; account login, selective
+installation and server publishing remain planned. See the [P1 implementation record](docs/EXMO_SOLUTION_P1_IMPLEMENTATION.md),
+[implementation and acceptance plan](docs/EXMO_SOLUTION_PRODUCTIZATION_PLAN.md)
 and the [standalone home-screen prototype](docs/prototypes/solution-home.html).
 
 [Desktop licensing and model protection design](docs/EXMO_DESKTOP_SECURITY_DESIGN.md)

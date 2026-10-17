@@ -15,6 +15,7 @@ test('result recovery survives a lost PC key, binds destination, and never overw
  store.recovery(M.sign({schema:'exmo-result-recovery-v1',binding,recoveryPublicKey:institution.publicKey.export({type:'spki',format:'pem'})},issuer.privateKey),issuer.publicKey,binding);
  assert.equal(store.hasRecovery(),true);
  const envelope=JSON.parse(fs.readFileSync(path.join(root,'result-recovery.json')));
+ assert.equal(store.id(),envelope.id);
  const plain=crypto.privateDecrypt({key:institution.privateKey,oaepHash:'sha256'},P.decode(envelope.wrappedKey));assert.equal(plain.toString('base64url'),secret);
  const identity={installationId:'new',modelKeyPublicKey:pc.publicKey.export({type:'spki',format:'pem'})};
  const claims={schema:'exmo-result-restore-v1',id:envelope.id,installationId:identity.installationId,recipient:P.fingerprint(pc.publicKey),wrappedKey:crypto.publicEncrypt({key:pc.publicKey,oaepHash:'sha256'},plain).toString('base64url')};plain.fill(0);
@@ -22,8 +23,10 @@ test('result recovery survives a lost PC key, binds destination, and never overw
  await assert.rejects(store.restore(token,issuer.publicKey,identity,unwrap));
  fs.writeFileSync(path.join(root,'results-key.bin'),'broken');
  const restored=openResultStorage(root,safeStorage);assert.equal(restored.ready(),false);
+ assert.equal(restored.id(),envelope.id,'Loss of the wrapping key does not change the origin store');
  await assert.rejects(restored.restore(token,issuer.publicKey,{...identity,installationId:'wrong'},unwrap));
  await restored.restore(token,issuer.publicKey,identity,unwrap);assert.equal(restored.bootstrap('unused').key,secret);
+ assert.equal(restored.id(),envelope.id);
  assert.equal(openResultStorage(root,safeStorage).bootstrap('unused').key,secret);assert.equal(restored.hasRecovery(),false);
 });
 test('RSA outer JWE binds context, rejects tampering, and uses the platform unwrap callback',async()=>{

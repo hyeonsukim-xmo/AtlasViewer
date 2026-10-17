@@ -31,6 +31,7 @@ import {
 } from "./xray-studies";
 
 type Props = {
+  solutionId?: string;
   files: ImagingFile[];
   results: AnalysisResult[];
   job: Job | null;
@@ -536,7 +537,7 @@ export default function XrayWorkspace(p: Props) {
                     {xrayView(preview) ? viewLabel(xrayView(preview)!) : t("방향 확인 필요")}
                   </span>
                 </div>
-                <ImagePreview key={preview.id} analysis="xray" id={preview.id} />
+                <ImagePreview key={preview.id} solutionId={p.solutionId} analysis="xray" id={preview.id} />
                 {preview.error && <p className="inline-error">{failureText(preview.error, preview.diagnostic)}</p>}
                 {preview.warnings.map((warning) => (
                   <p className="muted-note" key={warning}>
@@ -599,7 +600,7 @@ export default function XrayWorkspace(p: Props) {
                   <strong title={file.name}>{seriesLabel(file)}</strong></label>
                 <span>{stateOf(file)}</span>
               </div>
-              {file.metadata ? <LazyXrayPreview id={file.id} /> : <p>{t("입력 검토 필요")}</p>}
+              {file.metadata ? <LazyXrayPreview solutionId={p.solutionId} id={file.id} /> : <p>{t("입력 검토 필요")}</p>}
               <div className="review-case-details">
                 {file.error && <p className="inline-error">{failureText(file.error, file.diagnostic)}</p>}
                 {file.warnings.map(warning => <p className="muted-note" key={warning}>{t(warning)}</p>)}
@@ -767,7 +768,7 @@ export default function XrayWorkspace(p: Props) {
     </section>
   );
 }
-function LazyXrayPreview({id}: {id: string}) {
+function LazyXrayPreview({id, solutionId}: {id: string; solutionId?: string}) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -781,6 +782,6 @@ function LazyXrayPreview({id}: {id: string}) {
     return () => observer.disconnect();
   }, []);
   return <div className="xray-lazy-preview" ref={ref}>
-    {visible ? <ImagePreview analysis="xray" id={id} compact /> : <div className="clinical-empty">{t("영상 미리보기")}</div>}
+    {visible ? <ImagePreview analysis="xray" solutionId={solutionId} id={id} compact /> : <div className="clinical-empty">{t("영상 미리보기")}</div>}
   </div>;
 }

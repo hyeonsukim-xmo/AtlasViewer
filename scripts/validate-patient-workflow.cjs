@@ -12,8 +12,8 @@ const original=ipcMain.handle.bind(ipcMain);
 ipcMain.handle=(channel,handler)=>original(channel,async(event,...args)=>{
  const operation=channel.replace('exmo:imaging:','');let value;
  if(operation==='status')value={reviewAvailable:true,estimationAvailable:true,device:'CPU'};
- else if(operation==='list')value=args[0]==='ct'?files:[];
- else if(operation==='results')value=args[0]==='ct'?saved:[];
+ else if(operation==='list')value=['ct','exmo.thigh.ct'].includes(args[0])?files:[];
+ else if(operation==='results')value=['ct','exmo.thigh.ct'].includes(args[0])?saved:[];
  else if(operation==='job')value=null;
  else if(operation==='run'){runs.push(args);value=null;}
  else if(operation==='assignPatientStudy'){assignments.push(args);files=files.map(file=>args[1].includes(file.id)?{...file,metadata:{...file.metadata,patientId:args[2].patientId,patientIssuer:args[2].patientIssuer,patientAssigned:true}}:file);}
@@ -89,7 +89,7 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms)),deadline=setTimeout(()=>app.exi
  await run(()=>{const input=document.querySelector('.patient-assignment label input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'00099');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await run(()=>document.querySelector('.patient-assignment form').requestSubmit());
  await wait(()=>!document.querySelector('.patient-assignment'));
- assert.deepEqual(assignments[0],['ct',files.slice(0,6).map(f=>f.id),{patientId:'00099',patientIssuer:'Clinic',studyDate:''}]);
+ assert.deepEqual(assignments[0],['exmo.thigh.ct',files.slice(0,6).map(f=>f.id),{patientId:'00099',patientIssuer:'Clinic',studyDate:''}]);
  assert.ok(await run(()=>document.querySelector('.grouped-review .patient-level strong').textContent.includes('00099')));
  assert.equal(await run(()=>document.querySelectorAll('.grouped-review .date-level').length),2);
  // A new published result archives the entire study, but not the patient's other date.

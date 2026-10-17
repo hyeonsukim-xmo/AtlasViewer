@@ -262,7 +262,7 @@ const deadline = setTimeout(() => {
     assert.ok((await counts()).all, "Select all works with the keyboard");
     report[name] = { initial, final: await counts() };
   }
-  await wait(() => document.querySelector(".protocol-table"));
+  await wait(() => document.querySelector(".protocol-table tbody tr"));
   const start = performance.now();
   await run(() => document.querySelector('button[aria-label="CT 허벅지 근육 분석"]').click());
   await wait(() => document.querySelector(".desktop-workspace:not([hidden]) .medical-image img"));

@@ -52,6 +52,7 @@ let backendMessages = 0;
 const backendExceptions = new Set(["DICOM 폴더", "영상 파일", " · 미분류"]);
 for (const file of [
   "desktop/imaging.cjs",
+  "desktop/solutions.cjs",
   "desktop/imaging-worker.py",
   "desktop/classifier-worker.py",
 ]) {

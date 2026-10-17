@@ -1,74 +1,57 @@
 import { t, useLanguage, localeTag } from "./language";
+import {failureText} from "./diagnostics";
 import LanguageSelect from "./language-select";
 import LicenseStatusButton from "./license-status";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import Home from "../../app/page";
-import ThighWorkspace, { type Analysis } from "./thigh-workspace";
-import { unwrap, type AnalysisResult, type ModelStatus } from "./imaging";
+import ThighWorkspace from "./thigh-workspace";
+import { unwrap, type AnalysisResult, type ModelStatus, type Solution } from "./imaging";
 import "../../app/globals.css";
 import "./workspace.css";
 import { groupXrays, studyIdentity, xrayView, viewLabel } from "./xray-studies";
-
-const analyses = [
-  {
-    id: "ct",
-    name: "CT",
-    protocol: "3D CT · HU",
-    output: "Volume · HU fat-range · 3D",
-    input: "DICOM / NRRD / NIfTI",
-  },
-  {
-    id: "mri",
-    name: "MRI",
-    protocol: "3D Water sequence",
-    output: "Volume · TTA / QC · 3D",
-    input: "DICOM / NRRD / NIfTI",
-  },
-  {
-    id: "xray",
-    name: "X-ray",
-    protocol: "AP / LAT-LT / LAT-RT",
-    output: "Projection area · Overlay",
-    input: "NRRD · DICOM 방향 확인",
-  },
-] as const;
 
 function Desktop() {
   const language = useLanguage();
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
-  const [view, setView] = useState<Analysis | "home" | "demo">(
-    location.hash === "#xray" ? "xray" : "home",
+  const [view, setView] = useState<string>(
+    location.hash === "#xray" ? "exmo.lower-extremity.xray" : "home",
   );
-  const [status, setStatus] = useState<Partial<Record<Analysis, ModelStatus>>>({});
+  const [analyses, setAnalyses] = useState<Solution[]>([]);
+  const [catalogError, setCatalogError] = useState("");
+  const [status, setStatus] = useState<Record<string, ModelStatus>>({});
+  const [solutionErrors, setSolutionErrors] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let stale = false;
+    window.exmoDesktop.solutions().then(unwrap).then(values => {if (!stale) setAnalyses(values);})
+      .catch(error => {if (!stale) setCatalogError(failureText(error));});
+    return () => {stale = true;};
+  }, []);
   const [recent, setRecent] = useState<AnalysisResult[]>([]);
   const [initialResult, setInitialResult] = useState<string>();
   useEffect(() => {
     if (view !== "home") return;
     let stale = false;
-    void Promise.all(
-      analyses.map(async ({ id }) => ({
-        id,
-        status: unwrap(await window.exmoDesktop.status(id)),
-        results: unwrap(await window.exmoDesktop.results(id)),
-      })),
-    )
-      .then((values) => {
-        if (stale) return;
-        setStatus(Object.fromEntries(values.map((value) => [value.id, value.status])));
-        setRecent(
-          values
-            .flatMap((value) => value.results)
-            .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-        );
-      })
-      .catch(() => {});
+    void Promise.all(analyses.map(async ({id}) => {
+      const [state, saved] = await Promise.allSettled([
+        window.exmoDesktop.status(id).then(unwrap), window.exmoDesktop.results(id).then(unwrap),
+      ]);
+      return {id, status:state.status === 'fulfilled' ? state.value : undefined,
+        results:saved.status === 'fulfilled' ? saved.value : [],
+        error:[state,saved].filter(item => item.status === 'rejected')
+          .map(item => failureText((item as PromiseRejectedResult).reason)).join('\n')};
+    })).then(values => {
+      if (stale) return;
+      setStatus(Object.fromEntries(values.filter(value => value.status).map(value => [value.id,value.status!])));
+      setSolutionErrors(Object.fromEntries(values.map(value => [value.id,value.error])));
+      setRecent(values.flatMap(value => value.results).sort((a,b) => b.createdAt.localeCompare(a.createdAt)));
+    });
     return () => {
       stale = true;
     };
-  }, [view]);
+  }, [view, analyses]);
   const recentStudies = [
     ...recent.filter(result => result.analysis !== "xray").map(result => ({ key: result.id, items: [result] })),
     ...groupXrays(recent.filter(result => result.analysis === "xray")),
@@ -96,6 +79,7 @@ function Desktop() {
         </nav>
       )}
       <main className="desktop-content">
+        {catalogError && <p className="inline-error" role="alert">{catalogError}</p>}
         {view === "home" && (
           <section className="analysis-catalog" aria-label={t("분석 선택")}>
             <div className="analysis-catalog-inner">
@@ -154,6 +138,7 @@ function Desktop() {
                               : t("준비 필요")}
                           </span>
                           <small>{status[analysis.id]?.device || "—"}</small>
+                          {solutionErrors[analysis.id] && <small className="inline-error" role="alert">{solutionErrors[analysis.id]}</small>}
                         </td>
                         <td>
                           <button
@@ -192,7 +177,7 @@ function Desktop() {
                         className="openable-row"
                         onClick={() => {
                           setInitialResult(result.id);
-                          setView(result.analysis);
+                          setView(result.solutionId || analyses.find(item => item.analysis === result.analysis)!.id);
                         }}
                       >
                         <td>
@@ -233,7 +218,8 @@ function Desktop() {
         {analyses.map((analysis) => (
           <div className="desktop-workspace" key={analysis.id} hidden={view !== analysis.id}>
             <ThighWorkspace
-              analysis={analysis.id}
+              analysis={analysis.analysis}
+              solutionId={analysis.id}
               name={analysis.name}
               visible={view === analysis.id}
               onBack={() => setView("home")}

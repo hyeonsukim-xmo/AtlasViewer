@@ -515,5 +515,11 @@
   "이 장비의 분석 권한이 회수되었습니다.": "Analysis authorization for this device has been revoked.",
   "관리자에게 장비·모델 승인을 확인하세요. 기존 결과는 계속 열람할 수 있습니다.": "Ask the administrator to check device and model approval. Existing results remain readable.",
   "이 장비가 아직 활성화되지 않았습니다.": "This device has not been activated.",
-  "상단 라이선스 메뉴에서 장비 등록과 승인을 완료하세요.": "Complete device enrollment and approval in the license menu."
+  "상단 라이선스 메뉴에서 장비 등록과 승인을 완료하세요.": "Complete device enrollment and approval in the license menu.",
+  "결과 식별 정보": "Result identity",
+  "결과의 솔루션과 입력 경로가 일치하지 않습니다.": "The result solution does not match its input workflow.",
+  "결과의 솔루션과 분석 경로가 일치하지 않습니다.": "The result solution does not match its analysis workflow.",
+  "지원하지 않는 분석 솔루션입니다. 앱 버전과 분석 작업을 확인하세요.": "This analysis solution is not supported. Check the app version and selected workflow.",
+  "결과 식별 정보를 저장하거나 확인하지 못했습니다. 측정값과 영상은 계속 열람할 수 있습니다.": "Result identity could not be saved or verified. Measurements and images remain available.",
+  "결과 폴더와 식별 파일을 삭제하지 마세요. 저장 공간·권한을 확인한 뒤 앱을 다시 실행하고, 반복되면 진단 번호를 전달하세요.": "Keep the result folder and identity files. Check storage space and permissions, restart the app, and provide the diagnostic reference if this persists."
 }

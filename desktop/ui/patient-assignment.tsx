@@ -2,10 +2,10 @@ import { failureText, type Failure } from "./diagnostics";
 import { useEffect, useRef, useState } from "react";
 import { t, useLanguage } from "./language";
 import { patientIdentifier } from "./patient-groups";
-import { unwrap, type Analysis, type ImagingFile } from "./imaging";
+import { unwrap, type ImagingFile } from "./imaging";
 
 export default function PatientAssignment({analysis, files, onClose, onSaved}: {
-  analysis: Analysis; files: ImagingFile[]; onClose: () => void; onSaved: () => Promise<void>;
+  analysis: string; files: ImagingFile[]; onClose: () => void; onSaved: () => Promise<void>;
 }) {
   useLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
