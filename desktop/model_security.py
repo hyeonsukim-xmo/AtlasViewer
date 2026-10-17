@@ -84,6 +84,18 @@ def signed(token, issuer, header):
     return exact_json(decode(parts[1]).decode('utf8'))
 
 
+def legacy_lease(lease):
+    fields(lease, 'iss aud kind binding nonce iat exp renewAfter revision sequence decision engines modelDigests')
+    require(lease['iss'] == 'exmo-license-v2' and lease['aud'] == 'exmo-desktop-v2' and lease['kind'] == 'lease' and lease['decision'] == 'allow')
+    decode(lease['nonce'], 32)
+    for key in ('iat', 'exp', 'renewAfter', 'revision', 'sequence'):
+        require(type(lease[key]) is int and 0 <= lease[key] <= 9007199254740991)
+    require(lease['revision'] > 0 and lease['sequence'] > 0 and lease['iat'] < lease['renewAfter'] <= lease['exp'] <= lease['iat'] + 7 * 86400)
+    require(isinstance(lease['engines'], list) and 0 < len(lease['engines']) <= 4 and all(e in ('ct', 'mri', 'ap', 'lat') for e in lease['engines']) and len(set(lease['engines'])) == len(lease['engines']))
+    values = lease['modelDigests']
+    require(isinstance(values, list) and len(values) <= 6 and all(isinstance(v, str) and re.fullmatch('[a-f0-9]{64}', v) for v in values) and len(set(values)) == len(values))
+
+
 def read(file, limit, stack=None):
     """Snapshot bytes; hold vendor code against replacement until this job finishes."""
     file = Path(file).absolute()
@@ -128,7 +140,8 @@ def load_policy():
         require(not PROTECTED_MRI)
         return None  # Source development only; protected packages still require a policy.
     policy = json.loads(read(file, 8192))
-    fields(policy, 'profile issuerPublicKey')
+    fields(policy, 'profile issuerPublicKey' + (' licenseVersion' if 'licenseVersion' in policy else ''))
+    require(policy.get('licenseVersion', 2) in (2, 3))
     require(policy['profile'] in ('internal', 'customer'))
     require(isinstance(policy['issuerPublicKey'], str) and len(policy['issuerPublicKey']) < 2048 and 'PRIVATE' not in policy['issuerPublicKey'])
     return policy
@@ -216,7 +229,7 @@ class ModelGuard:
 
     @property
     def issuer(self):
-        # CT/AP/LAT keep their existing environments; only MRI needs cryptography in this stage.
+        # Load signature support only when this worker needs protected admission.
         if self.policy and self._issuer is None:
             self._issuer = public(self.policy['issuerPublicKey'], 'ed25519')
         return self._issuer
@@ -247,28 +260,37 @@ class ModelGuard:
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import ec
         signing = public(authorization['installationPublicKey'], 'p256')
-        signing.verify(decode(authorization['signature']), ('EXMO/MODEL-RUN/v1/' + authorization['message']).encode(), ec.ECDSA(hashes.SHA256()))
+        v3 = self.policy.get('licenseVersion', 2) == 3
+        domain = 'EXMO/MODEL-RUN/v2/' if v3 else 'EXMO/MODEL-RUN/v1/'
+        signing.verify(decode(authorization['signature']), (domain + authorization['message']).encode(), ec.ECDSA(hashes.SHA256()))
         claims = exact_json(authorization['message'])
-        fields(claims, 'schema runId engine nonce modelDigest jobDigest leaseDigest keyDigest iat exp')
-        require(claims['schema'] == 'exmo-model-run-v1' and claims['runId'] == run_id and claims['engine'] == engine)
+        fields(claims, 'schema runId engine nonce modelDigest jobDigest leaseDigest keyDigest iat exp' + (' solutionId workflowId capability recipeDigest packageSetDigest' if v3 else ''))
+        require(claims['schema'] == ('exmo-model-run-v2' if v3 else 'exmo-model-run-v1') and claims['runId'] == run_id and claims['engine'] == engine)
         require(claims['nonce'] == pending[0] and claims['modelDigest'] == pending[1])
         require(claims['jobDigest'] == digest(canonical(job).encode()) and claims['leaseDigest'] == digest(authorization['lease'].encode()))
         lease = signed(authorization['lease'], self.issuer, LICENSE_HEADER)
-        fields(lease, 'iss aud kind binding nonce iat exp renewAfter revision sequence decision engines modelDigests')
-        require(isinstance(lease['modelDigests'], list) and len(lease['modelDigests']) <= 6 and pending[1] in lease['modelDigests'])
-        require(lease['iss'] == 'exmo-license-v2' and lease['aud'] == 'exmo-desktop-v2' and lease['kind'] == 'lease' and lease['decision'] == 'allow')
+        if v3:
+            from solution_security import execution, allowed
+            require(len(authorization['lease']) <= 128 * 1024)
+            expected = execution(job, self.engine_root, self.issuer, 'classify' if engine == 'xray-classifier' else 'analyze', pending[1])
+            require(all(claims[k] == v for k, v in expected.items()))
+            require(claims['exp'] <= allowed(lease, expected, time.time()))
+        else:
+            legacy_lease(lease)
+            require(len(authorization['lease']) <= 16384 and pending[1] in lease['modelDigests'])
         binding = lease['binding']
         fields(binding, 'profile licenseId installationId installationKey' + (' dongleKey agreementKey' if customer else ''))
         require(binding['profile'] == self.policy['profile'] and binding['installationKey'] == fingerprint(signing))
         if customer:
             dongle = public(authorization['donglePublicKey'], 'p256')
             require(fingerprint(dongle) == binding['dongleKey'])
-            dongle.verify(decode(authorization['dongleSignature']), ('EXMO/MODEL-RUN/v1/dongle/' + authorization['message']).encode(), ec.ECDSA(hashes.SHA256()))
+            dongle.verify(decode(authorization['dongleSignature']), (domain + 'dongle/' + authorization['message']).encode(), ec.ECDSA(hashes.SHA256()))
         for name in ('iat', 'exp', 'renewAfter', 'revision', 'sequence'):
             require(type(lease[name]) is int and lease[name] >= 0)
         require(lease['revision'] > 0 and lease['sequence'] > 0 and lease['iat'] < lease['renewAfter'] <= lease['exp'] <= lease['iat'] + 7 * 86400)
-        entitled = any(e in lease['engines'] for e in ('ap', 'lat')) if engine == 'xray-classifier' else ('lat' if engine.startswith('lat_') else engine) in lease['engines']
-        require(isinstance(lease['engines'], list) and entitled and set(lease['engines']) <= {'ct', 'mri', 'ap', 'lat'})
+        if not v3:
+            entitled = any(e in lease['engines'] for e in ('ap', 'lat')) if engine == 'xray-classifier' else ('lat' if engine.startswith('lat_') else engine) in lease['engines']
+            require(isinstance(lease['engines'], list) and entitled and set(lease['engines']) <= {'ct', 'mri', 'ap', 'lat'})
         require(type(claims['iat']) is int and type(claims['exp']) is int and lease['iat'] <= claims['iat'] < claims['exp'] <= min(claims['iat'] + 60, lease['exp']))
         require(claims['iat'] - 2 <= time.time() < claims['exp'])
         access = signed(authorization['access'], self.issuer, MODEL_HEADER)

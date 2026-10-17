@@ -11,12 +11,13 @@ function expiryTime(value) {
   return Date.parse(value)/1000;
 }
 function main([command,directory,...args]) {
-  P.check(['approve','extend','activation','build-config'].includes(command),
+  P.check(['approve','extend','activation','build-config','build-config-v3','solutions','solutions-dry-run','solution-status','solution-expiry'].includes(command),
     'Usage: internal-admin.cjs approve DIR REQUEST LICENSE_ID EXPIRY_UTC ct,mri,ap,lat | extend DIR LICENSE_ID EXPIRY_UTC | activation DIR LICENSE_ID OUTPUT | build-config DIR HTTPS_URL OUTPUT [--loopback-test]');
   const authority=new Authority(directory);
   try {
     P.check(authority.profile==='internal','Internal authority required');
-    if(command==='approve') {
+    if(command.startsWith('solution')) {console.log(JSON.stringify(require('./solution-admin.cjs').configure(authority,command,args)));}
+    else if(command==='approve') {
       P.check(args.length===4);
       const [requestFile,licenseId,expiry,engines]=args,request=JSON.parse(read(requestFile));
       if(request.modelKeyPublicKey)M.validateEnrollment(request);
@@ -38,10 +39,10 @@ function main([command,directory,...args]) {
     } else {
       P.check(args.length===2 || (args.length===3 && args[2]==='--loopback-test'));
       write(args[1],validateBuild({profile:'internal',issuerPublicKey:authority.publicKey.export({format:'pem',type:'spki'}),
-        serverUrl:args[0],allowLoopback:args[2]==='--loopback-test'}));
+        serverUrl:args[0],allowLoopback:args[2]==='--loopback-test',...(command==='build-config-v3'?{licenseVersion:3}:{})}));
       console.log('Exported public build trust. No private key or preapproved installation included.');
     }
   } finally {authority.close();}
 }
 if(require.main===module){try{main(process.argv.slice(2));}catch(error){console.error(error.message);process.exitCode=1;}}
-module.exports={main};
+module.exports={main,expiryTime};

@@ -822,6 +822,9 @@ def run_job(engine_root, job, protection=None):
                 "timings": dict(_context.timing["seconds"]),
                 "peak_host_process_memory_bytes": peak_host_process_memory()}
     (result / "desktop-complete.json").write_text(json.dumps(identity), encoding="utf-8")
+    if protection:
+        from result_security import complete
+        complete(result, job, _context.control.ident)
     emit("complete", result=str(result), **identity)
 
 

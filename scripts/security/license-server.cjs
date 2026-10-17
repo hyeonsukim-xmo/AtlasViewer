@@ -5,9 +5,11 @@ const path = require('node:path');
 const http = require('node:http');
 const {DatabaseSync} = require('node:sqlite');
 const P = require('../../desktop/security/license-protocol.cjs');
+const V3 = require('../../desktop/security/license-v3.cjs');
 
 class Authority {
   constructor(directory, clock = ()=>Math.floor(Date.now()/1000)) {
+    this.directory=path.resolve(directory);
     this.clock = clock;
     const settings=JSON.parse(fs.readFileSync(path.join(directory,'authority.json'),'utf8'));
     P.fields(settings,['profile']); P.check(['internal','customer'].includes(settings.profile));
@@ -25,6 +27,8 @@ class Authority {
       CREATE TABLE IF NOT EXISTS audit (at INTEGER NOT NULL, license TEXT NOT NULL, event TEXT NOT NULL, revision INTEGER NOT NULL);`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS models (digest TEXT PRIMARY KEY, status TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS model_grants (license TEXT NOT NULL, engine TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(license,engine));`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS solution_assignments (license TEXT PRIMARY KEY, document TEXT NOT NULL, ready_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS lease_expiries (license TEXT PRIMARY KEY, expires INTEGER NOT NULL);`);
     try {
       this.transaction(()=>{
         const row = this.db.prepare('SELECT fingerprint,profile FROM authority').get();
@@ -82,27 +86,62 @@ class Authority {
     return this.transaction(()=>{
       P.check(this.db.prepare('UPDATE models SET status=? WHERE digest=? RETURNING digest').get(status,digest),'Unknown model');
       this.db.prepare('UPDATE licenses SET revision=revision+1 WHERE id IN (SELECT license FROM model_grants WHERE digest=?)').run(digest);
+      if(status==='revoked')for(const row of this.db.prepare('SELECT * FROM solution_assignments').all()){
+        const doc=JSON.parse(row.document);let changed=false;
+        for(const e of doc.entitlements)if(e.executions.some(x=>x.modelDigest===digest)){
+          e.executions=e.executions.filter(x=>x.modelDigest!==digest);e.revision++;changed=true;
+        }
+        if(changed){this.db.prepare('UPDATE solution_assignments SET document=? WHERE license=?').run(JSON.stringify(doc),row.license);
+          this.db.prepare('UPDATE licenses SET revision=revision+1 WHERE id=?').run(row.license);}
+      }
       this.db.prepare('INSERT INTO audit VALUES (?,?,?,?)').run(this.clock(),'models',status+':'+digest,0);
     });
   }
-  challenge(request) {
+  solutions(licenseId,document,{dryRun=false,inTransaction=false}={}) {
+    P.id(licenseId);P.fields(document,['orgId','entitlements']);P.id(document.orgId);V3.entitlements(document.entitlements);
+    const action=()=>{
+      const row=this.db.prepare('SELECT * FROM licenses WHERE id=?').get(licenseId);P.check(row,'Unknown license');
+      const old=this.db.prepare('SELECT * FROM solution_assignments WHERE license=?').get(licenseId);
+      // Reject unissuable assignments before replacing a working lease policy, including in dry-run.
+      const max=Number.MAX_SAFE_INTEGER;
+      V3.signToken({iss:V3.ISSUER,aud:V3.AUDIENCE,kind:'lease',schema:'exmo-device-lease-v3',
+        ...document,binding:JSON.parse(row.config).binding,nonce:'A'.repeat(43),iat:max,exp:max,
+        renewAfter:max,revision:max,sequence:max,decision:'allow'},this.key);
+      if(old){const prior=JSON.parse(old.document);V3.transition({...prior,revision:row.revision},{...document,revision:row.revision+1});}
+      // Existing v2 offline leases must drain before per-product revocation becomes authoritative.
+      const readyAt=old?.ready_at??Math.max(this.clock(),this.db.prepare('SELECT expires FROM lease_expiries WHERE license=?').get(licenseId)?.expires ?? (row.sequence?this.clock()+JSON.parse(row.config).graceSeconds:0));
+      const report={licenseId,readyAt,revision:row.revision+1,solutionIds:document.entitlements.map(e=>e.solutionId),dryRun};
+      for(const e of document.entitlements)for(const x of e.executions)if(x.modelDigest!==null)
+        P.check(this.db.prepare("SELECT 1 FROM model_grants g JOIN models m ON m.digest=g.digest WHERE g.license=? AND g.engine=? AND g.digest=? AND m.status='active'").get(licenseId,x.engine,x.modelDigest),'Execution has no active model grant');
+      if(dryRun)return report;
+      this.db.prepare('INSERT INTO solution_assignments VALUES (?,?,?) ON CONFLICT(license) DO UPDATE SET document=excluded.document').run(licenseId,JSON.stringify(document),readyAt);
+      this.db.prepare('UPDATE licenses SET revision=revision+1 WHERE id=?').run(licenseId);
+      this.db.prepare('INSERT INTO audit VALUES (?,?,?,?)').run(this.clock(),licenseId,'solutions-v3',report.revision);
+      return report;
+    };
+    return inTransaction?action():this.transaction(action);
+  }
+  challenge(request,version=2) {
     P.fields(request,['binding','nonce']); P.binding(request.binding); P.nonce(request.nonce);
     P.check(request.binding.profile===this.profile,'Wrong authority profile');
     return this.transaction(()=>{
       const row = this.db.prepare('SELECT config FROM licenses WHERE id=?').get(request.binding.licenseId);
       P.check(row,'Unapproved installation');
       P.sameBinding(request.binding,JSON.parse(row.config).binding);
+      if(version===3){const assignment=this.db.prepare('SELECT ready_at FROM solution_assignments WHERE license=?').get(request.binding.licenseId);
+        P.check(assignment && this.clock()>=assignment.ready_at,'Existing v2 leases must expire before v3 activation');}
       const now = this.clock();
       this.db.prepare('DELETE FROM challenges WHERE expires<=?').run(now);
       P.check(this.db.prepare('SELECT count(*) AS count FROM challenges').get().count < 1024,'Challenge capacity exceeded');
-      const value = {iss:P.ISSUER,aud:P.AUDIENCE,kind:'challenge',binding:request.binding,nonce:request.nonce,
+      const protocol=version===3?V3:P;
+      const value = {iss:protocol.ISSUER,aud:protocol.AUDIENCE,kind:'challenge',...(version===3?{schema:'exmo-device-challenge-v3'}:{}),binding:request.binding,nonce:request.nonce,
         iat:now,exp:now+60,challengeId:crypto.randomBytes(32).toString('base64url')};
-      const token = P.signToken(value,this.key);
+      const token = protocol.signToken(value,this.key);
       this.db.prepare('INSERT INTO challenges VALUES (?,?,?)').run(value.challengeId,token,value.exp);
       return {token};
     });
   }
-  lease(request) {
+  lease(request,version=2) {
     P.fields(request,['challengeId','installationSignature',...(this.profile==='customer'?['dongleSignature']:[])]); P.nonce(request.challengeId);
     const result = this.transaction(()=>{
       const challenge = this.db.prepare('DELETE FROM challenges WHERE id=? RETURNING token,expires').get(request.challengeId);
@@ -111,19 +150,28 @@ class Authority {
       const row = this.db.prepare('SELECT * FROM licenses WHERE id=?').get(value.binding.licenseId);
       const config = JSON.parse(row.config);
       try {
+        P.check(value.iss===(version===3?V3.ISSUER:P.ISSUER),'Challenge protocol mismatch');
         P.check(this.clock() >= value.iat,'Server clock moved backwards');
         P.sameBinding(value.binding,config.binding);
         P.verifyProof(P.p256(config.installationPublicKey),'installation',challenge.token,request.installationSignature);
         if(this.profile==='customer')P.verifyProof(P.p256(config.donglePublicKey),'dongle',challenge.token,request.dongleSignature);
       } catch { return {error:'Device proof rejected'}; }
       const now = this.clock();
-      const decision = row.status !== 'active' ? row.status : config.contractEnd !== null && now >= config.contractEnd ? 'expired' : 'allow';
+      const assignment=this.db.prepare('SELECT * FROM solution_assignments WHERE license=?').get(row.id);
+      if(version===3 && !assignment)return {error:'No v3 assignment'};
+      const decision = assignment && version===2 ? 'revoked' : version===3 && now<assignment.ready_at ? 'suspended' : row.status !== 'active' ? row.status : config.contractEnd !== null && now >= config.contractEnd ? 'expired' : 'allow';
       const exp = decision === 'allow' ? Math.min(now+config.graceSeconds,config.contractEnd ?? Number.MAX_SAFE_INTEGER) : now;
-      const claims = {iss:P.ISSUER,aud:P.AUDIENCE,kind:'lease',binding:config.binding,nonce:value.nonce,iat:now,exp,
+      let claims = {iss:P.ISSUER,aud:P.AUDIENCE,kind:'lease',binding:config.binding,nonce:value.nonce,iat:now,exp,
         renewAfter:Math.min(now+config.renewSeconds,exp),revision:row.revision,sequence:row.sequence+1,
         decision,engines:decision === 'allow' ? config.engines : [],modelDigests:decision==='allow'?
           this.db.prepare("SELECT g.digest FROM model_grants g JOIN models m ON g.digest=m.digest WHERE g.license=? AND m.status='active' ORDER BY g.engine").all(row.id).map(v=>v.digest):[]};
-      const token = P.signToken(claims,this.key);
+      if(version===3){const document=JSON.parse(assignment.document);
+        const {engines,modelDigests,...base}=claims;
+        claims={...base,iss:V3.ISSUER,aud:V3.AUDIENCE,schema:'exmo-device-lease-v3',orgId:document.orgId,entitlements:decision==='allow'?document.entitlements:[]};
+        V3.validate(claims,'lease',config.binding);
+      }
+      const token = (version===3?V3:P).signToken(claims,this.key);
+      if(version===2 && decision==='allow')this.db.prepare('INSERT INTO lease_expiries VALUES (?,?) ON CONFLICT(license) DO UPDATE SET expires=max(expires,excluded.expires)').run(row.id,exp);
       this.db.prepare('UPDATE licenses SET sequence=? WHERE id=?').run(claims.sequence,row.id);
       this.db.prepare('INSERT INTO audit VALUES (?,?,?,?)').run(now,row.id,decision,row.revision);
       return {token};
@@ -142,14 +190,15 @@ function createServer(authority) {
     try {
       P.check(req.socket.remoteAddress === '127.0.0.1');
       P.check(req.headers.host === `127.0.0.1:${server.address().port}` && !req.headers.origin && !req.headers['sec-fetch-site']);
-      P.check(req.method === 'POST' && ['/v1/challenge','/v1/lease'].includes(req.url));
+      P.check(req.method === 'POST' && ['/v1/challenge','/v1/lease','/v3/challenges','/v3/leases'].includes(req.url));
+      const version=req.url.startsWith('/v3/')?3:2,protocol=version===3?V3:P;
       P.check(req.headers['content-type'] === 'application/json' && !req.headers['transfer-encoding']);
-      const size = Number(req.headers['content-length']); P.check(Number.isInteger(size) && size > 0 && size <= P.LIMIT);
+      const size = Number(req.headers['content-length']); P.check(Number.isInteger(size) && size > 0 && size <= protocol.LIMIT);
       const chunks = []; let received = 0;
       for await (const chunk of req) {received+=chunk.length; P.check(received<=size); chunks.push(chunk);}
       P.check(received === size);
-      const body = P.json(Buffer.concat(chunks).toString('utf8'));
-      const reply = req.url === '/v1/challenge' ? authority.challenge(body) : authority.lease(body);
+      const body = protocol.json(Buffer.concat(chunks).toString('utf8'));
+      const reply = req.url.includes('challenge') ? authority.challenge(body,version) : authority.lease(body,version);
       res.end(JSON.stringify(reply));
     } catch {
       res.statusCode = 400;

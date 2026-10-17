@@ -382,7 +382,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       });
     });
     const checked = task.catch(error => {
-      diagnostic(error, operation, {inspect:'INPUT_READ',extract:'INPUT_READ',preview:'OVERLAY',prepare:'INPUT_READ',finalize:'RESULT_PROCESS',model_challenge:'AUTHORIZATION'}[operation], values.record?.id || values.id);
+      diagnostic(error, operation, {inspect:'INPUT_READ',extract:'INPUT_READ',preview:'OVERLAY',prepare:'INPUT_READ',finalize:'RESULT_PROCESS',model_challenge:'AUTHORIZATION',mutation_challenge:'AUTHORIZATION',snapshot:'RESULT_INVALID'}[operation], values.record?.id || values.id);
       throw error;
     });
     queue = checked.catch(() => {});
@@ -630,7 +630,8 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
             try {
               if (analysisAuthorization?.authorizeModel) {
                 const challenge = await request('model_challenge', {runId});
-                const job = {analysis:'xray-classifier',paths,destination:inspection.destination};
+                const job = {analysis:'xray-classifier',...solutionFields({analysis:'xray'}),paths,destination:inspection.destination};
+                Object.assign(inspection,solutionFields({analysis:'xray'}));
                 inspection.authorization = await analysisAuthorization.authorizeModel({runId,job,challenge});
                 inspection.runId = runId;
               } else await authorize(runId, "xray-classifier");
@@ -760,14 +761,38 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       return publicSummary(prior);
     }
     const task = (async () => {
-      const result = await request("finalize", {
+      // A saved variant is a read; only a new calculation needs a fresh authorization.
+      const saved = await request('snapshot', {result:prior.result,variant,adopt:true});
+      if (saved) {
+        await publishResult(saved);
+        queueMesh(saved);
+        return saved.summary;
+      }
+      const values = {
         id,
         variant,
         record: prior.record,
         result: prior.result,
         createdAt: prior.summary.createdAt,
         deferMesh: true,
-      });
+      };
+      if (analysisAuthorization) {
+        if (!analysisAuthorization.authorizeMutation) throw userError('새 후처리의 실행 권한을 확인하지 못했습니다.', 'AUTHORIZATION');
+        const fixed = await request('snapshot', {result:prior.result,variant:prior.summary.variant,adopt:true});
+        const identity = await identities.bindSnapshot(prior,fixed._snapshot.snapshotDigest);
+        const source = {originStoreId:identity.originStoreId,originResultId:identity.originResultId,analysisRevision:identity.analysisRevision,...fixed._snapshot};
+        const job = {analysis:prior.summary.analysis,...solutionFields(prior.record),...values,source};
+        const runId = randomUUID(), challenge = await request('mutation_challenge', {runId,job});
+        let authorization;
+        try {authorization = await analysisAuthorization.authorizeMutation({runId,job,challenge});}
+        catch (error) {
+          await request('mutation_discard',{runId});
+          diagnostic(error,'후처리','AUTHORIZATION',id);
+          throw error;
+        }
+        Object.assign(values,{runId,mutationJob:job,authorization});
+      }
+      const result = await request("finalize", values);
       await publishResult(result);
       queueMesh(result);
       return result.summary;
@@ -834,11 +859,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       await fsp.mkdir(directory);
       const route = file.classification?.route_to_segmentation;
       const engine = file.analysis === "xray" ? (route === "AP" ? "ap" : "lat") : file.analysis;
-      const job = { id: file.id, input: file.input, analysis: file.analysis, route, device, output: path.join(directory, "output") };
+      const job = { id: file.id, input: file.input, analysis: file.analysis, ...solutionFields(file), route, device, output: path.join(directory, "output") };
       await fsp.writeFile(path.join(directory, "job.json"), JSON.stringify(job));
       if (signal.aborted) throw aborted();
       // Authorize each run after waiting; expiry never cancels a run already admitted here.
-      if (analysisAuthorization) {
+      if (analysisAuthorization && !analysisAuthorization.authorizeModel) {
         taskState(task, { stage: "분석 권한 확인", lane: "waiting", progress: null });
         const authorizationStarted = performance.now();
         await authorize(id, engine, signal);
@@ -847,6 +872,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       const model = modelWorker(engine);
       let modelAuthorization;
       if (analysisAuthorization?.authorizeModel) {
+        taskState(task, { stage: "분석 권한 확인", lane: "waiting", progress: null });
         const authorizationStarted = performance.now();
         const challenge = await model.request({ operation: "model_challenge", runId: id, engine: require('./security/model-package.cjs').modelId(job) }, { timeout: 15000 });
         try {
@@ -856,7 +882,7 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
           model.send({ operation: "model_discard", id, runId: id });
           throw error;
         }
-        timings.authorization += (performance.now() - authorizationStarted) / 1000;
+        timings.authorization = (timings.authorization || 0) + (performance.now() - authorizationStarted) / 1000;
       }
       taskState(task, { stage: "모델 준비", lane: device === "cpu" ? "cpu" : "gpu", progress: null });
       phase = performance.now();

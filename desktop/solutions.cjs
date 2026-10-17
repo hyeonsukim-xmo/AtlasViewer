@@ -12,7 +12,7 @@ const solutions = Object.freeze([
     protocol:'AP / LAT-LT / LAT-RT', output:'Projection area · Overlay', input:'NRRD · DICOM 방향 확인',
     routes:['AP','LAT_LT','LAT_RT'], runtimes:['ct','ap','lat']},
 ].map(item => Object.freeze({...item, routes:Object.freeze(item.routes), runtimes:Object.freeze(item.runtimes)})));
-// shortcut: One built-in workflow per modality; a second needs a solution-scoped dispatcher and v3 grants first.
+// shortcut: One built-in workflow per modality; a second also needs a solution-scoped dispatcher, not just a v3 entitlement.
 if (new Set(solutions.map(item => item.analysis)).size !== solutions.length)
   throw new Error('Multiple workflows for one modality require solution-scoped execution authorization.');
 

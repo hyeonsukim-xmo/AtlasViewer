@@ -32,7 +32,8 @@
     "test:imaging": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-imaging.py",
     "test:transfer": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-transfer-integrity.py",
     "test:imaging:desktop": "npm run build && npm run build:desktop && electron scripts/validate-imaging-desktop.cjs",
-    "test:solutions": "node scripts/validate-solution-contracts.cjs"
+    "test:solutions": "node scripts/validate-solution-contracts.cjs",
+    "test:solution-security": "node --test scripts/security/test-solutions.cjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

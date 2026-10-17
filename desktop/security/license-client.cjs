@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const https = require('node:https');
 const P = require('./license-protocol.cjs');
+const V3 = require('./license-v3.cjs');
 
 function localTransport(base) {
   return transport(base,true);
@@ -13,20 +14,21 @@ function transport(base,allowLoopback=false) {
   P.check((url.protocol==='https:' || (allowLoopback && loopback)) &&
     url.pathname === '/' && !url.username && !url.password && !url.search && !url.hash,'Licensing requires HTTPS or an explicitly enabled local test server');
   return (route,body,signal)=>new Promise((resolve,reject)=>{
-    P.check(['/v1/challenge','/v1/lease'].includes(route));
-    const data = JSON.stringify(body); P.check(Buffer.byteLength(data)<=P.LIMIT);
+    P.check(['/v1/challenge','/v1/lease','/v3/challenges','/v3/leases'].includes(route));
+    const protocol=route.startsWith('/v3/')?V3:P;
+    const data = JSON.stringify(body); P.check(Buffer.byteLength(data)<=protocol.LIMIT);
     const request = (url.protocol==='https:'?https:http).request(new URL(route,url),{method:'POST',signal,headers:{
       'Content-Type':'application/json','Content-Length':Buffer.byteLength(data),Connection:'close'}},response=>{
       const chunks=[]; let size=0;
       response.on('data',chunk=>{
         size+=chunk.length;
-        if (size>P.LIMIT) response.destroy(Error('Licensing response too large')); else chunks.push(chunk);
+        if (size>protocol.LIMIT+32) response.destroy(Error('Licensing response too large')); else chunks.push(chunk);
       });
       response.on('error',reject);
       response.on('end',()=>{
         try {
           P.check(response.statusCode===200 && response.headers['content-type']==='application/json','Licensing server unavailable');
-          const reply=P.json(Buffer.concat(chunks).toString('utf8')); P.fields(reply,['token']);
+          const text=Buffer.concat(chunks).toString('utf8'),reply=JSON.parse(text);P.check(JSON.stringify(reply)===text);P.fields(reply,['token']);
           resolve(reply);
         } catch(error) {reject(error);}
       });
@@ -36,7 +38,8 @@ function transport(base,allowLoopback=false) {
 }
 
 class LicenseClient {
-  constructor({profile,config,store,sign,post,clock={wall:()=>Date.now()/1000,mono:()=>performance.now()/1000}}) {
+  constructor({profile,config,store,sign,post,version=2,clock={wall:()=>Date.now()/1000,mono:()=>performance.now()/1000}}) {
+    P.check([2,3].includes(version));this.version=version;this.protocol=version===3?V3:P;
     P.check(['internal','customer'].includes(profile) && config.binding?.profile===profile,'License profile does not match this build');
     P.fields(config,['binding','issuerPublicKey','installationPublicKey',...(profile==='customer'?['donglePublicKey']:[])]);
     P.binding(config.binding);
@@ -55,7 +58,7 @@ class LicenseClient {
       const saved=store.read();
       if (saved !== null) {
         P.fields(saved,['token','wall','serverNow']);
-        this.receipt=P.verifyToken(saved.token,this.issuer,'lease',config.binding); this.token=saved.token;
+        this.receipt=this.protocol.verifyToken(saved.token,this.issuer,'lease',config.binding); this.token=saved.token;
         P.check(Number.isFinite(saved.wall) && Number.isFinite(saved.serverNow) && saved.serverNow>=this.receipt.iat);
         this.anchor={wall:saved.wall,server:saved.serverNow,mono:clock.mono()}; this.lastWall=saved.wall;
         this.time();
@@ -120,18 +123,19 @@ class LicenseClient {
       await this.bounded(async signal=>{
         const started=this.clock.mono(), nonce=crypto.randomBytes(32).toString('base64url');
         const request={binding:this.config.binding,nonce};
-        const challenge=await this.post('/v1/challenge',request,signal);
-        const claims=P.verifyToken(challenge.token,this.issuer,'challenge',request.binding);
+        const challenge=await this.post(this.version===3?'/v3/challenges':'/v1/challenge',request,signal);
+        const claims=this.protocol.verifyToken(challenge.token,this.issuer,'challenge',request.binding);
         P.check(claims.nonce===nonce,'Challenge belongs to another request');
         const signatures=await this.proofs(challenge.token,signal);
-        const response=await this.post('/v1/lease',{challengeId:claims.challengeId,...signatures},signal);
-        const receipt=P.verifyToken(response.token,this.issuer,'lease',request.binding);
+        const response=await this.post(this.version===3?'/v3/leases':'/v1/lease',{challengeId:claims.challengeId,...signatures},signal);
+        const receipt=this.protocol.verifyToken(response.token,this.issuer,'lease',request.binding);
         const elapsed=this.clock.mono()-started;
         P.check(!this.closed && !signal.aborted && elapsed>=0 && elapsed<60 && receipt.nonce===nonce &&
           receipt.iat>=claims.iat && receipt.iat<claims.exp,'Expired or mismatched response');
         if (this.receipt) {
           P.check(receipt.revision>=this.receipt.revision && receipt.sequence>this.receipt.sequence && receipt.iat>=this.receipt.iat,'Stale licensing response');
           if (this.receipt.decision!=='allow' && receipt.decision==='allow') P.check(receipt.revision>this.receipt.revision,'A newer administrative approval is required');
+          if(this.version===3 && this.receipt.decision==='allow' && receipt.decision==='allow')V3.transition(this.receipt,receipt);
         }
         this.receipt=receipt; this.token=response.token;
         this.anchor={wall:this.clock.wall(),mono:this.clock.mono(),server:receipt.iat+elapsed};
@@ -142,7 +146,7 @@ class LicenseClient {
     return this.state();
   }
   refresh() {return this.enqueue(()=>this.renew());}
-  authorize({runId,engine,signal}) {
+  authorize({runId,engine,execution,signal}) {
     return this.enqueue(async()=>{
       P.check(typeof runId==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(runId) && [...P.ENGINES,'xray-classifier'].includes(engine));
       P.check(!this.closed && !signal?.aborted,'Analysis cancelled');
@@ -150,7 +154,8 @@ class LicenseClient {
       P.check(!this.closed && !signal?.aborted,'Analysis cancelled');
       let state=this.state();
       P.check(['VALID','GRACE'].includes(state),`신규 분석 권한 없음: ${state}`);
-      P.check(engine==='xray-classifier'?this.receipt.engines.some(value=>value==='ap'||value==='lat'):this.receipt.engines.includes(engine),'이 분석 모델의 사용 권한이 없습니다.');
+      const permitted=()=>this.version===3?V3.allowed(this.receipt,execution,this.time()):P.check(engine==='xray-classifier'?this.receipt.engines.some(value=>value==='ap'||value==='lat'):this.receipt.engines.includes(engine),'이 분석 모델의 사용 권한이 없습니다.');
+      permitted();
       try {
         // Offline and cached runs still prove the installation (and customer dongle) afresh.
         const message=JSON.stringify({binding:this.config.binding,runId,engine,nonce:crypto.randomBytes(32).toString('base64url')});
@@ -162,6 +167,7 @@ class LicenseClient {
       P.check(!this.closed && !signal?.aborted,'Analysis cancelled');
       state=this.state();
       P.check(['VALID','GRACE'].includes(state),`신규 분석 권한 없음: ${state}`);
+      permitted();
       this.persist();
       return {runId,engine,state};
     });

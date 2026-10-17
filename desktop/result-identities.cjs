@@ -66,12 +66,23 @@ function createResultIdentities(root, protectedStoreId) {
     return {...fields, resultSchema:'exmo.analysis-result.v1', originStoreId,
       originResultId:saved.originResultId, analysisRevision:saved.revisions[fingerprint], provenance:saved.provenance};
   }
-  return {get(publication) {
+  const identities = {get(publication) {
     if (!cache.has(publication)) {
       const pending = identify(publication);
       cache.set(publication,pending);
     }
     return cache.get(publication);
+  }, async bindSnapshot(publication, snapshotDigest) {
+    check(typeof snapshotDigest === 'string' && /^[a-f0-9]{64}$/.test(snapshotDigest));
+    const identity = await identities.get(publication);
+    const filename = path.join(root,'runs',publication.summary.id,'identity.json');
+    const saved = JSON.parse(read(filename));
+    saved.snapshots ??= {};
+    check(!saved.snapshots[identity.analysisRevision] || saved.snapshots[identity.analysisRevision] === snapshotDigest);
+    saved.snapshots[identity.analysisRevision] = snapshotDigest;
+    atomicWrite(filename,JSON.stringify(saved));
+    return identity;
   }};
+  return identities;
 }
 module.exports = {createResultIdentities};

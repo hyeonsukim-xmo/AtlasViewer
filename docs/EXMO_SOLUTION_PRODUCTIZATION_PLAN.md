@@ -1,6 +1,6 @@
 # 솔루션별 제품화 구현·검증 계획
 
-기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID를 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md)을 따른다. 아래 P2~P8과 acceptance matrix 전체가 완료된 것은 아니다.
+기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계를 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md) 및 [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증과 P3~P8, acceptance matrix 전체가 완료된 것은 아니다.
 
 ## 1. 작업 범위와 보존 대상
 
@@ -57,6 +57,8 @@
 - 종료 조건: 고정 3개 UI 상수 제거, 기존 5종 기능 및 선택·비교 회귀 통과. 고객에 무권한 generic runner를 노출하지 않음.
 
 ### P2 — 솔루션별 권한·발급
+
+2026-10-18: 권한/발급/worker/확정 결과 경계의 소프트웨어 구현과 검증을 반영했다. [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md)을 따른다. 실제 YubiKey, 운영 서버, 새 설치본 검증은 남아 있다.
 
 - v3 lease/run schema와 server transaction, 개별 상품 기간·회수·허용 digest를 구현한다.
 - main/Python shared fixtures로 동일 허용/거부 판정을 확인한다. 내부용도 상품 제한을 시험한다.

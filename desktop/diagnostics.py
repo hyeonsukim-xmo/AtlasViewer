@@ -23,7 +23,7 @@ def failure(error, operation, ident=None, *, input_error=False, code=None):
         code = code or (('RESULT_INVALID' if operation in ('finalize', 'mesh') else 'INPUT_INVALID') if input_error else {
             'inspect':'INPUT_READ', 'classify':'CLASSIFICATION', 'extract':'INPUT_READ', 'prepare':'INPUT_READ',
             'preview':'OVERLAY', 'finalize':'RESULT_PROCESS', 'mesh':'MESH_BUILD', 'run':'INFERENCE',
-            'model_challenge':'AUTHORIZATION'}.get(operation, 'INTERNAL'))
+            'model_challenge':'AUTHORIZATION', 'mutation_challenge':'AUTHORIZATION', 'snapshot':'RESULT_INVALID'}.get(operation, 'INTERNAL'))
     print(json.dumps({'diagnostic':reference, 'code':code, 'operation':operation, 'id':ident}), file=sys.stderr, flush=True)
     if code != 'AUTHORIZATION':
         traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)

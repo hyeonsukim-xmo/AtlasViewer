@@ -166,7 +166,7 @@ app
       resultStorage = openResultStorage(path.join(app.getPath('userData'), 'result-security'), safeStorage);
       startupTimings.resultStorageMs=performance.now()-phaseStarted;phaseStarted=performance.now();
       licensing = await openLicensing({ build: securityBuild, directory: path.join(app.getPath("userData"), "licensing"), safeStorage,
-        resultStorage,
+        resultStorage,engineRoot:protectedEngineRoot,scriptsRoot,
         dongle:securityBuild.profile==='customer'?new (require('./security/dongle.cjs').Dongle)(
           path.join(protectedEngineRoot,'python','python.exe'),path.join(scriptsRoot,'piv_worker.py'),
           [path.join(scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(protectedEngineRoot,'envs/security/Lib/site-packages'),'--']):undefined,

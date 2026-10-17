@@ -13,6 +13,8 @@ import nibabel as nib
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'desktop'))
 import artifact_store as A
+from result_security import complete, admit_completion
+from solution_security import SOLUTIONS
 
 engine = Path(sys.argv[1]).resolve() / 'packages' if len(sys.argv) > 1 else ROOT / 'work/security-delivery-v2/packages'
 spec = importlib.util.spec_from_file_location('worker', ROOT / 'desktop/imaging-worker.py')
@@ -42,6 +44,9 @@ with tempfile.TemporaryDirectory() as directory:
             worker.write_json(folder / 'metrics.json', metrics)
         worker.write_json(result / 'desktop-complete.json', {'complete':True, 'seconds':0})
         record = {'id':identity, 'analysis':analysis, 'input':str(input_path), 'name':'synthetic', 'metadata':{}, 'classification':{'route_to_segmentation':route}}
+        record.update(solutionId=SOLUTIONS[analysis][0], workflowId=SOLUTIONS[analysis][1])
+        complete(result, {**record, 'route':route}, identity)
+        admit_completion({'id':identity, 'record':record, 'result':str(result)})
         publication = worker.finalize({'id':identity, 'record':record, 'result':str(result), 'createdAt':'2026-10-15T00:00:00Z', 'deferMesh':True}, engine.parent, palette)
         assert publication['summary']['rows'][0]['count'] == int(np.count_nonzero(labels == 1))
         for view in ('axial', 'coronal', 'sagittal') if analysis != 'xray' else ('axial',):
@@ -58,5 +63,5 @@ with tempfile.TemporaryDirectory() as directory:
         for file in result.rglob('*'):
             if file.is_file() and store.managed(file):
                 with A._open(file, 'rb') as stream: assert stream.read(8) == A.MAGIC, file
-        report[route or analysis] = {'metrics':True, 'overlay':True, 'encryptedArtifacts':True, 'deferred3D':analysis != 'xray'}
+        report[route or analysis] = {'metrics':True, 'overlay':True, 'encryptedArtifacts':True, 'deferred3D':analysis != 'xray', 'boundCompletion':True}
 print(json.dumps({'syntheticOnly':True, 'results':report}))

@@ -521,5 +521,10 @@
   "결과의 솔루션과 분석 경로가 일치하지 않습니다.": "The result solution does not match its analysis workflow.",
   "지원하지 않는 분석 솔루션입니다. 앱 버전과 분석 작업을 확인하세요.": "This analysis solution is not supported. Check the app version and selected workflow.",
   "결과 식별 정보를 저장하거나 확인하지 못했습니다. 측정값과 영상은 계속 열람할 수 있습니다.": "Result identity could not be saved or verified. Measurements and images remain available.",
-  "결과 폴더와 식별 파일을 삭제하지 마세요. 저장 공간·권한을 확인한 뒤 앱을 다시 실행하고, 반복되면 진단 번호를 전달하세요.": "Keep the result folder and identity files. Check storage space and permissions, restart the app, and provide the diagnostic reference if this persists."
+  "결과 폴더와 식별 파일을 삭제하지 마세요. 저장 공간·권한을 확인한 뒤 앱을 다시 실행하고, 반복되면 진단 번호를 전달하세요.": "Keep the result folder and identity files. Check storage space and permissions, restart the app, and provide the diagnostic reference if this persists.",
+  "새 후처리의 실행 권한을 확인하지 못했습니다.": "Authorization for new postprocessing could not be verified.",
+  "확정된 결과와 3D 표시 요청이 일치하지 않습니다.": "The 3D display request does not match the fixed result.",
+  "확정된 Mask 경로가 변경되었습니다.": "The fixed mask path has changed.",
+  "확정된 구조 목록과 3D 표시 정보가 일치하지 않습니다.": "The 3D structures do not match the fixed result.",
+  "후처리 작업 내용이 승인된 요청과 다릅니다.": "The postprocessing job differs from the authorized request."
 }

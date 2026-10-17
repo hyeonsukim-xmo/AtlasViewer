@@ -26,22 +26,22 @@ function guard(context) {
   const policy=releasePolicy(configured.profile,configured);
   const worker=context.packager.config.extraResources?.find(item=>item.to==='imaging' && JSON.stringify(item.filter)===JSON.stringify(['model-policy.json',...protectedPython]));
   P.check(worker && path.resolve(worker.from)===path.resolve(entry.from),'Protected worker policy must be packaged');
-  P.check(JSON.stringify(JSON.parse(read(path.join(worker.from,'model-policy.json'))))===JSON.stringify({profile:policy.profile,issuerPublicKey:policy.issuerPublicKey}),'Worker policy mismatch');
+  P.check(JSON.stringify(JSON.parse(read(path.join(worker.from,'model-policy.json'))))===JSON.stringify({profile:policy.profile,issuerPublicKey:policy.issuerPublicKey,...(policy.licenseVersion!==undefined?{licenseVersion:policy.licenseVersion}:{})}),'Worker policy mismatch');
   for(const name of protectedPython)P.check(fs.readFileSync(path.join(worker.from,name),'utf8')===frozenPython(name),'Protected worker build differs');
   P.check(context.packager.config.appId===(policy.profile==='internal'?'com.exmo.atlas.internal':'com.exmo.atlas'),'Build application identity differs');
-  if(policy.profile==='customer')P.check(context.packager.config.extraResources.some(item=>item.to==='engine'),'Customer payload required');
+  if(policy.profile==='customer' || policy.licenseVersion===3)P.check(context.packager.config.extraResources.some(item=>item.to==='engine'),'Customer payload required');
 }
 async function main([profile,target,configFile,payloadRoot]) {
   P.check(['dir','nsis'].includes(target));
   const policy=releasePolicy(profile,configFile?JSON.parse(read(configFile)):undefined);
-  if(profile==='customer')P.check(payloadRoot,'Customer builds require a signed offline engine payload');
+  if(profile==='customer' || policy.licenseVersion===3)P.check(payloadRoot,'Customer builds require a signed offline engine payload');
   if(payloadRoot)P.check(verifyPayload(payloadRoot,require('node:crypto').createPublicKey(policy.issuerPublicKey)).profile===profile,'Payload belongs to another build profile');
   if(profile==='customer' && target==='nsis')P.check(process.env.CSC_LINK || process.env.WIN_CSC_LINK || process.env.EXMO_SIGNING_CERTIFICATE_SHA1,'Customer installer requires an actual code-signing certificate; use customer dir for an unsigned QA candidate');
   const stage=path.join(root,'work/security-build');fs.mkdirSync(stage,{recursive:true});
   const lock=path.join(stage,'build.lock');const fd=fs.openSync(lock,'wx');
   try {
     const policyFile=path.join(stage,'build.json');atomicWrite(policyFile,JSON.stringify(policy));
-    atomicWrite(path.join(stage,'model-policy.json'),JSON.stringify({profile:policy.profile,issuerPublicKey:policy.issuerPublicKey}));
+    atomicWrite(path.join(stage,'model-policy.json'),JSON.stringify({profile:policy.profile,issuerPublicKey:policy.issuerPublicKey,...(policy.licenseVersion!==undefined?{licenseVersion:policy.licenseVersion}:{})}));
     for(const name of protectedPython)atomicWrite(path.join(stage,name),frozenPython(name));
     for(const args of [['node_modules/vite/bin/vite.js','build','--mode','desktop'],['--experimental-strip-types','scripts/write-imaging-palette.mjs']]) {
       const result=spawnSync(process.execPath,args,{cwd:root,stdio:'inherit',windowsHide:true});
@@ -87,11 +87,11 @@ function verifyPackage(directory,policy) {
   P.check(fs.existsSync(path.join(directory,'resources/security/windows-key.ps1')) &&
     fs.existsSync(path.join(directory,'resources/imaging/model-runner.py')),'Runtime resource missing');
   const workerPolicy=JSON.parse(read(path.join(directory,'resources/imaging/model-policy.json')));
-  P.check(JSON.stringify(workerPolicy)===JSON.stringify({profile:policy.profile,issuerPublicKey:policy.issuerPublicKey}),'Worker trust differs from application trust');
+  P.check(JSON.stringify(workerPolicy)===JSON.stringify({profile:policy.profile,issuerPublicKey:policy.issuerPublicKey,...(policy.licenseVersion!==undefined?{licenseVersion:policy.licenseVersion}:{})}),'Worker trust differs from application trust');
   for(const name of protectedPython)P.check(fs.readFileSync(path.join(directory,'resources/imaging',name),'utf8')===frozenPython(name),'Packaged protected worker differs');
   const integrity=JSON.parse(asar.extractFile(archive,path.join('desktop','security','runtime-integrity.json')));
   for(const [file,digest] of Object.entries(integrity))P.check(hashFile(path.join(directory,'resources',file)).sha256===digest,'Packaged worker integrity mismatch');
-  if(policy.profile==='customer')verifyPayload(path.join(directory,'resources/engine'),require('node:crypto').createPublicKey(policy.issuerPublicKey));
+  if(policy.profile==='customer' || policy.licenseVersion===3)verifyPayload(path.join(directory,'resources/engine'),require('node:crypto').createPublicKey(policy.issuerPublicKey));
   console.log('Verified internal package: pinned build policy, CNG helper, no authority/simulated private keys.');
 }
 if(require.main===module)main(process.argv.slice(2)).catch(error=>{console.error(error.message);process.exit(1);});

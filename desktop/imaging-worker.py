@@ -807,15 +807,29 @@ def finalize(message, root, palette):
                            "metricsOverlay": time.monotonic() - started}}
     publication = {"summary": summary, "record": record, "mask": str(mask_path), "sideMask": str(side_path) if side_path else None, "mesh": str(mesh_path) if mesh_bytes else None, "result": str(result)}
     write_json(result / ("desktop-result-" + variant + ".json"), publication)
-    return publication
+    from result_security import seal_snapshot
+    return seal_snapshot(publication, make_mesh)
 
 
 def finish_mesh(publication):
     """Only derived geometry changes; measurements and source masks stay immutable."""
     import time
+    from result_security import read_snapshot
+    fixed = read_snapshot(publication['result'], publication['summary']['variant'], make_mesh, adopt=True)
+    def clinical(value):
+        if isinstance(value, dict): return {k: clinical(v) for k, v in value.items() if k not in ('color', 'group', 'name')}
+        if isinstance(value, list): return [clinical(v) for v in value]
+        return value
+    for key in ('analysis', 'variant', 'route', 'rows', 'unit', 'laterality', 'parts'):
+        if clinical(publication['summary'].get(key)) != clinical(fixed['summary'].get(key)):
+            raise InputError('확정된 결과와 3D 표시 요청이 일치하지 않습니다.')
+    if any(publication.get(k) != fixed.get(k) for k in ('mask', 'sideMask', 'result')):
+        raise InputError('확정된 Mask 경로가 변경되었습니다.')
     started = time.monotonic()
     folder = Path(publication["sideMask"]).parent
     saved = read_json(folder / "metrics.json")
+    if clinical(saved['parts']) != clinical(fixed['summary']['parts']):
+        raise InputError('확정된 구조 목록과 3D 표시 정보가 일치하지 않습니다.')
     target = folder / "surface.glb"
     if saved.get("meshBytes") and target.exists():
         mesh_bytes = target.stat().st_size
@@ -877,11 +891,14 @@ def main():
     spec.loader.exec_module(classifier)
     from model_security import ModelGuard, load_policy
     model_guard = ModelGuard(load_policy(), args.engine_root)
+    from result_security import MutationGuard, read_snapshot, admit_completion
+    mutation_guard = MutationGuard(model_guard, make_mesh)
     protected = model_guard.policy or (classification.parent / 'model-package-xray-classifier.json').exists()
     if not protected:
         classifier.pipeline = classifier.load_vendor(classification)
     for line in sys.stdin:
         message = {}
+        checking_authorization = False
         try:
             message = json.loads(line)
             operation = message["operation"]
@@ -898,13 +915,21 @@ def main():
             elif operation == 'model_discard':
                 model_guard.pending.pop(message['runId'], None)
                 result = None
+            elif operation == 'mutation_challenge':
+                checking_authorization = True
+                result = mutation_guard.challenge(message['runId'], message['job'])
+            elif operation == 'mutation_discard':
+                mutation_guard.pending.pop(message['runId'], None)
+                result = None
+            elif operation == 'snapshot':
+                result = read_snapshot(message['result'], message['variant'], make_mesh, adopt=message.get('adopt', False))
             elif operation == "inspect":
                 protection, active_classifier = None, classifier
                 try:
                     if message['analysis'] == 'xray' and protected:
                         active_classifier = None
                         if message.get('authorization'):
-                            job = {'analysis': 'xray-classifier', 'paths': message['paths'], 'destination': message['destination']}
+                            job = {'analysis': 'xray-classifier', **({k: message[k] for k in ('solutionId', 'workflowId')} if 'solutionId' in message else {}), 'paths': message['paths'], 'destination': message['destination']}
                             protection = model_guard.admit(message['runId'], job, message.pop('authorization'))
                             classifier.pipeline = classifier.load_vendor(classification, protection)
                             active_classifier = classifier
@@ -924,7 +949,19 @@ def main():
                 result = prepare(message)
             elif operation == "finalize":
                 clear_image_cache()
-                result = finalize(message, args.engine_root, palette)
+                result = read_snapshot(message['result'], message.get('variant', 'raw'), make_mesh)
+                if result is None:
+                    if model_guard.policy:
+                        if message.get('mutationJob'):
+                            checking_authorization = True
+                            mutation_guard.admit(message['runId'], message['mutationJob'], message.get('authorization'))
+                            for key in ('record', 'result', 'id', 'createdAt', 'deferMesh', 'variant'):
+                                if message.get(key) != message['mutationJob'].get(key):
+                                    raise InputError('후처리 작업 내용이 승인된 요청과 다릅니다.')
+                        else:
+                            admit_completion(message)
+                    checking_authorization = False
+                    result = finalize(message, args.engine_root, palette)
                 clear_image_cache()
             elif operation == "mesh":
                 clear_image_cache()
@@ -936,7 +973,7 @@ def main():
                 raise InputError("지원하지 않는 작업입니다.")
             response = {"id": message["requestId"], "result": result}
         except Exception as error:
-            response = {"id": message.get("requestId"), **failure(error, message.get('operation'), message.get('requestId'), input_error=isinstance(error, InputError))}
+            response = {"id": message.get("requestId"), **failure(error, message.get('operation'), message.get('requestId'), input_error=isinstance(error, InputError), code='AUTHORIZATION' if checking_authorization else None)}
         print(json.dumps(response, ensure_ascii=False, allow_nan=False), flush=True)
 
 

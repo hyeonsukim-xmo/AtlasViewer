@@ -3,11 +3,14 @@ const path=require('node:path');
 const crypto=require('node:crypto');
 const P=require('./license-protocol.cjs');
 const M=require('./model-package.cjs');
+const V3=require('./license-v3.cjs');
+const E3=require('./execution.cjs');
 const {LicenseClient,transport}=require('./license-client.cjs');
 const {read,atomicWrite,protectedStore}=require('./storage.cjs');
 
 function validateBuild(build) {
-  P.fields(build,['profile','issuerPublicKey','serverUrl','allowLoopback']);
+  P.fields(build,['profile','issuerPublicKey','serverUrl','allowLoopback',...(build.licenseVersion!==undefined?['licenseVersion']:[])]);
+  P.check(build.licenseVersion===undefined || [2,3].includes(build.licenseVersion));
   P.check(['internal','customer'].includes(build.profile));
   P.check(typeof build.allowLoopback==='boolean' && (!build.allowLoopback || build.profile==='internal'));
   P.check(typeof build.issuerPublicKey==='string' && !build.issuerPublicKey.includes('PRIVATE'));
@@ -20,7 +23,7 @@ function loadBuild(packaged,file=path.join(__dirname,'build.json')) {
   try {return validateBuild(JSON.parse(read(file)));}
   catch {throw Error('설치본의 서명 서버·빌드 정책이 없습니다. EXMO 설치본을 다시 준비하세요.');}
 }
-async function openLicensing({build,directory,key,safeStorage,resultStorage,dongle}) {
+async function openLicensing({build,directory,key,safeStorage,resultStorage,dongle,engineRoot,scriptsRoot}) {
   validateBuild(build);
   P.check(build.profile==='internal' || dongle,'Customer hardware authentication is unavailable');
   fs.mkdirSync(directory,{recursive:true});
@@ -46,6 +49,10 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
     }
   } catch {error='KEY_UNAVAILABLE';}
   const store=protectedStore(path.join(directory,'lease.bin'),safeStorage);
+  const version=build.licenseVersion??2;
+  const minimumPath=path.join(directory,'protocol-version.json');
+  if(fs.existsSync(minimumPath))P.check(JSON.parse(read(minimumPath)).version<=version,'This installation has migrated to v3; use a v3 build');
+  const execution=(job,capability,modelDigest)=>E3.binding(job,{engineRoot,scriptsRoot,issuer:crypto.createPublicKey(build.issuerPublicKey)},capability,modelDigest);
   const make=activation=>{
     P.check(identity && !error,'Installation key unavailable');
     P.fields(activation,['binding','installationPublicKey',...(activation.models?['models']:[]),...(activation.recovery?['recovery']:[]),...(build.profile==='customer'?['hardware']:[])]);P.binding(activation.binding);
@@ -61,7 +68,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
     }
     const hardware=build.profile==='customer'?M.hardwareKeys(activation.hardware):null;
     if(hardware)P.check(P.fingerprint(hardware['9e'])===activation.binding.dongleKey && P.fingerprint(hardware['9d'])===activation.binding.agreementKey,'Wrong hardware binding');
-    const next=new LicenseClient({profile:build.profile,config:{binding:activation.binding,installationPublicKey:activation.installationPublicKey,issuerPublicKey:build.issuerPublicKey,
+    const next=new LicenseClient({profile:build.profile,version,config:{binding:activation.binding,installationPublicKey:activation.installationPublicKey,issuerPublicKey:build.issuerPublicKey,
       ...(hardware?{donglePublicKey:hardware['9e'].export({type:'spki',format:'pem'})}:{})},store,
       post:transport(build.serverUrl,build.allowLoopback),
       sign:(role,message,signal)=>{
@@ -74,7 +81,8 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
     try {const activation=JSON.parse(read(activationPath));client=make(activation);models=activation.models || {};client.start();}catch {error='CONFIG_ERROR';}
   }
   return {
-    status(){return {profile:build.profile,state:error || client?.state() || 'UNACTIVATED',expiresAt:client?.receipt?.exp ?? null};},
+    status(){return {profile:build.profile,state:error || client?.state() || 'UNACTIVATED',expiresAt:client?.receipt?.exp ?? null,
+      ...(version===3?{solutions:client?.receipt?.entitlements?.map(e=>({solutionId:e.solutionId,state:e.state==='active'?(client.time()<e.validFrom?'pending':e.validUntil!==null && client.time()>=e.validUntil?'expired':'active'):e.state,expiresAt:e.validUntil}))??[]}: {})};},
     enrollment(){
       P.check(identity && error!=='KEY_UNAVAILABLE','Windows 설치 키를 사용할 수 없습니다.');
       if(build.profile==='customer')return (async()=>{
@@ -91,6 +99,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
         next=make(activation);
         // Approval files only identify the installation; a fresh signed online lease grants access.
         P.check(await next.refresh()==='VALID','온라인 승인을 확인하지 못했습니다. 서버 등록과 연결을 확인하세요.');
+        if(version===3)atomicWrite(minimumPath,JSON.stringify({version:3}));
         const same=client && JSON.stringify(client.config.binding)===JSON.stringify(activation.binding);
         const combined={...activation,models:{...(same?models:{}),...activation.models}};
         if(activation.recovery){P.check(resultStorage,'Result storage unavailable');resultStorage.recovery(activation.recovery,crypto.createPublicKey(build.issuerPublicKey),activation.binding);}
@@ -109,16 +118,34 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
       if(build.profile==='customer')P.check(resultStorage?.hasRecovery(),'기관 결과 복구 키가 등록되어야 신규 분석을 시작할 수 있습니다.');
       return client.authorize(request);
     },
+    async authorizeMutation({runId,job,challenge,signal}) {
+      P.check(!error && client && resultStorage?.ready(),'Result mutation authorization unavailable');
+      if(build.profile==='customer')P.check(resultStorage.hasRecovery(),'기관 결과 복구 키가 필요합니다.');
+      P.fields(challenge,['nonce']);P.nonce(challenge.nonce);
+      const binding=version===3?execution(job,'result-mutation',null):null;
+      await client.authorize({runId,engine:job.analysis,execution:binding,signal});
+      const lease=client.token,now=Math.floor(client.time());
+      const claims={schema:'exmo-result-mutation-v1',runId,...(binding??{...E3.scope(job),capability:'result-mutation',engine:job.analysis}),
+        source:job.source,nonce:challenge.nonce,jobDigest:M.hash(Buffer.from(JSON.stringify(job))),leaseDigest:M.hash(Buffer.from(lease)),
+        iat:now,exp:Math.min(now+60,version===3?V3.allowed(client.receipt,binding,client.time()):client.receipt.exp)};
+      const message=JSON.stringify(claims),signature=await key.sign(identity.installationId,Buffer.from('EXMO/RESULT-MUTATION/v1/'+message),signal);
+      const hardwareProof=build.profile==='customer'?{donglePublicKey:client.config.donglePublicKey,
+        dongleSignature:(await dongle.sign(client.hardware,Buffer.from('EXMO/RESULT-MUTATION/v1/dongle/'+message),signal)).toString('base64url')}:{};
+      P.check(client.token===lease && ['VALID','GRACE'].includes(client.state()) && client.time()<claims.exp && !signal?.aborted,'Mutation authorization changed');
+      return {lease,installationPublicKey:identity.installationPublicKey,message,signature:signature.toString('base64url'),...hardwareProof};
+    },
     async authorizeModel({runId,job,challenge,signal}) {
       const engine=M.modelId(job);
       P.check(!error && client,'Model analysis authorization unavailable');
+      if(resultStorage)P.check(resultStorage.ready(),'결과 보호 키 복구가 필요합니다.');
       if(build.profile==='customer')P.check(resultStorage?.hasRecovery(),'기관 결과 복구 키가 필요합니다.');
       P.fields(challenge,['nonce','modelDigest']);P.nonce(challenge.nonce);P.digest(challenge.modelDigest);
       P.check(models[engine],'암호화 모델 승인이 없습니다. 모델 권한이 포함된 승인 파일을 적용하세요.');
       const access=M.envelope(models[engine],crypto.createPublicKey(build.issuerPublicKey),client.config.binding,identity.modelKeyPublicKey);
       P.check(access.modelDigest===challenge.modelDigest,'Approved model differs from installed model');
-      await client.authorize({runId,engine:M.entitlement(engine),signal});
-      P.check(client.receipt.modelDigests.includes(access.modelDigest),'설치된 모델 버전의 권한이 회수되었거나 갱신이 필요합니다.');
+      const binding=version===3?execution(job,engine==='xray-classifier'?'classify':'analyze',access.modelDigest):null;
+      await client.authorize({runId,engine:M.entitlement(engine),execution:binding,signal});
+      if(version===2)P.check(client.receipt.modelDigests.includes(access.modelDigest),'설치된 모델 버전의 권한이 회수되었거나 갱신이 필요합니다.');
       let plain;
       if(build.profile==='customer') {
         const E=require('./model-envelope.cjs'),context=E.context(client.config.binding,access.modelDigest);
@@ -128,14 +155,15 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
       try {
         P.check(plain.length===32 && ['VALID','GRACE'].includes(client.state()) && !signal?.aborted,'MRI model authorization expired');
         const lease=client.token,now=Math.floor(client.time());
-        const claims={schema:'exmo-model-run-v1',runId,engine,nonce:challenge.nonce,modelDigest:access.modelDigest,
+        const claims={schema:version===3?'exmo-model-run-v2':'exmo-model-run-v1',runId,engine,...binding,nonce:challenge.nonce,modelDigest:access.modelDigest,
           jobDigest:M.hash(Buffer.from(JSON.stringify(job))),leaseDigest:M.hash(Buffer.from(lease)),keyDigest:M.hash(plain),
-          iat:now,exp:Math.min(now+60,client.receipt.exp)};
+          iat:now,exp:Math.min(now+60,version===3?V3.allowed(client.receipt,binding,client.time()):client.receipt.exp)};
         const message=JSON.stringify(claims);
-        const signature=await key.sign(identity.installationId,Buffer.from('EXMO/MODEL-RUN/v1/'+message),signal);
+        const domain=version===3?'EXMO/MODEL-RUN/v2/':'EXMO/MODEL-RUN/v1/';
+        const signature=await key.sign(identity.installationId,Buffer.from(domain+message),signal);
         const hardwareProof=build.profile==='customer'?{
           donglePublicKey:client.config.donglePublicKey,
-          dongleSignature:(await dongle.sign(client.hardware,Buffer.from('EXMO/MODEL-RUN/v1/dongle/'+message),signal)).toString('base64url'),
+          dongleSignature:(await dongle.sign(client.hardware,Buffer.from(domain+'dongle/'+message),signal)).toString('base64url'),
         }:{};
         P.check(['VALID','GRACE'].includes(client.state()) && client.token===lease && !signal?.aborted,'MRI authorization changed; retry analysis');
         return {lease,access:models[engine],installationPublicKey:identity.installationPublicKey,modelKeyPublicKey:identity.modelKeyPublicKey,

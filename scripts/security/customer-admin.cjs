@@ -12,12 +12,13 @@ function issuerCrypto(message) {
   const result=JSON.parse(output.stdout);P.fields(result,['value']);return result.value;
 }
 function main([command,directory,...args]) {
-  P.check(['approve','activation','build-config','model-status','extend','status'].includes(command));
+  P.check(['approve','activation','build-config','build-config-v3','model-status','extend','status','solutions','solutions-dry-run','solution-status','solution-expiry'].includes(command));
   const authority=new Authority(directory);
   const write=(file,value)=>fs.writeFileSync(file,JSON.stringify(value,null,2),{flag:'wx',mode:0o600});
   try {
     P.check(authority.profile==='customer','Customer authority required');
-    if(command==='approve') {
+    if(command.startsWith('solution')) {console.log(JSON.stringify(require('./solution-admin.cjs').configure(authority,command,args)));}
+    else if(command==='approve') {
       P.check(args.length===4);const [file,licenseId,expiry,engines]=args,request=JSON.parse(read(file));
       M.validateEnrollment(request);P.check(request.profile==='customer');
       const verified=issuerCrypto({operation:'verify',hardware:request.hardware}),keys=M.hardwareKeys(request.hardware);
@@ -41,7 +42,7 @@ function main([command,directory,...args]) {
       P.check(args.length===2);authority.modelStatus(...args);
     } else {
       P.check(args.length===2);
-      write(args[1],require('../../desktop/security/runtime.cjs').validateBuild({profile:'customer',issuerPublicKey:authority.publicKey.export({type:'spki',format:'pem'}),serverUrl:args[0],allowLoopback:false}));
+      write(args[1],require('../../desktop/security/runtime.cjs').validateBuild({profile:'customer',issuerPublicKey:authority.publicKey.export({type:'spki',format:'pem'}),serverUrl:args[0],allowLoopback:false,...(command==='build-config-v3'?{licenseVersion:3}:{})}));
     }
     console.log('Customer authority operation completed. No patient data or private key exported.');
   }finally{authority.close();}

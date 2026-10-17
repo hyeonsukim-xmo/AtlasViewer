@@ -46,6 +46,6 @@ test('signed authority backup restores exact revision, rejects corrupt DB or mis
  ops.main(['restore',copy,pem,restored]);const b=new Authority(restored);assert.equal(b.db.prepare('SELECT status,revision FROM licenses').get().status,'revoked');assert.equal(b.db.prepare('SELECT revision FROM licenses').get().revision,2);b.close();
  fs.appendFileSync(path.join(copy,'authority.sqlite'),'tampered');assert.throws(()=>ops.verify(copy,pub));
  const deployment=path.join(root,'deploy');ops.main(['deploy-files','license.example.invalid',deployment]);
- const config=fs.readFileSync(path.join(deployment,'exmo-license.conf'),'utf8');assert.match(config,/TLSv1.2 TLSv1.3/);assert.match(config,/client_max_body_size 16k/);assert.match(config,/127.0.0.1:43127/);
+ const config=fs.readFileSync(path.join(deployment,'exmo-license.conf'),'utf8');assert.match(config,/TLSv1.2 TLSv1.3/);assert.match(config,/client_max_body_size 128k/);assert.match(config,/127.0.0.1:43127/);assert.ok(config.includes('v3/(challenges|leases)'));
  assert.throws(()=>ops.main(['deploy-files','bad;host',path.join(root,'bad')]));
 });

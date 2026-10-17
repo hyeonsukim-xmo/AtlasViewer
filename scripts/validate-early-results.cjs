@@ -18,7 +18,7 @@ const input = path.join(storageRoot, 'input.nii.gz');
 fs.writeFileSync(input, 'fixture');
 const record = {id:'one', analysis:'ct', input, name:'fixture', ready:true, metadata:{size:[8,8,8],spacing:[1,1,1]}};
 fs.writeFileSync(path.join(storageRoot, 'library.json'), JSON.stringify([record]));
-let releaseMesh, failMesh = false, workers = [], onModelRun, onInspect, onModelChallenge, selectedPaths=[input];
+let releaseMesh, failMesh = false, workers = [], onModelRun, onInspect, onModelChallenge, onSnapshot, onMutationChallenge, selectedPaths=[input];
 class FakeWorker {
   constructor() { this.closed=false; workers.push(this); }
   async request(message, options) {
@@ -32,7 +32,7 @@ class FakeWorker {
       assert.equal(message.deferMesh,true);
       const mask = path.join(message.result, 'mask.nii.gz'); fs.writeFileSync(mask,'native');
       return {summary:{id:message.id, inputId:message.record.id, analysis:message.record.analysis, variant:message.variant || 'raw',
-        createdAt:message.createdAt, meshBytes:null, meshState:'pending', rows:[], seconds:1,
+        createdAt:message.createdAt, meshBytes:null, meshState:'pending', rows:[], qc:{}, seconds:1,
         laterality:{method:'femur_components_lps_v1'}, timings:{model:{inference:.5}}},
         record:message.record, result:message.result, mask, sideMask:mask, mesh:null};
     }
@@ -59,7 +59,7 @@ function spawn() {
   child.stdin.on('data', async data => {
     const message=JSON.parse(data.toString());
     if(message.operation==='extract') {child.stdout.write(JSON.stringify({id:message.requestId,error:'Corrupt ZIP fixture',errorCode:'INPUT_INVALID',errorPublic:true})+'\n');return;}
-    const result=message.operation==='inspect'?(onInspect?.(message)||[]):message.operation==='prepare'?message.record:message.operation==='finalize'?
+    const result=message.operation==='snapshot'?(onSnapshot?.(message)||null):message.operation==='mutation_challenge'?onMutationChallenge(message):message.operation==='inspect'?(onInspect?.(message)||[]):message.operation==='prepare'?message.record:message.operation==='finalize'?
       await new FakeWorker().request(message):{image:'data:image/png;base64,test'};
     child.stdout.write(JSON.stringify({id:message.requestId,result})+'\n');
   });
@@ -363,6 +363,27 @@ async function authorizeMriWorker() {
       await until(async()=> (await replacement.call('results','mri')).find(r=>r.id===saved.summary.id).meshState==='ready');
       assert.equal(JSON.parse(fs.readFileSync(published)).summary.variant,'pp500');
     } finally {await replacement.backend.dispose();}
+    const fixed=JSON.parse(fs.readFileSync(published));
+    fixed._snapshot={maskDigest:'1'.repeat(64),sideMaskDigest:'2'.repeat(64),snapshotDigest:'3'.repeat(64),variant:'pp500'};
+    onSnapshot=message=>message.variant==='pp500'?structuredClone(fixed):null;
+    onMutationChallenge=message=>{assert.equal(message.job.solutionId,'exmo.thigh.mri');assert.ok(message.job.source.analysisRevision);return {nonce:'4'.repeat(43)};};
+    let mutations=0,denied=false;
+    const secured=install({authorize:async()=>{throw Error('Mutation must not acquire an inference grant');},authorizeMutation:async request=>{
+      mutations++;assert.equal(request.job.variant,'strong');assert.equal(request.job.source.snapshotDigest,fixed._snapshot.snapshotDigest);
+      if(denied)throw Error('Solution execution is not authorized');
+      return {testProof:'private-mutation-proof'};
+    }});
+    try {
+      releaseMesh=undefined;
+      const strong=await secured.call('variant',fixed.summary.id,'strong');assert.equal(strong.variant,'strong');assert.equal(mutations,1);
+      await until(()=>releaseMesh);releaseMesh();
+      await until(async()=> (await secured.call('results','mri')).find(r=>r.id===fixed.summary.id).meshState==='ready');
+      assert.ok(!fs.readFileSync(published,'utf8').includes('private-mutation-proof'));
+      denied=true;releaseMesh=undefined;
+      const restored=await secured.call('variant',fixed.summary.id,'pp500');assert.equal(restored.variant,'pp500');assert.equal(mutations,1,'Saved variants need no fresh mutation grant');
+      onSnapshot=()=>null;
+    } finally {await secured.backend.dispose();onSnapshot=undefined;onMutationChallenge=undefined;}
+    console.log('PASS: new postprocessing gets a solution/source-bound mutation grant; saved variants remain readable without it');
     console.log('PASS: publication before mesh, immediate Overlay, mesh failure/cancel/retry, restart recovery, stale variant rejection');
   } finally {
     assert.ok(path.resolve(storageRoot).startsWith(path.resolve(os.tmpdir())+path.sep));
