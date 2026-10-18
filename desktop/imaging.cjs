@@ -1094,6 +1094,35 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
     await saveCatalog();
   });
   return {
+    async publicationSource(id, revision) {
+      const result=getResult(id);
+      if(!result)throw userError('저장된 결과를 찾을 수 없습니다.');
+      const identity=await identities.get(result);
+      if(revision!==identity.analysisRevision)throw userError('결과가 변경되었습니다. 현재 결과를 다시 선택하세요.');
+      const fixed=await request('snapshot',{result:result.result,variant:result.summary.variant,adopt:true},undefined,result.readerId);
+      if(!fixed)throw userError('확정된 결과를 확인하지 못했습니다.');
+      await identities.bindSnapshot(result,fixed._snapshot.snapshotDigest);
+      return {identity,summary:fixed.summary,result:fixed.result,variant:fixed.summary.variant,
+        snapshotDigest:fixed._snapshot.snapshotDigest,readerId:result.readerId,
+        meshFile:fixed.sideMask?path.join(path.dirname(fixed.sideMask),'surface.glb'):null};
+    },
+    async publicationMesh(source) {
+      if(!source.meshFile || !fs.existsSync(source.meshFile))return null;
+      const fixed=await request('snapshot',{result:source.result,variant:source.variant,adopt:false},undefined,source.readerId);
+      if(fixed?._snapshot.snapshotDigest!==source.snapshotDigest)throw userError('게시 결과의 확정 사본이 변경되었습니다.');
+      return source.meshFile;
+    },
+    async exportPublication(source,options) {
+      const slot=await resultLane.acquire(1);let context,exporter;
+      try{
+        if(disposed)throw aborted();
+        if(installations)context=await installations.acquire('reader',source.readerId);
+        exporter=new AnalysisWorker({...runtime(context?'reader':'ct',[path.join(scriptsRoot,'publication-worker.py')],context?{...context,scriptsRoot}:undefined),
+          env:workerEnv(),logPath:path.join(storageRoot,'publication-private.log'),artifactStorage,logResponses:false});
+        return await exporter.request({operation:'publication_export',result:source.result,variant:source.variant,
+          snapshotDigest:source.snapshotDigest,...options},{timeout:20*60000});
+      }finally{try{await exporter?.close();}finally{slot.release();context?.release();}}
+    },
     mesh(id) {
       const result = getResult(id);
       return result?.mesh && inside(result.mesh) ? result.mesh : null;

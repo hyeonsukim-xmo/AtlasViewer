@@ -35,7 +35,8 @@
     "test:solutions": "node scripts/validate-solution-contracts.cjs",
     "test:solution-security": "node --test scripts/security/test-solutions.cjs",
     "test:installations": "node --test scripts/security/test-installations.cjs",
-    "test:accounts": "node --test scripts/security/test-accounts.cjs"
+    "test:accounts": "node --test scripts/security/test-accounts.cjs",
+    "test:publications": "node --test scripts/security/test-publications.cjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

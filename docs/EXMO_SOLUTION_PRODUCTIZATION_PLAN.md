@@ -1,6 +1,6 @@
 # 솔루션별 제품화 구현·검증 계획
 
-기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer와 P4의 계정·운영 승인 연결을 로컬 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md), [P4 구현 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증과 P5~P8, acceptance matrix 전체가 완료된 것은 아니다.
+기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer, P4의 계정·운영 승인 연결과 P5 기본 결과 게시를 로컬 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md), [P4 구현 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md)을 따른다. [P5 구현·검증 기록](EXMO_SOLUTION_P5_IMPLEMENTATION.md)에 기본 게시 범위와 제외 사항을 기록했다. 실물·운영 배포 검증, P5의 대표 영상 승인 및 P6~P8, acceptance matrix 전체가 완료된 것은 아니다.
 
 ## 1. 작업 범위와 보존 대상
 
@@ -86,6 +86,8 @@
 - 종료 조건: 로그인 장애/로그아웃 중에도 유효 로컬 분석·열람 가능, 클라우드 게시/조회는 차단. 잘못된 기관/계정으로 장비·데이터를 이전할 수 없음.
 
 ### P5 — 결과 게시·보호 저장·복구
+
+2026-10-18: 수동 게시 UI, 암호화 outbox/multipart 재개, 기관·PC·게시자 검증, 서버 private verifier, 측정/QC 우선 commit과 후속 GLB, CAS/idempotency/tombstone을 구현·검증했다. [P5 구현 기록](EXMO_SOLUTION_P5_IMPLEMENTATION.md)을 따른다. 대표 Overlay는 픽셀 검토·최종 사본 승인 기능 전까지 전송하지 않는다. 실제 배포와 전체 acceptance 완료는 아니다.
 
 - result publication snapshot과 contentDigest, 별도 암호화 attempt/session/outbox, commit/CAS/idempotency/권한 재검사를 구현한다. origin 소유/이관과 tombstone을 현재 uploader와 분리한다. 첫 성공 commit에 workspace를 고정하고 재시도·조회·중복 반환·첨부에서도 대상 일치를 검사한다. 다른 대상은 409로 거부하며 원래 workspace/결과의 비공개 정보를 오류에 노출하지 않는다.
 - 기본 수동 게시. metrics/QC 준비 시 게시, 3D는 같은 revision의 후속 artifact로 첨부한다.

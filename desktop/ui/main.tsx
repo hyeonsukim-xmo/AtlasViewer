@@ -1,3 +1,4 @@
+import Publication from './publication';
 import { t, useLanguage, localeTag } from "./language";
 import {failureText} from "./diagnostics";
 import LanguageSelect from "./language-select";
@@ -84,6 +85,7 @@ function Desktop() {
           <LicenseStatusButton />
           <InstallationManager />
           <Account />
+          <Publication />
           <button className="desktop-demo-link" onClick={() => setView("demo")}>
             {t("3D 데모")}
           </button>

@@ -18,6 +18,7 @@ const securityBuild = loadBuild(app.isPackaged || bundled);
 const internalBuild = securityBuild.profile === "internal";
 const applicationName = internalBuild ? "EXMO Atlas Internal" : "EXMO Atlas";
 let desktopImaging;
+let publicationSync;
 let licensing;
 let resultStorage;
 let protectedEngineRoot;
@@ -120,11 +121,13 @@ function createWindow() {
     openExternal:url=>shell.openExternal(url),licensing,allowLoopback:securityBuild.allowLoopback===true});
   const removeAccountUi=require('./security/account-ui.cjs').installAccountUi({ipcMain,window,account});
   const imaging = desktopImaging;
+  const sync=publicationSync=require('./sync.cjs').openSync({directory:path.join(app.getPath('userData'),'publication-outbox'),safeStorage,account,imaging});
+  const removeSyncUi=require('./sync-ui.cjs').installSyncUi({ipcMain,window,sync});
   window.once("closed", () => {
     removeLicenseUi();
     removeInstallationUi();
     removeAccountUi();
-    imaging.dispose().catch(() => {});
+    void removeSyncUi().finally(()=>imaging.dispose()).catch(()=>{});
   });
   window.once("ready-to-show", () => {
     window.show();
@@ -251,9 +254,11 @@ app.on("before-quit", (event) => {
   if (!desktopImaging) { licensing?.close(); installations?.close(); return; }
   event.preventDefault();
   const imaging = desktopImaging;
+  const sync=publicationSync;
+  publicationSync=undefined;
   desktopImaging = undefined;
-  imaging
-    .dispose()
+  Promise.resolve(sync?.close())
+    .then(()=>imaging.dispose())
     .catch(() => {})
     .finally(() => app.quit());
 });

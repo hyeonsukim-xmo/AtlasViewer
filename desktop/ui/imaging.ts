@@ -191,9 +191,16 @@ export type InstallationState = {supported: boolean; busy: boolean; solutions: {
 export type InstallationChoice = {id: string; version: string; choices: {analysis: Analysis; bytes: number; authorized: boolean}[]};
 export type AccountState = {state: string; me: null | {subject: string; name: string; operator: boolean; memberships: {orgId: string; workspaceId: string; name: string; roles: string[]}[]}; workspace: null | {orgId: string; workspaceId: string}; deviceOrgId?: string | null; installationId?: string | null};
 export type Enrollment = {id: string; orgId: string; workspaceId: string; installationId: string; profile: 'internal' | 'customer'; state: string; revision: number; keyPolicy: 'required' | 'internal-exempt' | null; prepared: boolean; licenseRevision: number | null; solutions: {solutionId: string; state: string; expiresAt: number | null}[]};
+export type SyncState = {configured:boolean; storageError:boolean; jobs:{id:string;resultId:string;revision:string;name:string;state:string;error:string|null;orgId:string;workspaceId:string;uploaded:number;total:number;cloudResultId:string|null;meshState:string|null;kind:string}[]};
+export type PublicationRef = {id:string;revision:string};
 declare global {
   interface Window {
     exmoDesktop: {
+      syncStatus(): Promise<Reply<SyncState>>;
+      syncEnqueue(refs:PublicationRef[]): Promise<Reply<SyncState>>;
+      syncRetry(id:string): Promise<Reply<SyncState>>;
+      syncCancel(id:string): Promise<Reply<SyncState>>;
+      syncApproveOrigin(ref:PublicationRef): Promise<Reply<{approved:boolean}>>;
       accountStatus(): Promise<Reply<AccountState>>;
       accountLogin(): Promise<Reply<AccountState>>;
       accountLogout(): Promise<Reply<AccountState>>;

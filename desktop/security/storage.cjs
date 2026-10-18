@@ -13,10 +13,10 @@ function atomicWrite(file,bytes) {
     fs.renameSync(temporary,file);
   } finally {if(fd!==undefined)fs.closeSync(fd);fs.rmSync(temporary,{force:true});}
 }
-function protectedStore(file,safeStorage) {
+function protectedStore(file,safeStorage,limit=256*1024) {
   const ready=()=>P.check(safeStorage.isEncryptionAvailable(),'Windows protected storage unavailable');
   return {
-    read(){ready();try{return JSON.parse(safeStorage.decryptString(read(file,256*1024)));}catch(error){if(error.code==='ENOENT')return null;throw error;}},
+    read(){ready();try{return JSON.parse(safeStorage.decryptString(read(file,limit)));}catch(error){if(error.code==='ENOENT')return null;throw error;}},
     write(value){ready();atomicWrite(file,safeStorage.encryptString(JSON.stringify(value)));},
   };
 }

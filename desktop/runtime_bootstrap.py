@@ -38,7 +38,7 @@ def main():
     if not args.arguments or args.arguments[0] != '--' or len(args.arguments) < 2:
         raise ValueError('Worker entrypoint required')
     entry = Path(args.arguments[1]).resolve(strict=True)
-    if entry.parent != Path(__file__).resolve().parent or entry.name not in ('model-service.py', 'imaging-worker.py', 'piv_worker.py'):
+    if entry.parent != Path(__file__).resolve().parent or entry.name not in ('model-service.py', 'imaging-worker.py', 'piv_worker.py', 'publication-worker.py'):
         raise ValueError('Unapproved worker entrypoint')
     configure_runtime(args.site)
     sys.path.insert(0, import_path(entry.parent))

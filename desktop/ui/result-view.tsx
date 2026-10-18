@@ -1,3 +1,4 @@
+import Publication from './publication';
 import { failureText, sceneDiagnostic, type Diagnostic, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -263,6 +264,7 @@ export default function ResultView({
           </p>
         </div>
         <div className="result-view-actions">
+        <Publication results={results} />
         {comparison && <ResultComparison results={results} actions={comparison} />}
         <div className="control-segment">
           <button aria-pressed={mode === "overlay"} onClick={() => setMode("overlay")}>

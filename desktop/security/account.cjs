@@ -50,14 +50,14 @@ function openAccount({config,directory,safeStorage,openExternal,licensing,allowL
     })();}
     await refreshing;P.check(session?.accessToken,'Sign in required');return session.accessToken;
   }
-  async function request(route,body){
+  async function request(route,body,extraHeaders={},limit=1024*1024){
     const epoch=generation,access=await token();current(epoch);
     const response=await fetch(config.apiUrl.replace(/\/$/,'')+route,{method:body===undefined?'GET':'POST',redirect:'error',signal:AbortSignal.timeout(15000),
-      headers:{Authorization:'Bearer '+access,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+      headers:{Authorization:'Bearer '+access,...extraHeaders,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     current(epoch);
     if(response.status===401){session=null;identity=null;selected=null;state='sign-in-required';fs.rmSync(file,{force:true});}
     const chunks=[];let bytes=0;
-    for await(const part of response.body){bytes+=part.length;P.check(bytes<=1024*1024,'Account response too large');chunks.push(part);}
+    for await(const part of response.body){bytes+=part.length;P.check(bytes<=limit,'Account response too large');chunks.push(part);}
     current(epoch);
     const value=JSON.parse(Buffer.concat(chunks).toString());
     if(!response.ok)throw Object.assign(Error(typeof value.error==='string'?value.error:'Account service unavailable'),{accountStatus:response.status});return value;
@@ -124,6 +124,19 @@ function openAccount({config,directory,safeStorage,openExternal,licensing,allowL
     return request('/v1/enrollments',proof);
   }
   return {status,login,logout,refresh,workspace,enroll,
+    async publicationRequest(route,body,binding){
+      const S=require('../publication-protocol.cjs');S.scope(binding);
+      P.check(/^\/v1\/publications\/[a-z-]+$/.test(route));
+      const epoch=generation;await token();current(epoch);
+      P.check(session?.subject===binding.subject,'Publication account changed');
+      P.check(selected?.orgId===binding.orgId && selected?.workspaceId===binding.workspaceId,'Publication workspace changed');
+      P.check(status().installationId===binding.installationId && status().deviceOrgId===binding.orgId,'Device belongs to another organization');
+      const claims={...binding,route,bodyDigest:S.digest(body),nonce:require('node:crypto').randomBytes(32).toString('base64url'),at:Math.floor(Date.now()/1000)};
+      const signature=await licensing.publicationProof(claims);current(epoch);
+      P.check(selected?.orgId===binding.orgId && selected?.workspaceId===binding.workspaceId,'Publication workspace changed');
+      const proof=Buffer.from(JSON.stringify({claims,signature})).toString('base64url');
+      return request(route,body,{'X-EXMO-Publication-Proof':proof},2*1024*1024);
+    },
     enrollments:()=>request('/v1/enrollments'),
     decide:(id,revision,keyPolicy,decision)=>{P.id(id);P.integer(revision);P.check(['required','internal-exempt'].includes(keyPolicy) && ['approve','reject'].includes(decision));return request('/v1/enrollments/'+id+'/decision',{revision,keyPolicy,decision});},
     solution:(id,revision,solutionId,state)=>{P.id(id);P.integer(revision);require('./license-v3.cjs').name(solutionId);P.check(['active','suspended'].includes(state));return request('/v1/enrollments/'+id+'/solution',{revision,solutionId,state});},

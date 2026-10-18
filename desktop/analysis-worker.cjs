@@ -5,8 +5,8 @@ const { randomUUID } = require("node:crypto");
 const { workerError } = require('./diagnostics.cjs');
 
 class AnalysisWorker {
-  constructor({ python, args, env, logPath, artifactStorage }) {
-    Object.assign(this, { python, args, env, logPath, artifactStorage });
+  constructor({ python, args, env, logPath, artifactStorage, logResponses=true }) {
+    Object.assign(this, { python, args, env, logPath, artifactStorage, logResponses });
     this.pending = new Map(); this.child = null; this.closed = false;
   }
   start() {
@@ -30,7 +30,7 @@ class AnalysisWorker {
     child.once("close", () => { fail(); if (this.child === child) this.child = null; log.end(); });
     if (this.artifactStorage) child.stdin.write(JSON.stringify({operation:'storage_init',...this.artifactStorage})+'\n');
     readline.createInterface({ input: child.stdout }).on("line", line => {
-      log.write(line + "\n");
+      if(this.logResponses)log.write(line + "\n");
       let event;
       try { event = JSON.parse(line); } catch { return; }
       const id = event.job_id || event.id;

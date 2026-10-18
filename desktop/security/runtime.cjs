@@ -93,6 +93,12 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
       })();
       return {...registration};
     },
+    async publicationProof(claims){
+      const S=require('../publication-protocol.cjs');
+      P.check(version===3 && identity && error!=='KEY_UNAVAILABLE','Protected installation required');
+      P.check(claims.installationId===identity.installationId);
+      return (await key.sign(identity.installationId,S.proofMessage(claims))).toString('base64url');
+    },
     async enrollmentProof(challenge){
       P.check(version===3,'Account enrollment requires a v3 installation');
       const A=require('./account-protocol.cjs');A.challenge(challenge);

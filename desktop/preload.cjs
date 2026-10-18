@@ -4,6 +4,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "exmoDesktop",
   Object.freeze({
+    syncStatus: () => ipcRenderer.invoke('exmo:sync:status'),
+    syncEnqueue: refs => ipcRenderer.invoke('exmo:sync:enqueue',refs),
+    syncRetry: id => ipcRenderer.invoke('exmo:sync:retry',id),
+    syncCancel: id => ipcRenderer.invoke('exmo:sync:cancel',id),
+    syncApproveOrigin: ref => ipcRenderer.invoke('exmo:sync:approve-origin',ref),
     accountStatus: () => ipcRenderer.invoke('exmo:account:status'),
     accountLogin: () => ipcRenderer.invoke('exmo:account:login'),
     accountLogout: () => ipcRenderer.invoke('exmo:account:logout'),
