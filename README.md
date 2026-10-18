@@ -13,8 +13,12 @@ recursively in one import; overlapping parent/child selections are collected
 once. Existing file-count and byte limits apply to the whole selection.
 
 **Product boundary:** image import and analysis belong to Desktop. Web is a result
-viewer; server-backed result retrieval is planned, not implemented. The Web build
-contains neither the Desktop analysis UI nor its Python runtime/model files.
+viewer. The original atlas demo remains `npm run build`; the separate authenticated,
+read-only server Viewer is `npm run build:viewer`. It supports workspace-scoped result
+lists and single-result measurements, QC, approved representative Overlay and 3D.
+Neither Web build contains Desktop analysis UI or Python runtime/model files.
+See the [P7 implementation and deployment record](docs/EXMO_SOLUTION_P7_IMPLEMENTATION.md)
+for the BFF, security boundary, tests and remaining comparison/tablet work.
 
 ## Product direction
 
@@ -24,7 +28,9 @@ account-based institution result sharing, and read-only Web/tablet access. The f
 adds the built-in solution registry and persistent local result identities. P2 adds per-solution v3
 execution authorization and separates new postprocessing from fixed-result reading. P3 adds signed
 selective installation, an independent reader, pinned running versions and authorized rollback.
-Account login and server publishing remain planned. See the [P1 implementation record](docs/EXMO_SOLUTION_P1_IMPLEMENTATION.md),
+Account login, protected result publishing and Desktop remote review are now implemented
+locally; production IdP/server deployment and hardware checks remain pending.
+See the [P1 implementation record](docs/EXMO_SOLUTION_P1_IMPLEMENTATION.md),
 [P2 implementation and migration runbook](docs/EXMO_SOLUTION_P2_IMPLEMENTATION.md),
 [P3 installation and verification record](docs/EXMO_SOLUTION_P3_IMPLEMENTATION.md),
 [implementation and acceptance plan](docs/EXMO_SOLUTION_PRODUCTIZATION_PLAN.md)

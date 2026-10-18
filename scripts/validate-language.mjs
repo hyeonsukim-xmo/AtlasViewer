@@ -5,7 +5,7 @@ import ts from "typescript";
 const english = JSON.parse(fs.readFileSync("desktop/ui/locales/en.json", "utf8"));
 const missing = new Set();
 const hangul = /[\uac00-\ud7a3]/;
-const files = ["desktop/ui", "app", "components"].flatMap(root =>
+const files = ["desktop/ui", "app", "components", "web/viewer"].flatMap(root =>
   fs.existsSync(root) ? fs.readdirSync(root, {recursive: true})
     .filter(name => /\.(tsx?|css)$/.test(name)).map(name => `${root}/${name}`) : []);
 let calls = 0;

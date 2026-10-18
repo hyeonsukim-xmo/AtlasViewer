@@ -728,5 +728,12 @@
   "게시된 대표 Overlay": "Published representative Overlay",
   "식별 영역 제거 사본": "Identifying areas redacted",
   "식별정보 검토 완료 사본": "Privacy-reviewed copy",
-  "게시된 고정 이미지 · 구조 선택과 무관": "Published fixed image · independent of structure selection"
+  "게시된 고정 이미지 · 구조 선택과 무관": "Published fixed image · independent of structure selection",
+  "서버 연결 또는 접근 권한을 확인한 뒤 다시 로그인하거나 새로고침하세요.": "Check the server connection and access permissions, then sign in again or refresh.",
+  "계정에 허용된 기관·작업공간의 측정값, QC, 대표 Overlay와 3D를 확인합니다.": "Review measurements, QC, representative Overlays and 3D in your authorized organization and workspace.",
+  "상단에서 열람할 작업공간을 선택하세요.": "Select a workspace above to view its results.",
+  "열람 권한이 있는 작업공간이 없습니다. 기관 관리자에게 문의하세요.": "No workspace is available for review. Contact your organization administrator.",
+  "준비 중": "Pending",
+  "표시할 서버 결과가 없습니다.": "No server results to display.",
+  "로그인을 완료하지 못했습니다. 다시 로그인하세요.": "Sign-in could not be completed. Please sign in again."
 }

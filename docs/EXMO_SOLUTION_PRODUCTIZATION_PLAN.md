@@ -108,6 +108,8 @@
 
 ### P7 — Web·태블릿 결과 viewer
 
+2026-10-18: 첫 단계인 별도 Web 빌드, OIDC/BFF, workspace ACL, 결과 목록/검색과 단일 측정·QC·대표 Overlay·3D 열람을 구현했다. [P7 구현·배포 기록](EXMO_SOLUTION_P7_IMPLEMENTATION.md) 참조. 아래 전체 종료 조건 중 웹 다중 비교·X-ray 묶음·실물 태블릿·운영 배포는 아직 남아 있다.
+
 - OIDC/BFF 기반 결과 목록/검색·viewer·최대 3개 비교, X-ray view 그룹, touch controls.
 - metric/QC/3D/Overlay만 전달하고 manifest가 허용한 범위를 정확히 표시한다. stack 없는 결과에 slice 기능을 만들어 보이지 않는다.
 - 기본 online-only; 브라우저 영구 PHI cache 및 분석 UI/runtime 부재 검사.

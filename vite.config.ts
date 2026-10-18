@@ -4,11 +4,11 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/postcss";
 const path = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 export default defineConfig(({ mode }) => ({
-  root: path(mode === "desktop" ? "./desktop/ui" : "./web"),
-  publicDir: path("./public"),
+  root: path(mode === "desktop" ? "./desktop/ui" : mode === "viewer" ? "./web/viewer" : "./web"),
+  publicDir: mode === "viewer" ? false : path("./public"),
   plugins: [react()],
   resolve: { alias: { "@": path("./") } },
   css: { postcss: { plugins: [tailwindcss()] } },
   server: { watch: { usePolling: true } },
-  build: { outDir: path(mode === "desktop" ? "./dist-desktop" : "./dist"), emptyOutDir: true },
+  build: { outDir: path(mode === "desktop" ? "./dist-desktop" : mode === "viewer" ? "./dist-viewer" : "./dist"), emptyOutDir: true },
 }));

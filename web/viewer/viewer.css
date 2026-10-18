@@ -1,0 +1,28 @@
+@font-face {font-family: Pretendard; src: url('../../public/fonts/PretendardVariable.woff2') format('woff2'); font-weight:100 900; font-display:swap;}
+.web-viewer {overflow:hidden;}
+.viewer-nav {display:flex;align-items:center;gap:16px;min-height:70px;padding:12px 24px;border-bottom:1px solid #ffffff14;flex-wrap:wrap;flex-shrink:0;background:#101026;}
+.viewer-nav strong {font-size:21px;letter-spacing:.04em;}
+.viewer-nav strong span {font-size:14px;font-weight:400;letter-spacing:0;margin-left:12px;color:#a6abc4;}
+.viewer-readonly {color:#8fa2bc;font-size:12px;}
+.viewer-workspace {margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px;}
+.viewer-nav select,.viewer-results input {border:1px solid #ffffff25;background:#17172e;border-radius:8px;padding:9px 12px;color:inherit;}
+.viewer-signin {max-width:620px;margin:auto;padding:48px 28px;line-height:1.8;}
+.viewer-signin h1,.viewer-results h1 {font-size:24px;font-weight:600;}
+.viewer-signin p,.viewer-results header p {color:#919bb8;margin:12px 0 24px;}
+.viewer-signin button {min-width:140px;}
+.viewer-results {padding:28px;overflow:auto;}
+.viewer-results header {display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:20px;}
+.viewer-results header>div {margin-right:auto;}
+.viewer-results header p {margin:6px 0;}
+.viewer-table {overflow:auto;border:1px solid #ffffff20;border-radius:12px;background:#11112b;}
+.viewer-table table {width:100%;border-collapse:collapse;text-align:left;white-space:nowrap;}
+.viewer-table th {color:#919bb8;font-size:12px;font-weight:400;padding:15px 20px;}
+.viewer-table td {padding:22px 20px;border-top:1px solid #ffffff0d;font-size:14px;}
+.viewer-table small {display:block;color:#9098b5;margin-top:6px;font-size:12px;}
+.viewer-table tbody tr {cursor:pointer;}
+.viewer-table tbody tr:hover,.viewer-table tbody tr:focus-visible {background:#ffffff09;outline:2px solid #8d87ae;outline-offset:-2px;}
+.viewer-detail {flex:1;display:flex;flex-direction:column;min-height:0;}
+.viewer-detail>.result-workspace {height:auto;min-height:0;flex:1;}
+.viewer-error {padding:14px 24px;background:#311f30;flex-shrink:0;}
+.viewer-loading {position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#27273f;padding:10px 24px;border-radius:8px;}
+@media(max-width:900px) {.viewer-nav {padding:12px;gap:10px;}.viewer-workspace {order:3;width:100%;margin:0;}.viewer-workspace select {flex:1;min-width:0;}.viewer-results {padding:16px;}.viewer-detail {overflow:auto;}.viewer-detail>.result-workspace {overflow:visible;min-height:800px;}.web-viewer .result-body {grid-template-columns:1fr!important;display:flex;flex-direction:column;overflow:visible;}.web-viewer .metrics-resizer {display:none;}.web-viewer .metrics-panel {max-height:320px;min-height:260px;flex-shrink:0;}.web-viewer .result-imaging {min-height:500px;}.web-viewer .clinical-button {min-height:40px;}}

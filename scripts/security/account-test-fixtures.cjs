@@ -42,7 +42,7 @@ async function identityProvider(t){
       const access=await sign({sub,aud:base+'/api',azp:'desktop',scope:'exmo.account',amr:['mfa'],auth_time:Math.floor(Date.now()/1000)});
       let id=await sign({sub,aud:'desktop',auth_time:Math.floor(Date.now()/1000),...(nonce?{nonce:settings.badNonce?'wrong-nonce':nonce}:{})});
       if(settings.badSignature)id=id.slice(0,-10)+'AAAAAAAAAA';
-      res.end(JSON.stringify({token_type:'Bearer',access_token:access,refresh_token:refresh,expires_in:300,id_token:id}));
+      res.end(JSON.stringify({token_type:'Bearer',access_token:access,refresh_token:refresh,expires_in:settings.expiresIn??300,id_token:id}));
     }catch(e){res.statusCode=400;res.end(JSON.stringify({error:'invalid_grant'}));}
   });
   base=await start(server);cleanup(t,()=>{server.closeAllConnections();server.close();});

@@ -12,6 +12,8 @@
     "performance:startup": "node scripts/security/benchmark-startup.cjs",
     "dev": "vite --host 127.0.0.1 --port 3016",
     "build": "vite build",
+    "build:viewer": "vite build --mode viewer && node scripts/validate-viewer-build.cjs",
+    "test:viewer": "node --test scripts/security/test-viewer.cjs",
     "check": "tsc --noEmit",
     "test:language": "node scripts/validate-language.mjs",
     "test:license": "node --test scripts/security/test-license.cjs scripts/security/test-internal.cjs && node scripts/validate-early-results.cjs && node scripts/validate-analysis-pipeline.cjs",

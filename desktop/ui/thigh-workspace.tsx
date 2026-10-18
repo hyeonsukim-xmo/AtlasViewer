@@ -2,7 +2,7 @@ import { failureText, type Failure } from "./diagnostics";
 import { t, useLanguage, localeTag } from "./language";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ImagePreview from "./image-preview";
-import ResultView from "./result-view";
+import ResultView from "./local-result-view";
 import XrayWorkspace from "./xray-workspace";
 import PatientGroupsView from "./patient-groups-view";
 import { patientIdentifier, seriesLabel, studyDate, studyAnalysisHistory } from "./patient-groups";

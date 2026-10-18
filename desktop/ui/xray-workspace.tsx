@@ -4,7 +4,7 @@ import { t, useLanguage, localeTag } from "./language";
 import PatientGroupsView from "./patient-groups-view";
 import { seriesLabel } from "./patient-groups";
 import ImagePreview from "./image-preview";
-import ResultView from "./result-view";
+import ResultView from "./local-result-view";
 import {
   number,
   unwrap,

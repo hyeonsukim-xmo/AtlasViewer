@@ -28,6 +28,7 @@ yarn-error.log*
 .vercel
 /dist/
 /dist-desktop/
+/dist-viewer/
 /release/
 /outputs/
 /work/

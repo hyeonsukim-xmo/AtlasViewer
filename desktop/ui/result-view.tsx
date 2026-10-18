@@ -1,16 +1,13 @@
 import RemoteOverlayImage from './remote-overlay';
-import Publication from './publication';
 import { failureText, sceneDiagnostic, type Diagnostic, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import AnatomyScene from "../../app/scene";
 import { GROUPS, INITIAL_STATE, inGroup, type SceneState } from "../../app/anatomy";
-import ImagePreview from "./image-preview";
 import ResultComparison, { type ComparisonActions } from "./result-comparison";
 import { xrayApplicable, xrayView, viewLabel } from "./xray-studies";
 import {
   number,
-  unwrap,
   type AnalysisResult,
   type AnatomicalSide,
   type MetricRow,
@@ -70,6 +67,7 @@ export default function ResultView({
   description,
   comparison,
   remote,
+  local,
 }: {
   results: AnalysisResult[];
   onClose: () => void;
@@ -79,6 +77,13 @@ export default function ResultView({
   description?: string;
   comparison?: ComparisonActions;
   remote?: {meshUrls:Record<string,string>;overlays?:Record<string,import('./imaging').RemoteOverlay>};
+  local?: {
+    publication: ReactNode;
+    preview: (result: AnalysisResult, classIds: number[] | null) => ReactNode;
+    variant: (id: string, variant: string) => Promise<AnalysisResult>;
+    sceneFailure: (id: string, code: string, reference: string) => void;
+    imageMenu: (image: string, filename: string, id: string, language: 'ko'|'en') => Promise<void>;
+  };
 }) {
   const language = useLanguage();
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
@@ -106,7 +111,7 @@ export default function ResultView({
       try {
         for (const result of results.filter(needsPreparation)) {
           try {
-          const updated = unwrap(await window.exmoDesktop.variant(result.id, result.variant));
+          const updated = await local!.variant(result.id, result.variant);
           if (!disposed) onUpdate(updated);
           } catch (e) {
             if (!disposed) setCaseErrors(previous => ({...previous,[result.id]:e as Error}));
@@ -200,7 +205,7 @@ export default function ResultView({
     setError("");
     setCaseErrors(previous => ({...previous,[result.id]:''}));
     try {
-      onUpdate(unwrap(await window.exmoDesktop.variant(result.id, variant)));
+      onUpdate(await local!.variant(result.id, variant));
     } catch (e) {
       setCaseErrors(previous => ({...previous,[result.id]:e as Error}));
     } finally {
@@ -268,7 +273,7 @@ export default function ResultView({
           </p>
         </div>
         <div className="result-view-actions">
-        {!remote && <Publication results={results} />}
+        {!remote && local?.publication}
         {comparison && <ResultComparison results={results} actions={comparison} />}
         <div className="control-segment">
           <button aria-pressed={mode === "overlay"} onClick={() => setMode("overlay")}>
@@ -867,15 +872,7 @@ export default function ResultView({
                   </button>
                   {caseErrors[result.id] && <p className="inline-error" role="alert">{failureText(caseErrors[result.id])}</p>}
                   {mode === "overlay" && remote ? <RemoteOverlayImage overlay={remote.overlays?.[result.id]} /> : mode === "overlay" ? (
-                    <ImagePreview
-                      key={result.id}
-                      revision={`${result.variant}:${result.laterality?.method || "legacy"}`}
-                      analysis={result.analysis}
-                      id={result.id}
-                      result
-                      analysisRevision={result.analysisRevision}
-                      classIds={allSelected ? null : chosen.map((row) => row.label)}
-                    />
+                    local?.preview(result, allSelected ? null : chosen.map((row) => row.label))
                   ) : !result.meshBytes || needsPreparation(result) ? (
                     <div className="inline-error" role="status">{remote?(result.meshState==='pending'?t('3D 후속 전송 대기'):t('해당 결과에는 게시된 3D가 없습니다.')):result.meshDiagnostic
                       ? failureText('', result.meshDiagnostic) : t("3D 준비가 완료되지 않았습니다. 측정값과 Overlay는 사용할 수 있습니다.")}
@@ -902,16 +899,14 @@ export default function ResultView({
                         onError={(_message, issue) => {
                           const failure = sceneDiagnostic(issue?.code, issue?.reference);
                           setSceneErrors(previous => ({...previous,[sceneKey]:failure}));
-                          if(!remote)void window.exmoDesktop.sceneFailure(result.id, failure.code, failure.reference).catch(() => {});
+                          if(!remote)local?.sceneFailure(result.id, failure.code, failure.reference);
                         }}
                         onInteract={() => {}}
                         onImageMenu={remote?undefined:image => {
                           setError("");
-                          void window.exmoDesktop.imageMenu({image,
-                            filename: `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${assembled ? "assembled" : "exploded"}_${state.view}.png`,
-                            source: {kind:"result",id:result.id},
-                            language,
-                          }).then(unwrap).catch(error => setError(error));
+                          void local?.imageMenu(image,
+                            `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${assembled ? "assembled" : "exploded"}_${state.view}.png`,
+                            result.id, language).catch(error => setError(error));
                         }}
                         renderMeasurement={(structure, hoveredSide) => {
                           const row = result.rows.find((r) => r.id === structure.id)!;
