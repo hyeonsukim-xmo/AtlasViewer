@@ -2,6 +2,7 @@ import { t, useLanguage, localeTag } from "./language";
 import {failureText} from "./diagnostics";
 import LanguageSelect from "./language-select";
 import LicenseStatusButton from "./license-status";
+import Account from './account';
 import InstallationManager, {installationLabel} from './installation-manager';
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -82,6 +83,7 @@ function Desktop() {
           <span className="desktop-nav-label">Clinical imaging workspace</span>
           <LicenseStatusButton />
           <InstallationManager />
+          <Account />
           <button className="desktop-demo-link" onClick={() => setView("demo")}>
             {t("3D 데모")}
           </button>

@@ -1,5 +1,5 @@
 const startupStarted=performance.now(),startupTimings={};
-const { app, BrowserWindow, dialog, Menu, net, protocol, session, ipcMain, safeStorage, powerMonitor } = require("electron");
+const { app, BrowserWindow, dialog, Menu, net, protocol, session, ipcMain, safeStorage, powerMonitor, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { resultModelResponse } = require('./result-model-response.cjs');
@@ -116,10 +116,14 @@ function createWindow() {
   });
   const removeLicenseUi = installLicenseUi({ ipcMain, dialog, window, licensing, profile: securityBuild.profile, restart:()=>{app.relaunch();app.quit();} });
   const removeInstallationUi=require('./security/installations-ui.cjs').installInstallationUi({ipcMain,dialog,window,installations,licensing,logRoot:path.join(app.getPath('userData'),'imaging')});
+  const account=require('./security/account.cjs').openAccount({config:securityBuild.account,directory:path.join(app.getPath('userData'),'account'),safeStorage,
+    openExternal:url=>shell.openExternal(url),licensing,allowLoopback:securityBuild.allowLoopback===true});
+  const removeAccountUi=require('./security/account-ui.cjs').installAccountUi({ipcMain,window,account});
   const imaging = desktopImaging;
   window.once("closed", () => {
     removeLicenseUi();
     removeInstallationUi();
+    removeAccountUi();
     imaging.dispose().catch(() => {});
   });
   window.once("ready-to-show", () => {

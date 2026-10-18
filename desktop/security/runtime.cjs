@@ -9,13 +9,14 @@ const {LicenseClient,transport}=require('./license-client.cjs');
 const {read,atomicWrite,protectedStore}=require('./storage.cjs');
 
 function validateBuild(build) {
-  P.fields(build,['profile','issuerPublicKey','serverUrl','allowLoopback',...(build.licenseVersion!==undefined?['licenseVersion']:[])]);
+  P.fields(build,['profile','issuerPublicKey','serverUrl','allowLoopback',...(build.licenseVersion!==undefined?['licenseVersion']:[]),...(build.account!==undefined?['account']:[])]);
   P.check(build.licenseVersion===undefined || [2,3].includes(build.licenseVersion));
   P.check(['internal','customer'].includes(build.profile));
   P.check(typeof build.allowLoopback==='boolean' && (!build.allowLoopback || build.profile==='internal'));
   P.check(typeof build.issuerPublicKey==='string' && !build.issuerPublicKey.includes('PRIVATE'));
   P.check(crypto.createPublicKey(build.issuerPublicKey).asymmetricKeyType==='ed25519');
   transport(build.serverUrl,build.allowLoopback);
+  if(build.account!==undefined)require('./account-protocol.cjs').configuration(build.account,build.allowLoopback);
   return Object.freeze({...build});
 }
 function loadBuild(packaged,file=path.join(__dirname,'build.json')) {
@@ -81,7 +82,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
     try {const activation=JSON.parse(read(activationPath));client=make(activation);models=activation.models || {};client.start();}catch {error='CONFIG_ERROR';}
   }
   return {
-    status(){return {profile:build.profile,state:error || client?.state() || 'UNACTIVATED',expiresAt:client?.receipt?.exp ?? null,
+    status(){return {profile:build.profile,state:error || client?.state() || 'UNACTIVATED',expiresAt:client?.receipt?.exp ?? null,orgId:client?.receipt?.orgId??null,installationId:identity?.installationId??null,
       ...(version===3?{solutions:client?.receipt?.entitlements?.map(e=>({solutionId:e.solutionId,state:e.state==='active'?(client.time()<e.validFrom?'pending':e.validUntil!==null && client.time()>=e.validUntil?'expired':'active'):e.state,expiresAt:e.validUntil}))??[]}: {})};},
     enrollment(){
       P.check(identity && error!=='KEY_UNAVAILABLE','Windows 설치 키를 사용할 수 없습니다.');
@@ -91,6 +92,14 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
         M.validateEnrollment(request);return request;
       })();
       return {...registration};
+    },
+    async enrollmentProof(challenge){
+      P.check(version===3,'Account enrollment requires a v3 installation');
+      const A=require('./account-protocol.cjs');A.challenge(challenge);
+      P.check(challenge.expiresAt>Date.now()/1000 && challenge.expiresAt<Date.now()/1000+300,'Enrollment challenge expired');
+      const request=await this.enrollment(),message=A.enrollmentMessage(challenge,request);
+      return {challenge,request,signature:(await key.sign(identity.installationId,message)).toString('base64url'),
+        ...(build.profile==='customer'?{dongleSignature:(await dongle.sign(request.hardware,message)).toString('base64url')}:{})};
     },
     async activate(activation){
       P.check(error!=='KEY_UNAVAILABLE','Windows installation key unavailable');

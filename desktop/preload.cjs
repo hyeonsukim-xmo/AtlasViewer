@@ -4,6 +4,16 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "exmoDesktop",
   Object.freeze({
+    accountStatus: () => ipcRenderer.invoke('exmo:account:status'),
+    accountLogin: () => ipcRenderer.invoke('exmo:account:login'),
+    accountLogout: () => ipcRenderer.invoke('exmo:account:logout'),
+    accountRefresh: () => ipcRenderer.invoke('exmo:account:refresh'),
+    accountWorkspace: (org,id) => ipcRenderer.invoke('exmo:account:workspace',org,id),
+    accountEnroll: () => ipcRenderer.invoke('exmo:account:enroll'),
+    accountEnrollments: () => ipcRenderer.invoke('exmo:account:enrollments'),
+    accountDecide: (id,revision,policy,decision) => ipcRenderer.invoke('exmo:account:decide',id,revision,policy,decision),
+    accountActivate: id => ipcRenderer.invoke('exmo:account:activate',id),
+    accountSolution: (id,revision,solutionId,state) => ipcRenderer.invoke('exmo:account:solution',id,revision,solutionId,state),
     licenseStatus: () => ipcRenderer.invoke("exmo:license:status"),
     manageLicense: () => ipcRenderer.invoke("exmo:license:manage"),
     installations: () => ipcRenderer.invoke('exmo:installations:status'),

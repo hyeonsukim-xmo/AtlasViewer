@@ -1,6 +1,6 @@
 # 솔루션별 제품화 구현·검증 계획
 
-기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer를 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증과 P4~P8, acceptance matrix 전체가 완료된 것은 아니다.
+기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer와 P4의 계정·운영 승인 연결을 로컬 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md), [P4 구현 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증과 P5~P8, acceptance matrix 전체가 완료된 것은 아니다.
 
 ## 1. 작업 범위와 보존 대상
 
@@ -77,6 +77,8 @@
 - 종료 조건: CT만/MRI만/X-ray만/혼합/모두 설치·제거·중단 복구 통과. 보호된 고객 경로에서 5개 route 실제 입력→출력 기능 시험. 원래 환경과 비교가 필요한 import/수치 변경은 원인별 검사.
 
 ### P4 — 계정·기관·초기 설정
+
+2026-10-18: 계정/등록/EXMO 운영 승인과 고객별 솔루션 권한의 로컬 구현·검증을 진행했다. 적용 범위, 서버 설정과 남은 검증은 [P4 구현 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md)을 따른다. 고객의 키 하나·PC 하나 아래 여러 솔루션 권한을 추가하며, 키 필수/내부용 면제 승인은 EXMO 운영자만 수행한다. 실제 IdP/HTTPS/실물 동글 운영 배포는 아직 남아 있다.
 
 - OIDC provider 연결, 브라우저 PKCE, membership/workspace, 계정/장비 역할 분리.
 - 첫 등록은 관리자 로그인/키+PC 증명, 평상시 분석은 유효 장비 lease로 동작한다.

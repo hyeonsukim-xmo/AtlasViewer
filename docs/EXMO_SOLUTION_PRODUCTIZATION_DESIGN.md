@@ -113,6 +113,8 @@ reader의 mesh 요청은 등록된 결과 revision, 확정된 Mask/sideMask dige
 
 ### 4.4 lease와 작업 허가 버전
 
+2026-10-18 확정: 고객 한 곳의 YubiKey 하나와 등록 PC 한 대에 장비 라이선스를 연결하고, 그 아래 CT·MRI·X-ray 등 계약한 솔루션 권한을 추가한다. 솔루션 추가에 별도 동글이나 PC 재등록을 요구하지 않는다. EXMO 운영자만 키 정책(고객용 필수/내부용 면제)을 승인하며, 기관 관리자와 일반 사용자는 고객용 키 검증을 해제할 수 없다. 키 정책은 PC 전체, 솔루션 허가·기간·회수는 솔루션별로 유지한다. 구현 범위는 [P4 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md)을 따른다.
+
 새 라이선스는 별도 `exmo-license-v3`/audience와 `/v3` endpoint를 사용한다. 기존 v2의 exact-fields 검사를 느슨하게 만들지 않는다.
 
 | 문서 | 필수 내용 |

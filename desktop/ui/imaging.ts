@@ -189,9 +189,21 @@ export type Job = SolutionIdentity & {
 export type LicenseStatus = { profile: "development" | "internal" | "customer"; state: string; expiresAt: number | null };
 export type InstallationState = {supported: boolean; busy: boolean; solutions: {analysis: Analysis; solutionId: string; installed: boolean; canRollback: boolean; state: string; version?: string | null; completed?: number; total?: number}[]};
 export type InstallationChoice = {id: string; version: string; choices: {analysis: Analysis; bytes: number; authorized: boolean}[]};
+export type AccountState = {state: string; me: null | {subject: string; name: string; operator: boolean; memberships: {orgId: string; workspaceId: string; name: string; roles: string[]}[]}; workspace: null | {orgId: string; workspaceId: string}; deviceOrgId?: string | null; installationId?: string | null};
+export type Enrollment = {id: string; orgId: string; workspaceId: string; installationId: string; profile: 'internal' | 'customer'; state: string; revision: number; keyPolicy: 'required' | 'internal-exempt' | null; prepared: boolean; licenseRevision: number | null; solutions: {solutionId: string; state: string; expiresAt: number | null}[]};
 declare global {
   interface Window {
     exmoDesktop: {
+      accountStatus(): Promise<Reply<AccountState>>;
+      accountLogin(): Promise<Reply<AccountState>>;
+      accountLogout(): Promise<Reply<AccountState>>;
+      accountRefresh(): Promise<Reply<AccountState>>;
+      accountWorkspace(org: string, id: string): Promise<Reply<AccountState>>;
+      accountEnroll(): Promise<Reply<Enrollment>>;
+      accountEnrollments(): Promise<Reply<Enrollment[]>>;
+      accountDecide(id: string, revision: number, policy: 'required' | 'internal-exempt', decision: 'approve' | 'reject'): Promise<Reply<Enrollment>>;
+      accountActivate(id: string): Promise<Reply<AccountState>>;
+      accountSolution(id: string, revision: number, solutionId: string, state: 'active' | 'suspended'): Promise<Reply<Enrollment>>;
       licenseStatus(): Promise<LicenseStatus>;
       manageLicense(): Promise<LicenseStatus>;
       installations(): Promise<Reply<InstallationState>>;

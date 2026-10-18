@@ -34,12 +34,15 @@
     "test:imaging:desktop": "npm run build && npm run build:desktop && electron scripts/validate-imaging-desktop.cjs",
     "test:solutions": "node scripts/validate-solution-contracts.cjs",
     "test:solution-security": "node --test scripts/security/test-solutions.cjs",
-    "test:installations": "node --test scripts/security/test-installations.cjs"
+    "test:installations": "node --test scripts/security/test-installations.cjs",
+    "test:accounts": "node --test scripts/security/test-accounts.cjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "jose": "6.2.12",
+    "openid-client": "6.8.8",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "tailwind-merge": "3.6.0",
@@ -77,7 +80,16 @@
       "desktop/icon.*",
       "package.json",
       "LICENSE",
-      "!node_modules/**/*"
+      "!node_modules/**/*",
+      {
+        "from": "node_modules",
+        "to": "node_modules",
+        "filter": [
+          "openid-client/**/*",
+          "oauth4webapi/**/*",
+          "jose/**/*"
+        ]
+      }
     ],
     "extraResources": [
       { "from": "desktop/security/windows-key.ps1", "to": "security/windows-key.ps1" },

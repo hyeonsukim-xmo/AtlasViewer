@@ -94,6 +94,7 @@ function verifyPackage(directory,policy) {
   const asar=require('@electron/asar'),archive=path.join(directory,'resources/app.asar');
   const files=asar.listPackage(archive).map(file=>file.replaceAll('\\','/'));
   P.check(!files.some(file=>/issuer-private|SIMULATED|license-server|internal-admin|authority.sqlite|\/work\/|\/scripts\//.test(file)),'Forbidden server/development file in package');
+  for(const name of ['openid-client','oauth4webapi','jose'])P.check(files.includes('/node_modules/'+name+'/package.json'),'Packaged account dependency missing: '+name);
   const actual=validateBuild(JSON.parse(asar.extractFile(archive,path.join('desktop','security','build.json'))));
   P.check(JSON.stringify(actual)===JSON.stringify(policy),'Packaged build policy differs');
   P.check(fs.existsSync(path.join(directory,'resources/security/windows-key.ps1')) &&

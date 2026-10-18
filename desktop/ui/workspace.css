@@ -1512,3 +1512,8 @@
 .installation-choice label { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .installation-choice label span { margin-left: auto; color: #a7a2bb; }
 .installation-dialog progress { display: block; width: 100%; accent-color: #aaa0c7; margin-top: 6px; }
+.account-dialog { max-height: 85vh; overflow: auto; }
+.account-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.account-workspace { display: grid; gap: 8px; }
+.account-dialog td small { display: block; overflow-wrap: anywhere; }
+.account-solution { display: block; white-space: nowrap; }
