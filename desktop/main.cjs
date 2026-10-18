@@ -20,6 +20,7 @@ const applicationName = internalBuild ? "EXMO Atlas Internal" : "EXMO Atlas";
 let desktopImaging;
 let publicationSync;
 let licensing;
+let remoteResults;
 let resultStorage;
 let protectedEngineRoot;
 let installations;
@@ -123,10 +124,13 @@ function createWindow() {
   const imaging = desktopImaging;
   const sync=publicationSync=require('./sync.cjs').openSync({directory:path.join(app.getPath('userData'),'publication-outbox'),safeStorage,account,imaging});
   const removeSyncUi=require('./sync-ui.cjs').installSyncUi({ipcMain,window,sync});
+  remoteResults=require('./remote-results.cjs').openRemote({account});
+  const removeRemoteUi=require('./remote-results.cjs').installRemoteUi({ipcMain,window,remote:remoteResults});
   window.once("closed", () => {
     removeLicenseUi();
     removeInstallationUi();
     removeAccountUi();
+    removeRemoteUi();
     void removeSyncUi().finally(()=>imaging.dispose()).catch(()=>{});
   });
   window.once("ready-to-show", () => {
@@ -213,6 +217,8 @@ app
         const pathname = decodeURIComponent(url.pathname);
         if (pathname.includes("\\") || pathname.includes(":"))
           return new Response(null, { status: 403 });
+        const remote=/^\/remote\/([a-f0-9-]{36})\.glb$/.exec(pathname);
+        if(remote)return await remoteResults.model(remote[1]);
         const model = /^\/result\/([a-f0-9-]{36})\.glb$/.exec(pathname);
         const modelPath = model ? desktopImaging?.mesh(model[1]) : null;
         const file =

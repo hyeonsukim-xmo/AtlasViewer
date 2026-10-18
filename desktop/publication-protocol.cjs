@@ -21,9 +21,9 @@ function measurement(v){
   allowed(v,['count','value','fat','hu','entropy']);P.integer(v.count);numeric(v.value,0);
   for(const k of ['fat','hu','entropy'])if(v[k]!=null)numeric(v[k]);
 }
-function content(v){
-  P.fields(v,['schema','identity','solutionId','workflowId','analysis','variant','route','unit','geometry','rows','parts','laterality','qc','mask','provenance']);
-  check(v.schema==='exmo-publication-content-v1');identity(v.identity);
+function content(v,projection=false){
+  P.fields(v,['schema',...(!projection?['identity','mask']:[]),'solutionId','workflowId','analysis','variant','route','unit','geometry','rows','parts','laterality','qc','provenance']);
+  check(v.schema==='exmo-publication-content-v1');if(!projection)identity(v.identity);
   const solution=resolveSolution(v.solutionId);check(solution.workflowId===v.workflowId && solution.analysis===v.analysis);
   check(['raw','pp500','strong'].includes(v.variant) && (v.analysis==='mri' || v.variant==='raw'));
   check(v.route===null || ['AP','LAT_LT','LAT_RT','LAT-LT','LAT-RT'].includes(v.route));
@@ -56,11 +56,12 @@ function content(v){
   for(const k of ['missing','unexpected']){check(Array.isArray(v.qc[k]) && v.qc[k].length<256);v.qc[k].forEach(P.integer);}
   check(['identity + L/R flip','5 folds + mirroring','None'].includes(v.qc.tta));
   if(v.qc.postprocessing){P.fields(v.qc.postprocessing,['removedCm3','removedPercent','changedVoxels']);Object.values(v.qc.postprocessing).forEach(n=>numeric(n));}
-  P.fields(v.mask,['sha256','bytes']);P.digest(v.mask.sha256);check(v.mask.bytes===voxels*2);
+  if(!projection){P.fields(v.mask,['sha256','bytes']);P.digest(v.mask.sha256);check(v.mask.bytes===voxels*2);}
   P.fields(v.provenance,['source','modelDigest','recipeDigest','packageSetDigest']);check(v.provenance.source==='fixed-local-result');
   for(const k of ['modelDigest','recipeDigest','packageSetDigest'])if(v.provenance[k]!==null)P.digest(v.provenance[k]);
   check(Buffer.byteLength(canonical(v))<192*1024);return v;
 }
+function context(v){P.fields(v,['caseId','studyId','acquisitionId']);Object.values(v).forEach(n=>check(typeof n==='string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(n)));return v;}
 function flags(v){check(Array.isArray(v) && v.length<=100 && v.every(s=>typeof s==='string' && (/^[A-Za-z0-9 _.:()%-]{1,160}$/.test(s) || ['좌우 판정 보류 영역 포함','양측 검출 미확인'].includes(s))));}
 function fromSnapshot(summary,id,geometry,mask){
   return content({schema:'exmo-publication-content-v1',identity:identity(pick(id,['originStoreId','originResultId','analysisRevision'])),
@@ -84,4 +85,4 @@ function manifest(v){
   if(v.artifact.kind==='mask')check(v.artifact.sha256===v.content.mask.sha256 && v.artifact.bytes===v.content.mask.bytes && v.attachmentRevision===0);
   return v;
 }
-module.exports={CHUNK,MAX_BYTES,check,canonical,hash,digest,pick,identity,scope,aad,proofMessage,content,fromSnapshot,artifact,manifest};
+module.exports={CHUNK,MAX_BYTES,check,canonical,hash,digest,pick,identity,scope,aad,proofMessage,content,context,fromSnapshot,artifact,manifest};

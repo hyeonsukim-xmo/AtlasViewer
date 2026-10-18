@@ -5,17 +5,39 @@ import LanguageSelect from "./language-select";
 import LicenseStatusButton from "./license-status";
 import Account from './account';
 import InstallationManager, {installationLabel} from './installation-manager';
+import RemoteResults from './remote-results';
+import {useAccountState} from './account-state';
+import {solutionAction} from './solution-readiness';
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import Home from "../../app/page";
 import ThighWorkspace from "./thigh-workspace";
-import { unwrap, type AnalysisResult, type ModelStatus, type Solution } from "./imaging";
+import { unwrap, type AnalysisResult, type ModelStatus, type Solution, type LicenseStatus } from "./imaging";
 import "../../app/globals.css";
 import "./workspace.css";
 import { groupXrays, studyIdentity, xrayView, viewLabel } from "./xray-studies";
 
 function Desktop() {
   const language = useLanguage();
+  const account=useAccountState();
+  const [accountRequest,setAccountRequest]=useState(0),[installRequest,setInstallRequest]=useState(0),[license,setLicense]=useState<LicenseStatus>();
+  useEffect(()=>{let alive=true;const update=()=>void window.exmoDesktop.licenseStatus().then(value=>{if(alive)setLicense(value);}).catch(()=>{});update();const timer=setInterval(update,5000);return()=>{alive=false;clearInterval(timer);};},[]);
+  function permission(id:string){
+    if(!license)return t('상태 확인 중');
+    if(license.profile==='development')return t('개발 환경');
+    const grant=license.solutions?.find(s=>s.solutionId===id);
+    if(license.solutions && !grant)return t('권한 없음');
+    if(grant?.state==='expired')return t('기간 만료');
+    if(grant && grant.state!=='active')return t('사용 중지');
+    return ['VALID','GRACE'].includes(license.state)?t('사용 허용'):t('장비 인증 필요');
+  }
+  function enter(analysis:Solution){
+    const action=solutionAction(analysis.id,license,status[analysis.id]);
+    if(action==='checking')return;
+    if(action==='install'){setInstallRequest(n=>n+1);return;}
+    if(action==='license'){void window.exmoDesktop.manageLicense().then(setLicense);return;}
+    setInitialResult(undefined);setView(analysis.id);
+  }
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
@@ -83,9 +105,10 @@ function Desktop() {
           </button>
           <span className="desktop-nav-label">Clinical imaging workspace</span>
           <LicenseStatusButton />
-          <InstallationManager />
-          <Account />
+          <InstallationManager openRequest={installRequest}/>
+          <Account openRequest={accountRequest}/>
           <Publication />
+          <button className="desktop-demo-link" aria-pressed={view==='server'} onClick={()=>setView('server')}>{t('서버 결과')}</button>
           <button className="desktop-demo-link" onClick={() => setView("demo")}>
             {t("3D 데모")}
           </button>
@@ -105,6 +128,13 @@ function Desktop() {
                 </div>
                 <span>Desktop · Local processing</span>
               </header>
+              <div className="catalog-status" role="status">
+                <span>{license?.profile==='development'?t('개발 환경'):license?.profile==='internal'?t('내부 개발용'):t('고객용')} · {license?.state||t('상태 확인 중')}</span>
+                <span>{account?.state==='signed-in'?`${account.me?.name} · ${account.workspace?.orgId||t('작업공간 선택')}`:t('로그인 없이 로컬 분석·결과 열람 가능')}</span>
+                <button className="text-button" onClick={()=>setAccountRequest(n=>n+1)}>{account?.state==='signed-in'?t('계정·작업공간'):t('계정 연결')}</button>
+                <button className="text-button" onClick={()=>setInstallationRevision(n=>n+1)}>{t('새로고침')}</button>
+              </div>
+              {license && license.profile!=='development' && !['VALID','GRACE'].includes(license.state) && <p className="metric-note">{t('신규 분석은 장비 승인이 필요합니다. 기존 결과는 아래 목록에서 열 수 있습니다.')} <button className="text-button" onClick={()=>setAccountRequest(n=>n+1)}>{t('초기 설정')}</button></p>}
               <div className="catalog-section">
                 <div className="panel-title">
                   <strong>{t("분석 프로토콜")}</strong>
@@ -117,18 +147,18 @@ function Desktop() {
                       <th>{t("분석 / 입력 조건")}</th>
                       <th>{t("결과")}</th>
                       <th>{t("엔진")}</th>
+                      <th>{t('사용권')}</th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
-                    {analyses.map((analysis) => (
+                    {analyses.filter(a=>!license?.solutions || license.solutions.some(s=>s.solutionId===a.id)).toSorted((a,b)=>Number(license?.solutions?.find(s=>s.solutionId===b.id)?.state==='active')-Number(license?.solutions?.find(s=>s.solutionId===a.id)?.state==='active')).map((analysis) => (
                       <tr
                         key={analysis.id}
                         className="openable-row"
-                        onClick={() => {
-                          setInitialResult(undefined);
-                          setView(analysis.id);
-                        }}
+                        tabIndex={0}
+                        onClick={() => enter(analysis)}
+                        onKeyDown={e=>{if(e.target===e.currentTarget && ['Enter',' '].includes(e.key)){e.preventDefault();enter(analysis);}}}
                       >
                         <td>
                           <span className="modality-label">{analysis.name}</span>
@@ -154,12 +184,14 @@ function Desktop() {
                           <small>{status[analysis.id]?.device || "—"}</small>
                           {solutionErrors[analysis.id] && <small className="inline-error" role="alert">{solutionErrors[analysis.id]}</small>}
                         </td>
+                        <td>{permission(analysis.id)}</td>
                         <td>
                           <button
                             className="clinical-button"
+                            disabled={solutionAction(analysis.id,license,status[analysis.id])==='checking'}
                             aria-label={t("{{value0}} 허벅지 근육 분석", { value0: analysis.name })}
                           >
-                            {t("작업 열기")}
+                            {solutionAction(analysis.id,license,status[analysis.id])==='checking'?t('상태 확인 중'):solutionAction(analysis.id,license,status[analysis.id])==='install'?t('설치 확인'):solutionAction(analysis.id,license,status[analysis.id])==='license'?t('사용권 확인'):t('작업 열기')}
                           </button>
                         </td>
                       </tr>
@@ -167,6 +199,7 @@ function Desktop() {
                   </tbody>
                 </table>
               </div>
+              {license?.solutions?.length===0 && <div className="clinical-empty"><p>{t('승인된 솔루션이 없습니다. EXMO 운영 관리자에게 사용권을 요청하세요.')}</p><button className="clinical-button" onClick={()=>setAccountRequest(n=>n+1)}>{t('계정·장비 등록')}</button></div>}
               <div className="catalog-section recent-section">
                 <div className="panel-title">
                   <strong>{t("최근 분석")}</strong>
@@ -189,6 +222,8 @@ function Desktop() {
                       <tr
                         key={group.key}
                         className="openable-row"
+                        tabIndex={0}
+                        onKeyDown={e=>{if(e.target===e.currentTarget && ['Enter',' '].includes(e.key)){e.preventDefault();e.currentTarget.click();}}}
                         onClick={() => {
                           setInitialResult(result.id);
                           setView(result.solutionId || analyses.find(item => item.analysis === result.analysis)!.id);
@@ -229,6 +264,7 @@ function Desktop() {
             </div>
           </section>
         )}
+        {view==='server' && <RemoteResults local={recent} onAccount={()=>setAccountRequest(n=>n+1)} onHome={()=>setView('home')}/>}
         {analyses.map((analysis) => (
           <div className="desktop-workspace" key={analysis.id} hidden={view !== analysis.id}>
             <ThighWorkspace

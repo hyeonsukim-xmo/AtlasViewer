@@ -15,10 +15,11 @@ export function installationLabel(state?: string) {
     default: return t('설치 필요');
   }
 }
-export default function InstallationManager(){
+export default function InstallationManager({openRequest=0}:{openRequest?:number}){
   useLanguage();
   const [open,setOpen]=useState(false),[state,setState]=useState<InstallationState>(),[choice,setChoice]=useState<InstallationChoice|null>(null);
   const [selected,setSelected]=useState<Analysis[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  useEffect(()=>{if(openRequest)setOpen(true);},[openRequest]);
   useEffect(()=>{
     if(!window.exmoDesktop.installations)return;
     let alive=true;

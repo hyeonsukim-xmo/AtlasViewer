@@ -68,6 +68,7 @@ export default function ResultView({
   heading,
   description,
   comparison,
+  remote,
 }: {
   results: AnalysisResult[];
   onClose: () => void;
@@ -76,10 +77,11 @@ export default function ResultView({
   heading?: string;
   description?: string;
   comparison?: ComparisonActions;
+  remote?: {meshUrls:Record<string,string>};
 }) {
   const language = useLanguage();
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
-  const [requestedMode, setMode] = useState<"overlay" | "3d">("overlay");
+  const [requestedMode, setMode] = useState<"overlay" | "3d">(remote && results.some(r=>r.meshBytes)?"3d":"overlay");
   const [state, setState] = useState<SceneState<string>>({ ...INITIAL_STATE, group: "All" });
   const [linkedHover, setLinkedHover] = useState<{viewport: string; id: string} | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
@@ -91,7 +93,7 @@ export default function ResultView({
   const [table, setTable] = useState<"metrics" | "qc">("metrics");
   const [ttaThreshold, setTtaThreshold] = useState(1.16);
   const needsPreparation = (result: AnalysisResult) =>
-    result.analysis !== "xray" && result.laterality?.method !== "femur_components_lps_v1";
+    !remote && result.analysis !== "xray" && result.laterality?.method !== "femur_components_lps_v1";
   const [preparing, setPreparing] = useState(() => results.some(needsPreparation));
   const pendingMeshes = results.some(result => result.meshState === "pending");
   const preparationKey = results.map(result => result.id).join(",");
@@ -159,14 +161,14 @@ export default function ResultView({
         results.map((result) => [
           result.id,
           {
-            url: `/result/${result.id}.glb?v=${result.variant}&lr=${result.laterality?.method || "legacy"}`,
+            url: remote?.meshUrls[result.id] || `/result/${result.id}.glb?v=${result.variant}&lr=${result.laterality?.method || "legacy"}`,
             bytes: result.meshBytes || 0,
             structures: result.rows.filter((row) => row.present),
             parts: result.parts,
           },
         ]),
       ),
-    [results],
+    [results,remote],
   );
   const can3d =
     !preparing && results.some((result) => result.meshBytes && !needsPreparation(result));
@@ -192,6 +194,7 @@ export default function ResultView({
       }));
   }
   async function changeVariant(result: AnalysisResult, variant: string) {
+    if(remote)return;
     setChanging(true);
     setError("");
     setCaseErrors(previous => ({...previous,[result.id]:''}));
@@ -264,11 +267,11 @@ export default function ResultView({
           </p>
         </div>
         <div className="result-view-actions">
-        <Publication results={results} />
+        {!remote && <Publication results={results} />}
         {comparison && <ResultComparison results={results} actions={comparison} />}
         <div className="control-segment">
           <button aria-pressed={mode === "overlay"} onClick={() => setMode("overlay")}>
-            Overlay &amp; metrics
+            {remote?t('측정·QC'):<>Overlay &amp; metrics</>}
           </button>
           <button
             disabled={!can3d}
@@ -383,7 +386,7 @@ export default function ResultView({
                         {result.metadata.caseName}
                         {result.analysis === "xray" && xrayView(result) && <small>{viewLabel(xrayView(result)!)}</small>}
                       </strong>
-                      {result.analysis === "mri" ? (
+                      {result.analysis === "mri" && !remote ? (
                         <select
                           aria-label={t("{{value0}} MRI 결과 variant", {
                             value0: result.metadata.caseName,
@@ -397,7 +400,7 @@ export default function ResultView({
                           <option value="strong">{t("강화 후보")}</option>
                         </select>
                       ) : (
-                        <small>{result.unit}</small>
+                        <small>{remote?`${result.variant.toUpperCase()} · `:''}{result.unit}</small>
                       )}
                       {result.qc.ttaDisagreement != null &&
                         result.qc.ttaDisagreement * 100 > ttaThreshold && (
@@ -472,7 +475,7 @@ export default function ResultView({
                       <td>{t("좌우 분류")}</td>
                       {results.map((result) => (
                         <td key={result.id}>
-                          {t(result.laterality?.reason) || t("좌우 정보 준비 전")}
+                          {t(result.laterality?.reason) || (result.laterality?t('자동 좌우 분류 · 검토 필요'):t("좌우 정보 준비 전"))}
                           {result.laterality && (
                             <small>
                               {t("미분류 ")}
@@ -497,12 +500,12 @@ export default function ResultView({
                       <td key={r.id}>{r.qc.tta}</td>
                     ))}
                   </tr>
-                  <tr>
+                  {!remote && <tr>
                     <td>{t("처리 시간")}</td>
                     {results.map((r) => (
                       <td key={r.id}>{number(r.seconds, 0)} s</td>
                     ))}
-                  </tr>
+                  </tr>}
                   {results.some(result => result.compute) && (
                     <tr>
                       <td>{t("CT 계산 장치")}</td>
@@ -581,13 +584,13 @@ export default function ResultView({
                                     {ttaThreshold}
                                     {t("% 초과")}
                                   </small>
-                                  <button
+                                  {!remote && <button
                                     className="clinical-button"
                                     disabled={changing || preparing || r.variant === "strong"}
                                     onClick={() => void changeVariant(r, "strong")}
                                   >
                                     {t("강화 후보 비교")}
-                                  </button>
+                                  </button>}
                                 </>
                               )}
                           </td>
@@ -862,7 +865,7 @@ export default function ResultView({
                     )}
                   </button>
                   {caseErrors[result.id] && <p className="inline-error" role="alert">{failureText(caseErrors[result.id])}</p>}
-                  {mode === "overlay" ? (
+                  {mode === "overlay" && remote ? <div className="clinical-empty remote-preview-note"><strong>{t('게시된 측정·QC 결과')}</strong><span>{t('원본 영상과 대표 Overlay가 게시되지 않아 슬라이스 열람은 제공하지 않습니다.')}</span><span>{t('촬영 범위')}: {result.metadata.size.join(' × ')} · {result.metadata.spacing.join(' × ')} mm</span></div> : mode === "overlay" ? (
                     <ImagePreview
                       key={result.id}
                       revision={`${result.variant}:${result.laterality?.method || "legacy"}`}
@@ -872,9 +875,9 @@ export default function ResultView({
                       classIds={allSelected ? null : chosen.map((row) => row.label)}
                     />
                   ) : !result.meshBytes || needsPreparation(result) ? (
-                    <div className="inline-error" role="status">{result.meshDiagnostic
+                    <div className="inline-error" role="status">{remote?(result.meshState==='pending'?t('3D 후속 전송 대기'):t('해당 결과에는 게시된 3D가 없습니다.')):result.meshDiagnostic
                       ? failureText('', result.meshDiagnostic) : t("3D 준비가 완료되지 않았습니다. 측정값과 Overlay는 사용할 수 있습니다.")}
-                      {['failed','interrupted'].includes(result.meshState || '') && <p><button className="clinical-button" disabled={changing}
+                      {!remote && ['failed','interrupted'].includes(result.meshState || '') && <p><button className="clinical-button" disabled={changing}
                         onClick={() => void changeVariant(result, result.variant)}>{t("3D 다시 준비")}</button></p>}
                     </div>
                   ) : (
@@ -897,10 +900,10 @@ export default function ResultView({
                         onError={(_message, issue) => {
                           const failure = sceneDiagnostic(issue?.code, issue?.reference);
                           setSceneErrors(previous => ({...previous,[sceneKey]:failure}));
-                          void window.exmoDesktop.sceneFailure(result.id, failure.code, failure.reference).catch(() => {});
+                          if(!remote)void window.exmoDesktop.sceneFailure(result.id, failure.code, failure.reference).catch(() => {});
                         }}
                         onInteract={() => {}}
-                        onImageMenu={image => {
+                        onImageMenu={remote?undefined:image => {
                           setError("");
                           void window.exmoDesktop.imageMenu({image,
                             filename: `${result.analysis.toUpperCase()}_${result.metadata.studyDate || "undated"}_3D_${assembled ? "assembled" : "exploded"}_${state.view}.png`,
@@ -963,7 +966,7 @@ export default function ResultView({
           {mode === "3d" && (
             <footer className="render-hint">
               <span>
-                {t("좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장")}
+                {remote?t('좌클릭 선택 · 드래그 회전 · 휠 확대 · 휠 버튼 이동'):t("좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장")}
               </span>
               <label>
                 Surrounding opacity

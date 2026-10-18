@@ -1,6 +1,6 @@
 # 솔루션별 제품화 구현·검증 계획
 
-기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer, P4의 계정·운영 승인 연결과 P5 기본 결과 게시를 로컬 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md), [P4 구현 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md)을 따른다. [P5 구현·검증 기록](EXMO_SOLUTION_P5_IMPLEMENTATION.md)에 기본 게시 범위와 제외 사항을 기록했다. 실물·운영 배포 검증, P5의 대표 영상 승인 및 P6~P8, acceptance matrix 전체가 완료된 것은 아니다.
+기준: 2026-10-17, `d474eea`. [설계 본문](EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)의 실행 계획이다. 설계 기준점은 `f790036`이며, `feat/solution-productization`에서 P0의 기준 기록과 P1의 registry·로컬 결과 ID, P2의 솔루션별 권한 경계, P3의 선택 설치·공용 Viewer, P4의 계정·운영 승인, P5 기본 결과 게시와 P6 Desktop 홈·서버 열람을 로컬 구현했다. 실제 통과 범위와 남은 검증은 [P1 구현 기록](EXMO_SOLUTION_P1_IMPLEMENTATION.md), [P2 구현·전환 기록](EXMO_SOLUTION_P2_IMPLEMENTATION.md), [P3 구현·검증 기록](EXMO_SOLUTION_P3_IMPLEMENTATION.md), [P4 구현 기록](EXMO_SOLUTION_P4_IMPLEMENTATION.md), [P5 구현 기록](EXMO_SOLUTION_P5_IMPLEMENTATION.md), [P6 구현 기록](EXMO_SOLUTION_P6_IMPLEMENTATION.md)을 따른다. 실물·운영 배포 검증, P5의 대표 영상 승인 및 P7~P8, acceptance matrix 전체가 완료된 것은 아니다.
 
 ## 1. 작업 범위와 보존 대상
 
@@ -97,6 +97,8 @@
 - 종료 조건: 원본/키/평문 Mask 유출 없음, 네트워크/로그인/디스크/권한 오류에서 원본·완료 결과 유지, 재시도 중복 없음, 기관별 복구/삭제 시험 통과.
 
 ### P6 — 실제 홈 화면 통합
+
+2026-10-18: Desktop 홈의 사용권/설치 상태 분리, 서버 결과 목록·읽기 전용 측정/QC/3D, 최대 3개 선택과 호환성 검사, 가명 Study 및 X-ray 방향 묶음을 연결했다. [P6 구현·검증 기록](EXMO_SOLUTION_P6_IMPLEMENTATION.md)을 따른다. 운영 서버·고객 설치본 검증과 Web/태블릿은 남아 있다.
 
 - [화면 모형](prototypes/solution-home.html)의 상태와 실 backend readiness를 연결한다.
 - 구매/설치/장비 상태와 계정/전송 상태가 독립적으로 보이고 row 주요 동작이 일관되게 작동하게 한다.

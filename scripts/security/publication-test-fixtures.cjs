@@ -1,5 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),http=require('node:http');
 const {execFile}=require('node:child_process');
+const assert=require('node:assert/strict');
 const F=require('./account-test-fixtures.cjs');
 const S=require('../../desktop/publication-protocol.cjs');
 const {Results,createServer}=require('./results-server.cjs');

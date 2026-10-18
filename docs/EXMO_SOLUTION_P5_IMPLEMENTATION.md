@@ -122,6 +122,8 @@ node node_modules/electron/cli.js scripts/security/validate-publication-desktop.
 
 ## 남은 범위
 
+2026-10-18 후속: [P6](EXMO_SOLUTION_P6_IMPLEMENTATION.md)에서 Desktop 서버 목록/측정/QC/GLB 읽기와 가명 context를 연결했다. 아래 목록은 P5 종료 당시 기준이며, P6의 표시용 GLB 사본 및 추가 서비스 ACL을 함께 적용해야 한다. Web/태블릿과 대표 Overlay는 여전히 미완료다.
+
 1. 실제 서버/IdP/HTTPS·OS 서비스 권한·KMS·운영 백업/복구·부하 시험, 실물 YubiKey/새 PC/고객 설치본 검증.
 2. 대표 Overlay의 픽셀 식별정보 제거/최종 사본 승인. 이 경로를 만들기 전까지 영상 게시 기능은 제공하지 않는다.
 3. 실제 환자/Study 연결·원격 결과 목록/geometry 제공·Web/태블릿 Viewer 및 P6 홈 통합. 지금 원격 조회 API는 측정/QC projection을 반환하며 GLB는 보호 저장까지만 연결했다.

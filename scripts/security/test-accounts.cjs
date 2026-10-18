@@ -121,7 +121,7 @@ test('unconfigured account is nonblocking; production config cannot enable loopb
   assert.equal(openAccount({config:account,directory:locked}).status().state,'storage-unavailable');
   assert.throws(()=>validateBuild({...base,account:{...account,issuer:'http://127.0.0.1'}}));
   const handlers=new Map(),ipcMain={handle:(name,fn)=>handlers.set(name,fn),removeHandler:name=>handlers.delete(name)},frame={url:'atlas://app/'};
-  const window={webContents:{mainFrame:frame}},fake={status:()=>({state:'unconfigured'}),close(){}};
+  const events=[],window={webContents:{mainFrame:frame,isDestroyed:()=>false,send:(...args)=>events.push(args)}},fake={status:()=>({state:'unconfigured'}),close(){}};
   const cleanup=require('../../desktop/security/account-ui.cjs').installAccountUi({ipcMain,window,account:fake});
-  return (async()=>{await assert.rejects(handlers.get('exmo:account:status')({sender:{},senderFrame:frame}));assert.equal((await handlers.get('exmo:account:status')({sender:window.webContents,senderFrame:frame})).ok,true);cleanup();assert.equal(handlers.size,0);})();
+  return (async()=>{await assert.rejects(handlers.get('exmo:account:status')({sender:{},senderFrame:frame}));assert.equal((await handlers.get('exmo:account:status')({sender:window.webContents,senderFrame:frame})).ok,true);assert.deepEqual(events,[['exmo:account:changed',{state:'unconfigured'}]]);cleanup();assert.equal(handlers.size,0);})();
 });

@@ -3,6 +3,7 @@ const S=require('./publication-protocol.cjs');
 const {protectedStore}=require('./security/storage.cjs');
 const {encryptMesh,publicKey}=require('./publication-crypto.cjs');
 function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
+  const context=require('./publication-context.cjs').openContexts(directory,safeStorage);
   const jobs=new Map();let active=null,closed=false,storageError=false;
   const file=id=>path.join(directory,id+'.bin'),store=id=>protectedStore(file(id),safeStorage,2*1024*1024);
   const save=job=>store(job.id).write(job);
@@ -73,6 +74,10 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
       }
       discardParts(job);state(job,'cancelled');return;
     }
+    if(job.published && !job.contextLinked){
+      job.context??=(await rpc(job,'read',{resultId:job.published.resultId})).context??context(job.source);save(job);
+      await rpc(job,'context',{resultId:job.published.resultId,context:job.context});job.contextLinked=true;save(job);
+    }
     if(job.published && job.published.meshState!=='pending'){discardParts(job);job.manifest=null;job.attemptId=null;state(job,'published');return;}
     if(job.published && !job.manifest){
       if(!await imaging.publicationMesh(job.source)){state(job,'published');return;}
@@ -105,7 +110,7 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
       for(const job of jobs.values()){
         if(closed)break;
         if(['failed','cancelled','needs_permission','quota_blocked'].includes(job.state) || job.next>Date.now())continue;
-        if(job.published?.meshState!=='pending' && job.state==='published')continue;
+        if(job.published?.meshState!=='pending' && job.state==='published' && job.contextLinked)continue;
         if(!eligible(job)){if(job.state!=='needs_login')state(job,'needs_login','PUBLICATION_SIGN_IN');continue;}
         try{await transfer(job);}
         catch(e){

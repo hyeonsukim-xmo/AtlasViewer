@@ -186,16 +186,23 @@ export type Job = SolutionIdentity & {
   failed: { id: string; name: string; error: string; diagnostic?:Diagnostic }[];
   total: number;
 };
-export type LicenseStatus = { profile: "development" | "internal" | "customer"; state: string; expiresAt: number | null };
+export type LicenseStatus = { profile: "development" | "internal" | "customer"; state: string; expiresAt: number | null; solutions?:{solutionId:string;state:string;expiresAt:number|null}[] };
 export type InstallationState = {supported: boolean; busy: boolean; solutions: {analysis: Analysis; solutionId: string; installed: boolean; canRollback: boolean; state: string; version?: string | null; completed?: number; total?: number}[]};
 export type InstallationChoice = {id: string; version: string; choices: {analysis: Analysis; bytes: number; authorized: boolean}[]};
 export type AccountState = {state: string; me: null | {subject: string; name: string; operator: boolean; memberships: {orgId: string; workspaceId: string; name: string; roles: string[]}[]}; workspace: null | {orgId: string; workspaceId: string}; deviceOrgId?: string | null; installationId?: string | null};
 export type Enrollment = {id: string; orgId: string; workspaceId: string; installationId: string; profile: 'internal' | 'customer'; state: string; revision: number; keyPolicy: 'required' | 'internal-exempt' | null; prepared: boolean; licenseRevision: number | null; solutions: {solutionId: string; state: string; expiresAt: number | null}[]};
 export type SyncState = {configured:boolean; storageError:boolean; jobs:{id:string;resultId:string;revision:string;name:string;state:string;error:string|null;orgId:string;workspaceId:string;uploaded:number;total:number;cloudResultId:string|null;meshState:string|null;kind:string}[]};
 export type PublicationRef = {id:string;revision:string};
+export type RemoteContext = {caseId:string;studyId:string;acquisitionId:string};
+export type RemoteSummary = {resultId:string;attachmentRevision:number;meshState:'ready'|'empty'|'pending';solutionId:string;analysis:Analysis;variant:string;route:string|null;unit:string;context:RemoteContext|null};
+export type RemoteDetail = Omit<RemoteSummary,'analysis'> & {analysis:Analysis;content:{schema:string;solutionId:string;workflowId:string;analysis:Analysis;variant:string;route:string|null;unit:string;geometry:{size:number[];spacing:number[];origin:number[];direction:number[]};rows:MetricRow[];parts:{id:string;structureId:string;side:AnatomicalSide;label:number}[];laterality:Omit<NonNullable<AnalysisResult['laterality']>,'reason'>|null;qc:AnalysisResult['qc'];provenance:{source:string;modelDigest:string|null;recipeDigest:string|null;packageSetDigest:string|null}};meshBytes:number|null;meshUrl:string|null};
 declare global {
   interface Window {
     exmoDesktop: {
+      remoteList():Promise<Reply<RemoteSummary[]>>;
+      remoteRead(ids:string[],loadMesh?:boolean):Promise<Reply<RemoteDetail[]>>;
+      remoteClose():Promise<Reply<void>>;
+      onAccountChanged(callback:(state:AccountState)=>void):()=>void;
       syncStatus(): Promise<Reply<SyncState>>;
       syncEnqueue(refs:PublicationRef[]): Promise<Reply<SyncState>>;
       syncRetry(id:string): Promise<Reply<SyncState>>;

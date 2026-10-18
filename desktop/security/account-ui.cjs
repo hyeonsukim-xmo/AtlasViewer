@@ -15,18 +15,21 @@ const errors={
 };
 function installAccountUi({ipcMain,window,account}){
   const channels=[];
+  let previous='';
+  const notify=()=>{const state=account.status(),key=JSON.stringify(state);if(key!==previous && !window.webContents.isDestroyed()){previous=key;window.webContents.send('exmo:account:changed',state);}};
+  const timer=setInterval(notify,500);timer.unref?.();
   const handle=(name,action)=>{
     const channel='exmo:account:'+name;channels.push(channel);
     ipcMain.handle(channel,async(event,...args)=>{
       const frame=event.senderFrame,url=frame?new URL(frame.url):null;
       if(event.sender!==window.webContents || frame!==window.webContents.mainFrame || url?.protocol!=='atlas:' || url.host!=='app' || !['/','/index.html'].includes(url.pathname))throw Error('Untrusted account caller');
-      try{return {ok:true,value:await action(...args)};}catch(error){return {ok:false,error:errors[error.message]??(error.accountStatus===401?'로그인이 만료되었습니다. 다시 로그인하세요.':error.accountStatus===403?'해당 기관·작업공간의 권한이 없습니다. 관리자에게 확인하세요.':name==='login'?'로그인을 확인하지 못했습니다. 브라우저 인증과 계정 서버 설정을 확인하세요.':'계정 요청을 완료하지 못했습니다. 로그인·기관 권한·서버 연결·장비 승인 상태를 확인하세요.')};}
+      try{const pending=action(...args);notify();return {ok:true,value:await pending};}catch(error){return {ok:false,error:errors[error.message]??(error.accountStatus===401?'로그인이 만료되었습니다. 다시 로그인하세요.':error.accountStatus===403?'해당 기관·작업공간의 권한이 없습니다. 관리자에게 확인하세요.':name==='login'?'로그인을 확인하지 못했습니다. 브라우저 인증과 계정 서버 설정을 확인하세요.':'계정 요청을 완료하지 못했습니다. 로그인·기관 권한·서버 연결·장비 승인 상태를 확인하세요.')};}finally{notify();}
     });
   };
   handle('status',()=>account.status());handle('login',()=>account.login());handle('logout',()=>account.logout());handle('refresh',()=>account.refresh());
   handle('workspace',(org,id)=>account.workspace(org,id));handle('enroll',()=>account.enroll());handle('enrollments',()=>account.enrollments());
   handle('decide',(id,revision,policy,decision)=>account.decide(id,revision,policy,decision));handle('activate',id=>account.activate(id));
   handle('solution',(id,revision,solutionId,state)=>account.solution(id,revision,solutionId,state));
-  return ()=>{channels.forEach(c=>ipcMain.removeHandler(c));account.close();};
+  return ()=>{clearInterval(timer);channels.forEach(c=>ipcMain.removeHandler(c));account.close();};
 }
 module.exports={installAccountUi};

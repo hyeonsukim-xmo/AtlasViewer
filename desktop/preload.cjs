@@ -4,6 +4,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld(
   "exmoDesktop",
   Object.freeze({
+    remoteList:()=>ipcRenderer.invoke('exmo:remote:list'),
+    remoteRead:(ids,loadMesh)=>ipcRenderer.invoke('exmo:remote:read',ids,loadMesh),
+    remoteClose:()=>ipcRenderer.invoke('exmo:remote:close'),
+    onAccountChanged:callback=>{const listener=(_event,state)=>callback(state);ipcRenderer.on('exmo:account:changed',listener);return ()=>ipcRenderer.removeListener('exmo:account:changed',listener);},
     syncStatus: () => ipcRenderer.invoke('exmo:sync:status'),
     syncEnqueue: refs => ipcRenderer.invoke('exmo:sync:enqueue',refs),
     syncRetry: id => ipcRenderer.invoke('exmo:sync:retry',id),

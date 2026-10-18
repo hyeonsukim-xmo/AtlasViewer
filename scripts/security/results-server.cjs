@@ -24,6 +24,7 @@ class Results{
         digest TEXT NOT NULL,content TEXT NOT NULL,mask_attempt TEXT NOT NULL,mesh_attempt TEXT,revision INTEGER NOT NULL,deleted INTEGER NOT NULL DEFAULT 0,publisher TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS result_audit(at INTEGER NOT NULL,actor TEXT NOT NULL,event TEXT NOT NULL,target TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS proof_nonces(nonce TEXT PRIMARY KEY,expires INTEGER NOT NULL);`);
+    this.db.exec('CREATE TABLE IF NOT EXISTS publication_contexts(result TEXT PRIMARY KEY REFERENCES publications(id),document TEXT NOT NULL)');
   }
   transaction(fn){this.db.exec('BEGIN IMMEDIATE');try{const value=fn();this.db.exec('COMMIT');return value;}catch(e){this.db.exec('ROLLBACK');throw e;}}
   audit(actor,event,target){this.db.prepare('INSERT INTO result_audit VALUES(?,?,?,?)').run(Math.floor(Date.now()/1000),actor.sub,event,target);}
@@ -43,7 +44,7 @@ class Results{
     P.fields(claims,['orgId','workspaceId','subject','installationId','route','bodyDigest','nonce','at']);P.nonce(claims.nonce);P.integer(claims.at);
     fail(claims.route===route && claims.bodyDigest===S.digest(body) && Math.abs(Date.now()/1000-claims.at)<120,403,'PUBLICATION_PROOF');
     const scope=S.pick(claims,['orgId','workspaceId','subject','installationId']);
-    const role=route.endsWith('/approve-origin')||route.endsWith('/delete')?'data-admin':route.endsWith('/list')||route.endsWith('/read')?'read':'analyst';
+    const role=route.endsWith('/approve-origin')||route.endsWith('/delete')?'data-admin':['/list','/read','/mesh-part'].some(p=>route.endsWith(p))?'read':'analyst';
     const request=this.access(actor,scope,role);
     fail(crypto.verify('sha256',S.proofMessage(claims),P.p256(request.installationPublicKey),P.decode(signature)),403,'PUBLICATION_PROOF');
     this.transaction(()=>{this.db.prepare('DELETE FROM proof_nonces WHERE expires<?').run(Date.now()/1000);fail(!this.db.prepare('SELECT 1 FROM proof_nonces WHERE nonce=?').get(claims.nonce),409,'PUBLICATION_REPLAY');this.db.prepare('INSERT INTO proof_nonces VALUES(?,?)').run(claims.nonce,claims.at+120);});
@@ -117,7 +118,7 @@ class Results{
       this.access(actor,scope);this.originAccess(scope,m.content.identity);
       if(m.artifact.kind==='mask'){
         const resultId=crypto.randomUUID();
-        this.db.prepare('INSERT INTO publications VALUES(?,?,?,?,?,?,?,NULL,0,0,?)').run(this.key(m),resultId,scope.orgId,scope.workspaceId,m.contentDigest,S.canonical(m.content),id,actor.sub);
+        this.db.prepare('INSERT INTO publications(identity,id,org,workspace,digest,content,mask_attempt,mesh_attempt,revision,deleted,publisher) VALUES(?,?,?,?,?,?,?,NULL,0,0,?)').run(this.key(m),resultId,scope.orgId,scope.workspaceId,m.contentDigest,S.canonical(m.content),id,actor.sub);
       }else{
         fail(existing && existing.revision===m.attachmentRevision,409,'PUBLICATION_ATTACHMENT_CONFLICT');
         this.db.prepare('UPDATE publications SET mesh_attempt=?,revision=revision+1 WHERE identity=?').run(id,this.key(m));
@@ -131,15 +132,43 @@ class Results{
     if(published && (published.mask_attempt===id || published.mesh_attempt===id))return this.dto(published);
     this.db.prepare("UPDATE attempts SET state='cancelled',receipt=NULL WHERE id=?").run(id);this.audit(actor,'upload-cancelled',id);return {state:'cancelled'};
   }
-  list(actor,scope){this.access(actor,scope,'read');return this.db.prepare('SELECT * FROM publications WHERE org=? AND workspace=? AND deleted=0 ORDER BY rowid DESC LIMIT 200').all(scope.orgId,scope.workspaceId).map(r=>({...this.dto(r),solutionId:JSON.parse(r.content).solutionId,variant:JSON.parse(r.content).variant}));}
+  describe(row){const v=JSON.parse(row.content),context=this.db.prepare('SELECT document FROM publication_contexts WHERE result=?').get(row.id)?.document;return {...this.dto(row),solutionId:v.solutionId,variant:v.variant,analysis:v.analysis,route:v.route,unit:v.unit,context:context?JSON.parse(context):null};}
+  list(actor,scope){this.access(actor,scope,'read');return this.db.prepare('SELECT * FROM publications WHERE org=? AND workspace=? AND deleted=0 ORDER BY rowid DESC LIMIT 200').all(scope.orgId,scope.workspaceId).map(r=>this.describe(r));}
   result(actor,scope,id){P.id(id);this.access(actor,scope,'read');const row=this.db.prepare('SELECT * FROM publications WHERE id=? AND org=? AND workspace=? AND deleted=0').get(id,scope.orgId,scope.workspaceId);fail(row,404,'PUBLICATION_NOT_FOUND');return row;}
-  read(actor,scope,id){const row=this.result(actor,scope,id),v=JSON.parse(row.content);delete v.mask;delete v.identity;this.audit(actor,'result-read',id);return {...this.dto(row),analysis:v};}
+  read(actor,scope,id){const row=this.result(actor,scope,id),v=JSON.parse(row.content);delete v.mask;delete v.identity;this.audit(actor,'result-read',id);
+    const artifact=row.mesh_attempt?JSON.parse(this.db.prepare('SELECT document FROM attempts WHERE id=?').get(row.mesh_attempt).document).artifact:null;
+    return {...this.describe(row),analysis:v,mesh:artifact?S.pick(artifact,['sha256','bytes']):null};}
+  context(actor,scope,id,value){
+    S.context(value);this.access(actor,scope);return this.transaction(()=>{
+      const row=this.result(actor,scope,id),v=JSON.parse(row.content);this.originAccess(scope,v.identity);
+      const old=this.db.prepare('SELECT document FROM publication_contexts WHERE result=?').get(id)?.document;
+      fail(!old || old===S.canonical(value),409,'PUBLICATION_CONTEXT_CONFLICT');
+      this.db.prepare('INSERT OR IGNORE INTO publication_contexts VALUES(?,?)').run(id,S.canonical(value));this.audit(actor,'context-linked',id);return {linked:true};
+    });
+  }
+  meshPart(actor,scope,{resultId,revision,sha256,index}){
+    P.integer(revision);P.digest(sha256);P.integer(index);const row=this.result(actor,scope,resultId);
+    fail(row.mesh_attempt && row.revision===revision,409,'PUBLICATION_ATTACHMENT_CONFLICT');
+    const m=JSON.parse(this.db.prepare('SELECT document FROM attempts WHERE id=?').get(row.mesh_attempt).document);
+    fail(m.artifact.kind==='mesh' && m.artifact.sha256===sha256 && index<Math.ceil(m.artifact.bytes/S.CHUNK),400,'PUBLICATION_PART');
+    // Only the verifier writes this validated display copy. No native Mask or decryption key is served.
+    const dir=directory(path.join(this.root,'objects'),row.mesh_attempt),file=path.join(dir,'display.glb');
+    fail(fs.existsSync(file) && !fs.lstatSync(file).isSymbolicLink(),503,'PUBLICATION_MESH_UNAVAILABLE');
+    const fd=fs.openSync(file,'r');try{
+      fail(fs.fstatSync(fd).size===m.artifact.bytes,503,'PUBLICATION_MESH_UNAVAILABLE');
+      const bytes=Buffer.alloc(Math.min(S.CHUNK,m.artifact.bytes-index*S.CHUNK));
+      fail(fs.readSync(fd,bytes,0,bytes.length,index*S.CHUNK)===bytes.length,503,'PUBLICATION_MESH_UNAVAILABLE');
+      if(index===0)this.audit(actor,'mesh-read',resultId);return {data:bytes.toString('base64')};
+    }finally{fs.closeSync(fd);}
+  }
   delete(actor,scope,id,revision){
     this.access(actor,scope,'data-admin');P.integer(revision);
     return this.transaction(()=>{const row=this.result(actor,scope,id);fail(row.revision===revision,409,'PUBLICATION_ATTACHMENT_CONFLICT');
+      this.db.prepare('DELETE FROM publication_contexts WHERE result=?').run(id);
       this.db.prepare("UPDATE publications SET deleted=1,content='{}',revision=revision+1 WHERE id=?").run(id);this.audit(actor,'result-deleted',id);return {deleted:true};});
   }
   sweep(){
+    this.db.prepare('DELETE FROM publication_contexts WHERE result IN (SELECT id FROM publications WHERE deleted=1)').run();
     const rows=this.db.prepare('SELECT * FROM attempts').all();
     for(const row of rows){const ref=this.db.prepare('SELECT deleted,mask_attempt,mesh_attempt FROM publications WHERE identity=?').get(row.identity);
       if(ref && !ref.deleted && [ref.mask_attempt,ref.mesh_attempt].includes(row.id))continue;
@@ -172,6 +201,8 @@ function createServer(service,verify){
         case '/v1/publications/cancel':P.fields(body,['attemptId']);value=service.cancel(actor,scope,body.attemptId);break;
         case '/v1/publications/list':P.fields(body,[]);value=service.list(actor,scope);break;
         case '/v1/publications/read':P.fields(body,['resultId']);value=service.read(actor,scope,body.resultId);break;
+        case '/v1/publications/context':P.fields(body,['resultId','context']);value=service.context(actor,scope,body.resultId,body.context);break;
+        case '/v1/publications/mesh-part':P.fields(body,['resultId','revision','sha256','index']);value=service.meshPart(actor,scope,body);break;
         case '/v1/publications/delete':P.fields(body,['resultId','revision']);value=service.delete(actor,scope,body.resultId,body.revision);break;
         default:throw Object.assign(Error('NOT_FOUND'),{status:404});
       }

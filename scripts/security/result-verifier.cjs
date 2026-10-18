@@ -33,12 +33,16 @@ async function verifyArtifact(root,m,keys){
   }else{
     S.check(m.artifact.bytes<=128*1024*1024);const blocks=[];
     for await(const block of stream)blocks.push(Buffer.from(block));
-    const bytes=Buffer.concat(blocks);try{mesh(bytes,m.content);}finally{bytes.fill(0);blocks.forEach(b=>b.fill(0));}
+    const bytes=Buffer.concat(blocks);try{mesh(bytes,m.content);atomicWrite(path.join(dir,'display.glb'),bytes);}finally{bytes.fill(0);blocks.forEach(b=>b.fill(0));}
   }
 }
 async function verifyPending(root,keys){
   const db=new DatabaseSync(path.join(root,'results.sqlite'));db.exec('PRAGMA busy_timeout=5000');let count=0;
   try{
+    // Older verified meshes gain a display copy without rerunning inference or exposing the Mask.
+    for(const row of db.prepare('SELECT a.document FROM attempts a JOIN publications p ON p.mesh_attempt=a.id WHERE p.deleted=0').all()){
+      const m=JSON.parse(row.document);if(!fs.existsSync(path.join(root,'objects',m.attemptId,'display.glb'))){try{await verifyArtifact(root,m,keys);}catch{/* A damaged legacy display copy must not block new publications. */}}
+    }
     for(const row of db.prepare("SELECT id,document,digest FROM attempts WHERE state='verifying' AND receipt IS NULL LIMIT 10").all()){
       let valid=false;
       try{await verifyArtifact(root,JSON.parse(row.document),keys);valid=true;}catch{/* Do not log decrypted content or local paths. */}

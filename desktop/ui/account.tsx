@@ -8,11 +8,14 @@ function enrollmentState(value:string){
   if(value==='rejected')return t('등록 거절');
   return t('승인 대기');
 }
-export default function Account(){
+export default function Account({openRequest=0}:{openRequest?:number}){
   useLanguage();
   const api=window.exmoDesktop;
   const [open,setOpen]=useState(false),[state,setState]=useState<AccountState>(),[rows,setRows]=useState<Enrollment[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
   useEffect(()=>{let alive=true;void api.accountStatus?.().then(unwrap).then(v=>{if(alive)setState(v);}).catch(()=>{});return()=>{alive=false;};},[api]);
+  useEffect(()=>api.onAccountChanged(value=>setState(previous=>{if(previous?.me?.subject!==value.me?.subject || JSON.stringify(previous?.workspace)!==JSON.stringify(value.workspace))setRows([]);return value;})),[api]);
+  useEffect(()=>{if(openRequest)setOpen(true);},[openRequest]);
+  useEffect(()=>{if(open && state?.me)void api.accountEnrollments().then(unwrap).then(setRows).catch(()=>{});},[open,state?.me?.subject,api]);
   async function action(run:()=>Promise<void>){setBusy(true);setError('');try{await run();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
   async function refresh(){setState(unwrap(await api.accountRefresh()));setRows(unwrap(await api.accountEnrollments()));}
   const membership=state?.me?.memberships.find(m=>m.orgId===state.workspace?.orgId && m.workspaceId===state.workspace?.workspaceId);
