@@ -82,4 +82,6 @@ node node_modules/electron/cli.js scripts/security/validate-publication-desktop.
 - 최종 Electron 증거: `outputs/publication-desktop-check/c648c600-5bea-49e0-a4b8-719cbb457f66/`. CT/MRI 각 뷰의 독립 회전을 실제 입력·화면 픽셀 변화로 확인했다. X-ray AP-only/누락 view, 삭제 반영, 900px 창도 통과했다.
 - `work/p6-package-check/win-unpacked` 격리 패키지: 새 main 모듈 포함, 서버 코드/개인키 제외, 서명된 공용 runtime·ASAR 무결성 정책 확인. `release/internal`과 기존 설치본은 교체하지 않았다. 코드 서명된 고객 설치 프로그램 검증이 아니다.
 
-남은 작업: 대표 Overlay 승인(P5 잔여), Web/태블릿 Viewer·BFF(P7), 실제 IdP/HTTPS/서비스 계정 ACL/암호화 볼륨·운영 복구, 실물 동글·새 PC·코드 서명 고객 설치본(P8). 이 단계로 전체 제품 출시 acceptance가 끝난 것은 아니다.
+후속으로 [대표 Overlay 승인·게시·열람](EXMO_REPRESENTATIVE_OVERLAY_IMPLEMENTATION.md)을 구현했다. 이미지 게시 이후의 서버 rollback 주의점도 해당 문서를 따른다.
+
+남은 작업: Web/태블릿 Viewer·BFF(P7), 실제 IdP/HTTPS/서비스 계정 ACL/암호화 볼륨·운영 복구, 실물 동글·새 PC·코드 서명 고객 설치본(P8). 이 단계로 전체 제품 출시 acceptance가 끝난 것은 아니다.

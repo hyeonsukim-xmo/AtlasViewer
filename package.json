@@ -37,7 +37,8 @@
     "test:installations": "node --test scripts/security/test-installations.cjs",
     "test:accounts": "node --test scripts/security/test-accounts.cjs",
     "test:publications": "node --test scripts/security/test-publications.cjs",
-    "test:remote": "node --experimental-strip-types --test scripts/security/test-remote-results.cjs"
+    "test:remote": "node --experimental-strip-types --test scripts/security/test-remote-results.cjs",
+    "test:overlays": "node --test scripts/security/test-overlays.cjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

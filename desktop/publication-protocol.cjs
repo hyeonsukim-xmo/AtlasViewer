@@ -74,15 +74,32 @@ function fromSnapshot(summary,id,geometry,mask){
     provenance:{source:'fixed-local-result',modelDigest:null,recipeDigest:null,packageSetDigest:null}});
 }
 function artifact(v){
-  P.fields(v,['kind','sha256','bytes','wrappedKey','parts']);check(['mask','mesh'].includes(v.kind));P.digest(v.sha256);P.integer(v.bytes);check(v.bytes>0 && v.bytes<=MAX_BYTES);
+  P.fields(v,['kind','sha256','bytes','wrappedKey','parts']);check(['mask','mesh','overlay'].includes(v.kind));P.digest(v.sha256);P.integer(v.bytes);check(v.bytes>0 && v.bytes<=MAX_BYTES);
   if(v.kind==='mesh')check(v.bytes<=128*1024*1024);
+  if(v.kind==='overlay')check(v.bytes<=16*1024*1024);
   check(P.decode(v.wrappedKey).length===384);check(Array.isArray(v.parts) && v.parts.length===Math.ceil(v.bytes/CHUNK));
   v.parts.forEach((p,i)=>{P.fields(p,['sha256','bytes']);P.digest(p.sha256);check(p.bytes===Math.min(CHUNK,v.bytes-i*CHUNK)+28);});return v;
 }
 function manifest(v){
-  P.fields(v,['schema','attemptId','scope','content','contentDigest','artifact','attachmentRevision']);check(v.schema==='exmo-upload-v1');P.id(v.attemptId);scope(v.scope);content(v.content);check(digest(v.content)===v.contentDigest);
+  P.fields(v,['schema','attemptId','scope','content','contentDigest','artifact','attachmentRevision',...(v.artifact?.kind==='overlay'?['overlay']:[])]);check(v.schema==='exmo-upload-v1');P.id(v.attemptId);scope(v.scope);content(v.content);check(digest(v.content)===v.contentDigest);
   artifact(v.artifact);P.integer(v.attachmentRevision);
   if(v.artifact.kind==='mask')check(v.artifact.sha256===v.content.mask.sha256 && v.artifact.bytes===v.content.mask.bytes && v.attachmentRevision===0);
+  if(v.artifact.kind==='overlay'){
+    overlay(v.overlay);check(v.overlay.privacyReview.sha256===v.artifact.sha256 && v.overlay.privacyReview.subject===v.scope.subject);
+    const c=v.overlay.capture;check(c.classIds===null||c.classIds.every(id=>v.content.rows.some(r=>r.label===id)));
+    check(v.content.analysis==='xray'?c.view==='projection'&&c.index===0&&c.count===1:c.view!=='projection');
+  }
   return v;
 }
-module.exports={CHUNK,MAX_BYTES,check,canonical,hash,digest,pick,identity,scope,aad,proofMessage,content,context,fromSnapshot,artifact,manifest};
+function overlay(v){
+  P.fields(v,['width','height','capture','privacyReview']);for(const n of [v.width,v.height]){P.integer(n);check(n>0&&n<=2048);}
+  const c=v.capture;P.fields(c,['view','index','count','window','opacity','classIds','side','orientation']);
+  check(['axial','coronal','sagittal','projection'].includes(c.view));P.integer(c.index);P.integer(c.count);check(c.index<c.count&&c.count<=100001);
+  check(['soft','bone'].includes(c.window)&&['all','left','right','unassigned'].includes(c.side));numeric(c.opacity,0);check(c.opacity<=1);
+  check(c.classIds===null||Array.isArray(c.classIds)&&c.classIds.length<=255&&new Set(c.classIds).size===c.classIds.length&&c.classIds.every(n=>Number.isInteger(n)&&n>0&&n<=255));
+  check(Array.isArray(c.orientation)&&c.orientation.length<=4&&c.orientation.every(s=>typeof s==='string'&&/^[LRAPSI]{1,3}$/.test(s)));
+  const p=v.privacyReview;P.fields(p,['policy','sha256','permittedIdentifiers','redacted','subject','reviewedAt']);
+  check(p.policy==='exmo-no-identifiers-v1'&&p.permittedIdentifiers==='none'&&typeof p.redacted==='boolean');P.digest(p.sha256);
+  check(typeof p.subject==='string'&&p.subject.length>0&&p.subject.length<=512);P.integer(p.reviewedAt);check(p.reviewedAt>0);return v;
+}
+module.exports={CHUNK,MAX_BYTES,check,canonical,hash,digest,pick,identity,scope,aad,proofMessage,content,context,fromSnapshot,artifact,manifest,overlay};

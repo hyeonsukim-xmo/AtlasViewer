@@ -1,3 +1,4 @@
+import RemoteOverlayImage from './remote-overlay';
 import Publication from './publication';
 import { failureText, sceneDiagnostic, type Diagnostic, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
@@ -77,7 +78,7 @@ export default function ResultView({
   heading?: string;
   description?: string;
   comparison?: ComparisonActions;
-  remote?: {meshUrls:Record<string,string>};
+  remote?: {meshUrls:Record<string,string>;overlays?:Record<string,import('./imaging').RemoteOverlay>};
 }) {
   const language = useLanguage();
   const [active, setActive] = useState<string | null>(results.length === 1 ? results[0].id : null);
@@ -271,7 +272,7 @@ export default function ResultView({
         {comparison && <ResultComparison results={results} actions={comparison} />}
         <div className="control-segment">
           <button aria-pressed={mode === "overlay"} onClick={() => setMode("overlay")}>
-            {remote?t('측정·QC'):<>Overlay &amp; metrics</>}
+            {remote?t('Overlay·측정·QC'):<>Overlay &amp; metrics</>}
           </button>
           <button
             disabled={!can3d}
@@ -865,13 +866,14 @@ export default function ResultView({
                     )}
                   </button>
                   {caseErrors[result.id] && <p className="inline-error" role="alert">{failureText(caseErrors[result.id])}</p>}
-                  {mode === "overlay" && remote ? <div className="clinical-empty remote-preview-note"><strong>{t('게시된 측정·QC 결과')}</strong><span>{t('원본 영상과 대표 Overlay가 게시되지 않아 슬라이스 열람은 제공하지 않습니다.')}</span><span>{t('촬영 범위')}: {result.metadata.size.join(' × ')} · {result.metadata.spacing.join(' × ')} mm</span></div> : mode === "overlay" ? (
+                  {mode === "overlay" && remote ? <RemoteOverlayImage overlay={remote.overlays?.[result.id]} /> : mode === "overlay" ? (
                     <ImagePreview
                       key={result.id}
                       revision={`${result.variant}:${result.laterality?.method || "legacy"}`}
                       analysis={result.analysis}
                       id={result.id}
                       result
+                      analysisRevision={result.analysisRevision}
                       classIds={allSelected ? null : chosen.map((row) => row.label)}
                     />
                   ) : !result.meshBytes || needsPreparation(result) ? (

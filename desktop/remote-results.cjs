@@ -22,7 +22,8 @@ function openRemote({account}){
     const solution=require('./solutions.cjs').resolveSolution(v.solutionId);S.check(solution.analysis===v.analysis && ['raw','pp500','strong'].includes(v.variant));
     S.check(['cm³','cm²','pixel'].includes(v.unit));S.check(v.route===null||['AP','LAT_LT','LAT_RT','LAT-LT','LAT-RT'].includes(v.route));
     if(v.context!==null)S.context(v.context);
-    return S.pick(v,['resultId','attachmentRevision','meshState','solutionId','variant','analysis','route','unit','context']);
+    S.check(v.overlayState===undefined||['ready','empty'].includes(v.overlayState));
+    return {...S.pick(v,['resultId','attachmentRevision','meshState','solutionId','variant','analysis','route','unit','context']),overlayState:v.overlayState??'empty'};
   }
   return {
     invalidate,
@@ -36,24 +37,30 @@ function openRemote({account}){
       for(const resultId of ids){
         const v=await rpc('read',{resultId},binding);S.check(v.resultId===resultId);const analysis=S.content(v.analysis,true);
         const header=overview({...v,analysis:analysis.analysis});S.check(header.solutionId===analysis.solutionId && header.variant===analysis.variant && header.route===analysis.route && header.unit===analysis.unit);
-        let meshUrl=null;
+        let meshUrl=null,overlayUrl=null;
         if(v.mesh!==null){P.fields(v.mesh,['sha256','bytes']);P.digest(v.mesh.sha256);P.integer(v.mesh.bytes);S.check(v.mesh.bytes>0 && v.mesh.bytes<=128*1024*1024 && header.meshState==='ready');
-          if(loadMesh){const existing=[...models].find(([,m])=>m.resultId===resultId && m.revision===v.attachmentRevision && m.sha256===v.mesh.sha256 && S.canonical(m.binding)===S.canonical(binding));
-            const key=existing?.[0]??crypto.randomUUID();pendingModels.set(key,existing?.[1]??{binding,resultId,revision:v.attachmentRevision,...v.mesh});meshUrl='/remote/'+key+'.glb';}}
-        S.check(before===epoch,'PUBLICATION_SIGN_IN');out.push({...header,content:analysis,meshBytes:v.mesh?.bytes??null,meshUrl});
+          if(loadMesh){const existing=[...models].find(([,m])=>m.kind==='mesh'&&m.resultId===resultId && m.revision===v.attachmentRevision && m.sha256===v.mesh.sha256 && S.canonical(m.binding)===S.canonical(binding));
+            const key=existing?.[0]??crypto.randomUUID();pendingModels.set(key,existing?.[1]??{kind:'mesh',binding,resultId,revision:v.attachmentRevision,...v.mesh});meshUrl='/remote/'+key+'.glb';}}
+        if(v.overlay!=null){
+          P.fields(v.overlay,['sha256','bytes','width','height','capture','privacyReview']);P.digest(v.overlay.sha256);P.integer(v.overlay.bytes);S.check(v.overlay.bytes>0&&v.overlay.bytes<=16*1024*1024&&header.overlayState==='ready');
+          S.overlay(S.pick(v.overlay,['width','height','capture','privacyReview']));S.check(v.overlay.sha256===v.overlay.privacyReview.sha256);
+          if(loadMesh){const existing=[...models].find(([,m])=>m.kind==='overlay'&&m.resultId===resultId&&m.revision===v.attachmentRevision&&m.sha256===v.overlay.sha256&&S.canonical(m.binding)===S.canonical(binding));
+            const key=existing?.[0]??crypto.randomUUID();pendingModels.set(key,existing?.[1]??{kind:'overlay',binding,resultId,revision:v.attachmentRevision,...S.pick(v.overlay,['sha256','bytes'])});overlayUrl='/remote/'+key+'.png';}
+        }
+        S.check(before===epoch,'PUBLICATION_SIGN_IN');out.push({...header,content:analysis,meshBytes:v.mesh?.bytes??null,meshUrl,overlay:v.overlay?{...S.pick(v.overlay,['width','height','capture','privacyReview']),url:overlayUrl}:null});
       }
       // Only current viewer handles survive; no patient data or GLB is stored in a browser cache.
       if(loadMesh){S.check(request===readGeneration,'PUBLICATION_REQUEST_SUPERSEDED');models.clear();for(const [key,value]of pendingModels)models.set(key,value);}
       return out;
     },
-    async model(key){
-      P.id(key);const model=models.get(key);S.check(model,'PUBLICATION_NOT_FOUND');const before=epoch;
+    async model(key,kind='mesh'){
+      P.id(key);const model=models.get(key);S.check(model&&model.kind===kind,'PUBLICATION_NOT_FOUND');const before=epoch;
       S.check(S.canonical(scope())===S.canonical(model.binding),'PUBLICATION_SIGN_IN');
       let index=0,cancelled=false;const hash=crypto.createHash('sha256');
       const stream=new ReadableStream({async pull(controller){
         try{
           S.check(!cancelled && before===epoch && models.get(key)===model,'PUBLICATION_SIGN_IN');
-          const part=await rpc('mesh-part',{resultId:model.resultId,revision:model.revision,sha256:model.sha256,index},model.binding);
+          const part=await rpc(kind+'-part',{resultId:model.resultId,revision:model.revision,sha256:model.sha256,index},model.binding);
           S.check(!cancelled && before===epoch && models.get(key)===model,'PUBLICATION_SIGN_IN');
           P.fields(part,['data']);S.check(typeof part.data==='string' && part.data.length<=Math.ceil(S.CHUNK/3)*4);
           const bytes=Buffer.from(part.data,'base64');S.check(bytes.toString('base64')===part.data && bytes.length===Math.min(S.CHUNK,model.bytes-index*S.CHUNK),'PUBLICATION_ARTIFACT_INVALID');
@@ -61,7 +68,7 @@ function openRemote({account}){
           controller.enqueue(bytes);if(index===Math.ceil(model.bytes/S.CHUNK))controller.close();
         }catch{if(!cancelled)controller.error(Error('Remote 3D request failed'));}
       },cancel(){cancelled=true;}});
-      return new Response(stream,{headers:{'Content-Type':'model/gltf-binary','Content-Length':String(model.bytes),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+      return new Response(stream,{headers:{'Content-Type':kind==='mesh'?'model/gltf-binary':'image/png','Content-Length':String(model.bytes),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
     },
     close(){clearInterval(timer);invalidate();},
   };

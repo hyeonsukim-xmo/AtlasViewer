@@ -121,7 +121,7 @@ export default function RemoteResults({local,onAccount,onHome}:{local:AnalysisRe
       <p className="remote-disclosure" role="status">{reference?t('나란히 열람 · 촬영 범위와 측정 조건의 동일성을 보증하지 않습니다.'):t('게시된 고정 결과 · 읽기 전용')}
         {opened.some(r=>!r.content.provenance.recipeDigest) && <> · {t('과거 모델·처리 버전 미기록')}</>}</p>
       <ResultView results={opened.map(row=>remoteResult(row,title(row)))} onClose={close} onUpdate={()=>{}} heading={opened.length>1?(reference?t('나란히 열람'):t('수치 비교')):title(opened[0])}
-        description={t('서버에 게시된 측정값과 QC · 원본 영상 없음')} remote={{meshUrls:Object.fromEntries(opened.filter(r=>r.meshUrl).map(r=>[r.resultId,r.meshUrl!]))}}/>
+        description={t('서버에 게시된 측정값과 QC · 원본 영상 없음')} remote={{overlays:Object.fromEntries(opened.filter(r=>r.overlay).map(r=>[r.resultId,r.overlay!])),meshUrls:Object.fromEntries(opened.filter(r=>r.meshUrl).map(r=>[r.resultId,r.meshUrl!]))}}/>
     </div>}
   </section>;
 }

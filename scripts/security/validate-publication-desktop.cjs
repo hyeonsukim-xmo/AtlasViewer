@@ -34,6 +34,7 @@ async function run(){
   assert.equal(await c.executeJavaScript('typeof window.require'),'undefined');
   assert.ok(await c.executeJavaScript(`document.body.textContent.includes('게시 완료')||document.body.textContent.includes('Published')`));
   fs.writeFileSync(path.join(output,'transfers.png'),(await c.capturePage()).toPNG());
+  if(process.argv.includes('--overlay'))await require('./validate-overlay-desktop.cjs')({window,c,call,f,sync,output,context});
   if(process.argv.includes('--remote'))await require('./validate-remote-desktop.cjs')({window,c,call,f,sync,output,context});
   fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify({passed:true,syntheticIdp:true,localTestServer:true,existingMRI:true,realWorkerExport:true,realDpapi:true,realRendererIPC:true,metricsBeforeMesh:true,archivedReader:process.argv.includes('--archived-reader'),remote:process.argv.includes('--remote'),inferenceRerun:false},null,2));
   console.log('PASS: real Desktop worker → encrypted upload → verified result + later 3D; sandboxed transfer UI');

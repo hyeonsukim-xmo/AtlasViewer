@@ -1,12 +1,13 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const S=require('./publication-protocol.cjs');
 const {protectedStore}=require('./security/storage.cjs');
-const {encryptMesh,publicKey}=require('./publication-crypto.cjs');
+const {encryptMesh,encryptArtifact,publicKey}=require('./publication-crypto.cjs');
 function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
   const context=require('./publication-context.cjs').openContexts(directory,safeStorage);
   const jobs=new Map();let active=null,closed=false,storageError=false;
   const file=id=>path.join(directory,id+'.bin'),store=id=>protectedStore(file(id),safeStorage,2*1024*1024);
   const save=job=>store(job.id).write(job);
+  const overlayStore=job=>protectedStore(path.join(directory,job.id+'.overlay'),safeStorage,48*1024*1024);
   try{
     fs.mkdirSync(directory,{recursive:true});
     for(const entry of fs.readdirSync(directory))if(/^[0-9a-f-]{36}\.bin$/.test(entry)){
@@ -26,7 +27,7 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
     const current=account.status();return {configured:current.state!=='unconfigured',storageError,
       jobs:[...jobs.values()].filter(j=>j.scope.subject===current.me?.subject).map(j=>({id:j.id,resultId:j.localResultId,revision:j.source.identity.analysisRevision,
         name:j.name,state:j.state,error:j.error,orgId:j.scope.orgId,workspaceId:j.scope.workspaceId,uploaded:j.uploaded??0,total:j.manifest?.artifact.parts.length??0,
-        cloudResultId:j.published?.resultId??null,meshState:j.published?.meshState??null,kind:j.manifest?.artifact.kind??'mask'}))};
+        cloudResultId:j.published?.resultId??null,meshState:j.published?.meshState??null,overlayState:j.overlay?(j.overlayPending?'pending':'ready'):null,kind:j.manifest?.artifact.kind??'mask'}))};
   }
   async function enqueue(refs){
     S.check(!storageError,'PUBLICATION_STORAGE');S.check(Array.isArray(refs) && refs.length>0 && refs.length<=3);
@@ -34,13 +35,23 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
     for(const ref of refs){Pfields(ref);const source=await imaging.publicationSource(ref.id,ref.revision);
       source.identity=S.pick(source.identity,['originStoreId','originResultId','analysisRevision','solutionId','workflowId']);
       S.check(S.canonical(scope())===S.canonical(binding),'PUBLICATION_SIGN_IN');
-      const existing=[...jobs.values()].find(j=>j.source.identity.analysisRevision===source.identity.analysisRevision && j.source.identity.originStoreId===source.identity.originStoreId && j.scope.subject===binding.subject && j.scope.orgId===binding.orgId && j.scope.workspaceId===binding.workspaceId && j.state!=='cancelled');
-      if(existing)continue;
-      const job={schema:1,id:crypto.randomUUID(),localResultId:ref.id,name:source.summary.metadata?.caseName||source.summary.name,
-        source,scope:binding,state:'queued',error:null,manifest:null,attemptId:null,retries:0,next:0};save(job);jobs.set(job.id,job);
+      addJob(ref,source,binding);
     }
     void tick();return status();
   }
+  function addJob(ref,source,binding){
+    const existing=[...jobs.values()].find(j=>j.source.identity.analysisRevision===source.identity.analysisRevision && j.source.identity.originStoreId===source.identity.originStoreId && j.scope.subject===binding.subject && j.scope.orgId===binding.orgId && j.scope.workspaceId===binding.workspaceId && j.state!=='cancelled');
+    if(existing)return existing;
+    const job={schema:1,id:crypto.randomUUID(),localResultId:ref.id,name:source.summary.metadata?.caseName||source.summary.name,
+      source,scope:binding,state:'queued',error:null,manifest:null,attemptId:null,retries:0,next:0};save(job);jobs.set(job.id,job);return job;
+  }
+  async function enqueueOverlay(ref,source,binding,overlay,bytes){
+    S.check(!closed&&!storageError,'PUBLICATION_STORAGE');S.check(eligible({scope:binding}),'PUBLICATION_SIGN_IN');
+    const job=addJob(ref,source,binding);S.check(!job.overlayPending&&!job.cancelRequested,'PUBLICATION_OVERLAY_PENDING');
+    overlayStore(job).write({image:bytes.toString('base64'),overlay});job.overlay=overlay;job.overlayPending=true;job.next=0;job.retries=0;
+    state(job,'queued');void tick();return status();
+  }
+  const review=require('./overlay-review.cjs').openOverlayReview({account,imaging,enqueue:enqueueOverlay});
   function Pfields(ref){require('./security/license-protocol.cjs').fields(ref,['id','revision']);require('./security/license-protocol.cjs').id(ref.id);require('./security/license-protocol.cjs').id(ref.revision);}
   function discardParts(job){
     if(!job.attemptId)return;
@@ -59,11 +70,18 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
       artifact=exported.artifact;content=S.fromSnapshot(job.source.summary,job.source.identity,exported.geometry,{sha256:artifact.sha256,bytes:artifact.bytes});
       if(job.content)S.check(S.digest(job.content)===S.digest(content),'PUBLICATION_CONTENT_CONFLICT');
       job.content=content;
-    }else{
+    }else if(kind==='mesh'){
       const mesh=await imaging.publicationMesh(job.source);S.check(mesh,'PUBLICATION_MESH_PENDING');
       artifact=await encryptMesh(mesh,dest,job.scope,job.content.identity,job.attemptId,keys.meshPublicKey);content=job.content;
+    }else{
+      S.check(keys.overlayPolicy==='exmo-no-identifiers-v1','PUBLICATION_OVERLAY_UNSUPPORTED');
+      const stored=overlayStore(job).read();S.check(stored&&S.canonical(stored.overlay)===S.canonical(job.overlay),'PUBLICATION_REVIEW_CHANGED');
+      const bytes=Buffer.from(stored.image,'base64');S.check(S.hash(bytes)===job.overlay.privacyReview.sha256,'PUBLICATION_REVIEW_CHANGED');
+      try{const blocks=Array.from({length:Math.ceil(bytes.length/S.CHUNK)},(_,i)=>bytes.subarray(i*S.CHUNK,(i+1)*S.CHUNK));
+        artifact=await encryptArtifact(blocks,'overlay',dest,job.scope,job.content.identity,job.attemptId,keys.meshPublicKey);
+      }finally{bytes.fill(0);}content=job.content;
     }
-    job.manifest=S.manifest({schema:'exmo-upload-v1',attemptId:job.attemptId,scope:job.scope,content,contentDigest:S.digest(content),artifact,attachmentRevision:kind==='mask'?0:job.published.attachmentRevision});
+    job.manifest=S.manifest({schema:'exmo-upload-v1',attemptId:job.attemptId,scope:job.scope,content,contentDigest:S.digest(content),artifact,attachmentRevision:kind==='mask'?0:job.published.attachmentRevision,...(kind==='overlay'?{overlay:job.overlay}:{})});
     state(job,'queued');
   }
   async function transfer(job){
@@ -72,13 +90,14 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
         try{const response=await rpc(job,'cancel',{attemptId:job.attemptId});if(response.state==='published'){job.published=response;job.cancelRequested=false;state(job,'published');return;}}
         catch(e){if(e.accountStatus!==404)throw e;}
       }
-      discardParts(job);state(job,'cancelled');return;
+      discardParts(job);fs.rmSync(path.join(directory,job.id+'.overlay'),{force:true});job.overlay=null;job.overlayPending=false;state(job,'cancelled');return;
     }
     if(job.published && !job.contextLinked){
       job.context??=(await rpc(job,'read',{resultId:job.published.resultId})).context??context(job.source);save(job);
       await rpc(job,'context',{resultId:job.published.resultId,context:job.context});job.contextLinked=true;save(job);
     }
-    if(job.published && job.published.meshState!=='pending'){discardParts(job);job.manifest=null;job.attemptId=null;state(job,'published');return;}
+    if(job.published && !job.manifest && job.overlayPending){job.published=S.pick(await rpc(job,'read',{resultId:job.published.resultId}),['state','resultId','attachmentRevision','meshState','overlayState']);await prepare(job,'overlay');}
+    if(job.published && job.published.meshState!=='pending' && !job.overlayPending){discardParts(job);job.manifest=null;job.attemptId=null;state(job,'published');return;}
     if(job.published && !job.manifest){
       if(!await imaging.publicationMesh(job.source)){state(job,'published');return;}
       await prepare(job,'mesh');
@@ -101,6 +120,7 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
       state(job,'verifying');response=await rpc(job,'complete',{attemptId:job.attemptId});
     }
     if(response.state==='published'){
+      if(job.manifest?.artifact.kind==='overlay'){job.overlayPending=false;fs.rmSync(path.join(directory,job.id+'.overlay'),{force:true});}
       job.published=response;job.retries=0;job.next=0;job.uploaded=0;state(job,'published');discardParts(job);job.manifest=null;job.attemptId=null;save(job);
     }
   }
@@ -110,7 +130,7 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
       for(const job of jobs.values()){
         if(closed)break;
         if(['failed','cancelled','needs_permission','quota_blocked'].includes(job.state) || job.next>Date.now())continue;
-        if(job.published?.meshState!=='pending' && job.state==='published' && job.contextLinked)continue;
+        if(job.published?.meshState!=='pending' && !job.overlayPending && job.state==='published' && job.contextLinked)continue;
         if(!eligible(job)){if(job.state!=='needs_login')state(job,'needs_login','PUBLICATION_SIGN_IN');continue;}
         try{await transfer(job);}
         catch(e){
@@ -130,11 +150,11 @@ function openSync({directory,safeStorage,account,imaging,intervalMs=3000}){
     })().catch(()=>{storageError=true;}).finally(()=>{active=null;});return active;
   }
   const timer=setInterval(()=>{void tick();},intervalMs);timer.unref?.();
-  return {status,enqueue,tick,
+  return {status,enqueue,tick,review,
     async approveOrigin(ref){Pfields(ref);await account.refresh();const target=scope(),source=await imaging.publicationSource(ref.id,ref.revision);return account.publicationRequest('/v1/publications/approve-origin',{originStoreId:source.identity.originStoreId},target);},
     retry(id){const job=jobs.get(id);S.check(job && eligible(job),'PUBLICATION_SIGN_IN');S.check(!['cancelled'].includes(job.state));job.next=0;job.retries=0;state(job,'queued');void tick();return status();},
     cancel(id){const job=jobs.get(id);S.check(job && eligible(job),'PUBLICATION_SIGN_IN');job.cancelRequested=true;job.next=0;state(job,'queued');void tick();return status();},
-    async close(){closed=true;clearInterval(timer);await active;},
+    async close(){closed=true;clearInterval(timer);review.close();await active;},
   };
 }
 module.exports={openSync};

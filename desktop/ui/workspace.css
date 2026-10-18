@@ -1533,3 +1533,17 @@
 .remote-disclosure { margin:0; padding:10px 28px; border-bottom:1px solid #ffffff18; color:#afa8c5; font-size:12px; }
 .remote-preview-note { height:100%; padding:24px; gap:16px; text-align:center; flex-direction:column; }
 @media(max-width:1100px) { .desktop-nav { flex-wrap:wrap; height:auto; min-height:60px; padding-block:10px; } .desktop-nav-label { display:none; } .protocol-table { min-width:720px; } .catalog-section { overflow:auto; } .remote-workspace { padding:16px; } }
+.overlay-review-dialog { width:min(1000px,94vw); max-height:94vh; overflow:auto; }
+.overlay-review-viewport { max-height:48vh; overflow:auto; background:#030308; }
+.overlay-review-image { position:relative; width:fit-content; margin:0 auto; touch-action:none; }
+.overlay-review-image img { display:block; max-width:none; width:auto; object-fit:contain; }
+.overlay-zoom { display:flex; align-items:center; gap:12px; }
+.overlay-zoom input { width:160px; }
+.overlay-review-image svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.overlay-redaction-fields { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin-bottom:12px; }
+.overlay-redaction-fields label { display:grid; gap:4px; }
+.overlay-redaction-fields input { width:76px; padding:6px; border:1px solid var(--border); border-radius:6px; background:transparent; }
+.overlay-approval { display:flex; align-items:center; gap:10px; margin:12px 0; }
+.overlay-hash { display:block; overflow-wrap:anywhere; margin-top:12px; opacity:.65; }
+.remote-overlay { display:flex; flex:1; min-height:0; flex-direction:column; gap:8px; padding:10px; }
+.remote-overlay .medical-image { flex:1; min-height:200px; }

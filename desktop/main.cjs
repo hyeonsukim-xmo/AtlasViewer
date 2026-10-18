@@ -217,8 +217,8 @@ app
         const pathname = decodeURIComponent(url.pathname);
         if (pathname.includes("\\") || pathname.includes(":"))
           return new Response(null, { status: 403 });
-        const remote=/^\/remote\/([a-f0-9-]{36})\.glb$/.exec(pathname);
-        if(remote)return await remoteResults.model(remote[1]);
+        const remote=/^\/remote\/([a-f0-9-]{36})\.(glb|png)$/.exec(pathname);
+        if(remote)return await remoteResults.model(remote[1],remote[2]==='png'?'overlay':'mesh');
         const model = /^\/result\/([a-f0-9-]{36})\.glb$/.exec(pathname);
         const modelPath = model ? desktopImaging?.mesh(model[1]) : null;
         const file =

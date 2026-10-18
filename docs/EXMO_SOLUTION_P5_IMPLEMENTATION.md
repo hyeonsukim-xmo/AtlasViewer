@@ -19,7 +19,7 @@
 | Native Mask | 원본 좌표의 정수 label 배열을 little-endian uint16, x가 가장 빠른 순서로 직렬화. geometry는 size/spacing/origin/direction으로 별도 보존. NRRD/NIfTI header·입력 파일은 전송하지 않음 |
 | 3D | 해당 snapshot의 표시 GLB만 후속 첨부. 실제 CT/MRI GLB를 검증. 외부 URI·이미지/texture·임의 extras는 거부 |
 | 원본 영상/환자명·환자번호/Study UID/로컬 경로 | 전송 manifest와 조회 projection에서 제외 |
-| 대표 Overlay | **이번 전송에서는 제외**. 픽셀 식별정보 검토·비가역 제거·최종 hash 승인 UI/API를 구현하기 전에는 전송하지 않음 |
+| 대표 Overlay | 초기 P5에서는 제외. 2026-10-18 [후속 구현](EXMO_REPRESENTATIVE_OVERLAY_IMPLEMENTATION.md)에서 픽셀 가림·최종 hash 승인·암호화 첨부·Desktop 열람 연결 |
 | 확률/entropy/disagreement 전체 배열 | 전송하지 않고 공유를 위해 재추론하지 않음 |
 
 Mask 전송 형식 변경은 저장된 Mask나 모델 출력을 바꾸지 않는다. 서버 검증기는 복호화한 label count·단위·geometry와 전송 측정값을 대조한다. 지방량·entropy·좌우 계산을 서버에서 새로 수행하거나 임상 정확도를 판정하는 검증이 아니다. 원본은 로컬에 유지되므로 이 전송만으로 서버에서 임의 slice의 원본 Overlay를 생성할 수 없다.
@@ -122,10 +122,10 @@ node node_modules/electron/cli.js scripts/security/validate-publication-desktop.
 
 ## 남은 범위
 
-2026-10-18 후속: [P6](EXMO_SOLUTION_P6_IMPLEMENTATION.md)에서 Desktop 서버 목록/측정/QC/GLB 읽기와 가명 context를 연결했다. 아래 목록은 P5 종료 당시 기준이며, P6의 표시용 GLB 사본 및 추가 서비스 ACL을 함께 적용해야 한다. Web/태블릿과 대표 Overlay는 여전히 미완료다.
+2026-10-18 후속: [P6](EXMO_SOLUTION_P6_IMPLEMENTATION.md)에서 Desktop 서버 목록/측정/QC/GLB 읽기와 가명 context를 연결했고, [대표 Overlay 구현](EXMO_REPRESENTATIVE_OVERLAY_IMPLEMENTATION.md)에서 최종 사본 승인·게시·열람을 추가했다. 아래 목록은 P5 종료 당시 기준이며 후속 구현 기록을 함께 따른다. Web/태블릿은 미완료다.
 
 1. 실제 서버/IdP/HTTPS·OS 서비스 권한·KMS·운영 백업/복구·부하 시험, 실물 YubiKey/새 PC/고객 설치본 검증.
-2. 대표 Overlay의 픽셀 식별정보 제거/최종 사본 승인. 이 경로를 만들기 전까지 영상 게시 기능은 제공하지 않는다.
+2. 대표 Overlay의 픽셀 식별정보 제거/최종 사본 승인은 후속 구현 완료. 실제 기관 정책·운영 배포 검증은 남아 있다.
 3. 실제 환자/Study 연결·원격 결과 목록/geometry 제공·Web/태블릿 Viewer 및 P6 홈 통합. 지금 원격 조회 API는 측정/QC projection을 반환하며 GLB는 보호 저장까지만 연결했다.
 4. 과거 미기록 model/recipe/runtime provenance 보완 정책, key rotation, 대규모 object store와 pagination.
 

@@ -33,7 +33,12 @@ async function verifyArtifact(root,m,keys){
   }else{
     S.check(m.artifact.bytes<=128*1024*1024);const blocks=[];
     for await(const block of stream)blocks.push(Buffer.from(block));
-    const bytes=Buffer.concat(blocks);try{mesh(bytes,m.content);atomicWrite(path.join(dir,'display.glb'),bytes);}finally{bytes.fill(0);blocks.forEach(b=>b.fill(0));}
+    const bytes=Buffer.concat(blocks);try{
+      if(m.artifact.kind==='overlay'){
+        const image=require('../../desktop/publication-image.cjs').decode(bytes);S.check(image.width===m.overlay.width&&image.height===m.overlay.height);
+        atomicWrite(path.join(dir,'display.png'),bytes);image.pixels.fill(0);
+      }else{mesh(bytes,m.content);atomicWrite(path.join(dir,'display.glb'),bytes);}
+    }finally{bytes.fill(0);blocks.forEach(b=>b.fill(0));}
   }
 }
 async function verifyPending(root,keys){

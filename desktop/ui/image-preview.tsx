@@ -1,3 +1,4 @@
+import OverlayPublication from './overlay-publication';
 import { failureText, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
 import { schedulePreview } from "./preview-queue";
@@ -13,6 +14,7 @@ export default function ImagePreview({
   side = "all",
   revision = "input",
   compact = false,
+  analysisRevision,
 }: {
   analysis: Analysis;
   solutionId?: string;
@@ -22,6 +24,7 @@ export default function ImagePreview({
   side?: PreviewOptions["side"];
   revision?: string;
   compact?: boolean;
+  analysisRevision?: string;
 }) {
   const language = useLanguage();
   const scope = solutionId || analysis;
@@ -126,6 +129,8 @@ export default function ImagePreview({
   return (
     <div className={`medical-preview ${compact ? "compact" : ""}`}>
       <div className="preview-toolbar">
+        {result&&analysisRevision&&!compact&&<OverlayPublication reference={{id,revision:analysisRevision}} disabled={loading||!data||!!error}
+          options={{view,index:data?.index??0,window:windowing,opacity,classIds:classIds??null,side:side??'all'}}/>}
         {analysis !== "xray" ? (
           <div className="control-segment" aria-label={t("보기 방향")}>
             {(["axial", "coronal", "sagittal"] as const).map((item) => (

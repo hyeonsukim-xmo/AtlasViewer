@@ -1112,6 +1112,11 @@ function installImaging(window, { engineRoot, storageRoot, scriptsRoot, palette,
       if(fixed?._snapshot.snapshotDigest!==source.snapshotDigest)throw userError('게시 결과의 확정 사본이 변경되었습니다.');
       return source.meshFile;
     },
+    async publicationPreview(source,value) {
+      const fixed=await request('snapshot',{result:source.result,variant:source.variant,adopt:false},undefined,source.readerId);
+      if(fixed?._snapshot.snapshotDigest!==source.snapshotDigest)throw userError('게시 결과의 확정 사본이 변경되었습니다.');
+      return request('preview',{...options(value),record:fixed.record,mask:fixed.mask,sideMask:fixed.sideMask,rows:fixed.summary.rows},undefined,source.readerId);
+    },
     async exportPublication(source,options) {
       const slot=await resultLane.acquire(1);let context,exporter;
       try{
