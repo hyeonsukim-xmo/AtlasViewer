@@ -5,11 +5,11 @@ function read(file,limit=65536) {
   P.check(fs.statSync(file).size<=limit,'Licensing file too large');
   return fs.readFileSync(file);
 }
-function atomicWrite(file,bytes) {
+function atomicWrite(file,bytes,mode=0o600) {
   const temporary=`${file}.${crypto.randomUUID()}.tmp`;
   let fd;
   try {
-    fd=fs.openSync(temporary,'wx',0o600);fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
+    fd=fs.openSync(temporary,'wx',mode);fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
     fs.renameSync(temporary,file);
   } finally {if(fd!==undefined)fs.closeSync(fd);fs.rmSync(temporary,{force:true});}
 }

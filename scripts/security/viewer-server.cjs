@@ -86,6 +86,14 @@ async function createViewer({service,config,staticRoot,clientSecret,allowLoopbac
       fail(!req.headers['sec-fetch-site'] || req.headers['sec-fetch-site']!=='cross-site' || req.url.startsWith('/auth/callback?'),403,'VIEWER_ORIGIN');
       fail(['GET','POST'].includes(req.method) && req.url.length<=8192,404,'NOT_FOUND');
       const url=new URL(req.url,config.origin);let s=session(req);
+      if(req.method==='GET' && url.pathname==='/health/ready'){
+        try{
+          service.db.prepare('SELECT 1 FROM publications LIMIT 1').get();
+          service.accounts.prepare('SELECT 1 FROM account_members LIMIT 1').get();
+          fs.accessSync(path.join(staticRoot,'index.html'),fs.constants.R_OK);
+          return json(res,{ready:true});
+        }catch{res.statusCode=503;return json(res,{ready:false});}
+      }
       if(req.method==='GET' && url.pathname==='/auth/callback'){
         fail(s?.flow && s.flow.expires>Date.now() && url.searchParams.getAll('state').length===1 && url.searchParams.get('state')===s.flow.state,400,'VIEWER_CALLBACK');
         const flow=s.flow;s.flow=null;

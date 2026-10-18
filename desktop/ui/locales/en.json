@@ -735,5 +735,9 @@
   "열람 권한이 있는 작업공간이 없습니다. 기관 관리자에게 문의하세요.": "No workspace is available for review. Contact your organization administrator.",
   "준비 중": "Pending",
   "표시할 서버 결과가 없습니다.": "No server results to display.",
-  "로그인을 완료하지 못했습니다. 다시 로그인하세요.": "Sign-in could not be completed. Please sign in again."
+  "로그인을 완료하지 못했습니다. 다시 로그인하세요.": "Sign-in could not be completed. Please sign in again.",
+  "같은 방향의 결과가 여러 개이거나 방향이 불명확합니다. 비교 선택에서 직접 고르세요.": "Multiple results share a view, or a view is unknown. Choose results explicitly using Compare selection.",
+  "터치: 선택 구조 회전": "Touch: rotate selected structure",
+  "케이스별 측정 단위·조건은 각 열에 표시됩니다.": "Measurement units and conditions are shown in each case column.",
+  "탭·클릭 선택 · 드래그 조작 · 두 손가락 확대·이동 · 분해 후 우클릭 또는 터치 구조 회전": "Tap/click to select · Drag to navigate · Pinch/pan with two fingers · After exploding, right-drag or enable touch structure rotation"
 }

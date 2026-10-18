@@ -7,6 +7,7 @@ test('BFF OIDC session, CSRF, workspace ACL and read-only boundary without a PC 
   const f=await F.fixture(t),v=await V.startViewer(t,f),b=V.browser(v.base);
   f.accounts.membership('reader','hospital-a','research','Research',['reviewer']);f.idp.settings.subject='reader';
   assert.equal((await b.request('/api/results')).status,401);
+  const ready=await b.request('/health/ready');assert.equal(ready.status,200);assert.deepEqual(await ready.json(),{ready:true});
   const anon=await b.session(),initial=b.cookie;
   assert.equal((await b.request('/auth/login',{}, {'X-EXMO-CSRF':'forged'})).status,403);
   assert.equal((await b.request('/auth/login',{}, {Origin:'https://evil.invalid'})).status,403);

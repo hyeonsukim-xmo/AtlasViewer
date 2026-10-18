@@ -36,8 +36,8 @@ async function verifyArtifact(root,m,keys){
     const bytes=Buffer.concat(blocks);try{
       if(m.artifact.kind==='overlay'){
         const image=require('../../desktop/publication-image.cjs').decode(bytes);S.check(image.width===m.overlay.width&&image.height===m.overlay.height);
-        atomicWrite(path.join(dir,'display.png'),bytes);image.pixels.fill(0);
-      }else{mesh(bytes,m.content);atomicWrite(path.join(dir,'display.glb'),bytes);}
+        atomicWrite(path.join(dir,'display.png'),bytes,0o660);image.pixels.fill(0);
+      }else{mesh(bytes,m.content);atomicWrite(path.join(dir,'display.glb'),bytes,0o660);}
     }finally{bytes.fill(0);blocks.forEach(b=>b.fill(0));}
   }
 }

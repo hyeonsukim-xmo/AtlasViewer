@@ -97,6 +97,7 @@ export default function ResultView({
   const [sceneRetries, setSceneRetries] = useState<Record<string, number>>({});
   const [changing, setChanging] = useState(false);
   const [table, setTable] = useState<"metrics" | "qc">("metrics");
+  const [touchRotateSelection,setTouchRotateSelection]=useState(false);
   const [ttaThreshold, setTtaThreshold] = useState(1.16);
   const needsPreparation = (result: AnalysisResult) =>
     !remote && result.analysis !== "xray" && result.laterality?.method !== "femur_components_lps_v1";
@@ -329,10 +330,10 @@ export default function ResultView({
             </div>
           </div>
           <div className="metric-note">
-            {primary.analysis === "xray"
+            {results.some(r=>r.unit!==primary.unit)?t('케이스별 측정 단위·조건은 각 열에 표시됩니다.'):primary.analysis === "xray"
               ? t("Projection area · 체적 환산 없음")
               : t("촬영 범위 내 체적 · 환자 기준 좌우")}{" "}
-            · {primary.unit}
+            {results.every(r=>r.unit===primary.unit)&&<>· {primary.unit}</>}
             <span>
               {" "}
               ·{" "}
@@ -341,7 +342,7 @@ export default function ResultView({
                 : t("{{value0}}개 구조 선택", { value0: selectedIds.length })}
             </span>
           </div>
-          {primary.analysis === "mri" && table === "qc" && (
+          {results.some(r=>r.analysis === "mri") && table === "qc" && (
             <label className="qc-threshold">
               {t("TTA 검토 기준")}
               <input
@@ -392,6 +393,7 @@ export default function ResultView({
                         {result.metadata.caseName}
                         {result.analysis === "xray" && xrayView(result) && <small>{viewLabel(xrayView(result)!)}</small>}
                       </strong>
+                      {remote&&<small title={result.id}>{result.metadata.studyDescription||t('Study 미연결')} · {result.id.slice(0,8)}</small>}
                       {result.analysis === "mri" && !remote ? (
                         <select
                           aria-label={t("{{value0}} MRI 결과 variant", {
@@ -476,12 +478,12 @@ export default function ResultView({
                 </tbody>
               ) : (
                 <tbody>
-                  {primary.analysis !== "xray" && (
+                  {results.some(r=>r.analysis !== "xray") && (
                     <tr>
                       <td>{t("좌우 분류")}</td>
                       {results.map((result) => (
                         <td key={result.id}>
-                          {t(result.laterality?.reason) || (result.laterality?t('자동 좌우 분류 · 검토 필요'):t("좌우 정보 준비 전"))}
+                          {result.analysis==='xray'?t('해당 없음'):t(result.laterality?.reason) || (result.laterality?t('자동 좌우 분류 · 검토 필요'):t("좌우 정보 준비 전"))}
                           {result.laterality && (
                             <small>
                               {t("미분류 ")}
@@ -572,7 +574,7 @@ export default function ResultView({
                       })}
                     </>
                   )}
-                  {primary.analysis === "mri" && (
+                  {results.some(r=>r.analysis === "mri") && (
                     <>
                       <tr>
                         <td>TTA disagreement</td>
@@ -612,7 +614,7 @@ export default function ResultView({
                         <td>{t("후처리")}</td>
                         {results.map((r) => (
                           <td key={r.id}>
-                            {r.variant === "raw"
+                            {r.analysis!=='mri'?t('해당 없음'):r.variant === "raw"
                               ? t("없음")
                               : r.variant === "pp500"
                                 ? t("500 mm³ 미만 제거")
@@ -830,6 +832,8 @@ export default function ResultView({
               >
                 Reset
               </button>
+              {remote&&<button className="clinical-button touch-rotation" aria-pressed={touchRotateSelection}
+                disabled={!state.explode||state.selected.length!==1} onClick={()=>setTouchRotateSelection(value=>!value)}>{t('터치: 선택 구조 회전')}</button>}
             </div>
           )}
           <div className={`case-canvases count-${viewports.length}`}>
@@ -852,6 +856,7 @@ export default function ResultView({
                   <button className="case-title" onClick={() => setActive(result.id)}>
                     {paired && <span className="viewport-layout">{t(assembled ? "전체 형태" : "분해 형태")}</span>}
                     <strong>{result.metadata.caseName}</strong>
+                    {remote&&<span title={result.id}>{result.metadata.studyDescription||t('Study 미연결')} · {result.id.slice(0,8)}</span>}
                     <span>
                       {result.route || result.analysis.toUpperCase()} ·{" "}
                       {result.variant.toUpperCase()} ·{" "}
@@ -884,6 +889,7 @@ export default function ResultView({
                       <AnatomyScene<string>
                         key={`${sceneKey}:${sceneRetries[sceneKey] || 0}`}
                         model={models.get(result.id)}
+                        touchRotateSelection={!!remote&&touchRotateSelection&&!!state.explode&&state.selected.length===1&&!assembled}
                         state={paired && assembled ? assembledState : sceneState}
                         highlightedId={paired ? linkedHover?.id : undefined}
                         onHover={paired ? id => setLinkedHover(previous => id
@@ -963,7 +969,7 @@ export default function ResultView({
           {mode === "3d" && (
             <footer className="render-hint">
               <span>
-                {remote?t('좌클릭 선택 · 드래그 회전 · 휠 확대 · 휠 버튼 이동'):t("좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장")}
+                {remote?t('탭·클릭 선택 · 드래그 조작 · 두 손가락 확대·이동 · 분해 후 우클릭 또는 터치 구조 회전'):t("좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장")}
               </span>
               <label>
                 Surrounding opacity

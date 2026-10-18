@@ -108,7 +108,7 @@ class Results{
     const {row,m}=this.attempt(actor,scope,attemptId);fail(row.state==='uploading' && row.expires>Date.now()/1000,410,'PUBLICATION_ATTEMPT_EXPIRED');P.integer(index);
     const p=m.artifact.parts[index];fail(p && typeof data==='string' && data.length<=Math.ceil((S.CHUNK+28)/3)*4,400,'PUBLICATION_PART');
     const bytes=Buffer.from(data,'base64');fail(bytes.toString('base64')===data && bytes.length===p.bytes && S.hash(bytes)===p.sha256,400,'PUBLICATION_PART');
-    atomicWrite(path.join(directory(path.join(this.root,'objects'),attemptId),index+'.part'),bytes);return {received:index};
+    atomicWrite(path.join(directory(path.join(this.root,'objects'),attemptId),index+'.part'),bytes,0o660);return {received:index};
   }
   complete(actor,scope,id){
     return this.transaction(()=>{

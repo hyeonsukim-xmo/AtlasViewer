@@ -44,6 +44,7 @@ interface Props<Id extends string> {
   onImageMenu?: (png: string) => void;
   highlightedId?: Id | null;
   onHover?: (id: Id | null) => void;
+  touchRotateSelection?: boolean;
 }
 interface Piece {
   mesh: T.Mesh<T.BufferGeometry, T.MeshPhysicalMaterial>;
@@ -102,6 +103,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       dirty = true,
       frame = 0,
       lastTime = 0;
+    let compilation: Promise<unknown> | null = null;
     let previous: SceneState<Id> | null = null,
       width = 1,
       height = 1,
@@ -179,6 +181,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       raycaster = new T.Raycaster(),
       pointer = new T.Vector2();
     const tap = new PointerTap();
+    const touches = new Set<number>();
     let segmentDrag: { pointerId: number; id: Id; x: number; y: number } | null = null;
     let rightGesture: {pointerId: number; x: number; y: number; moved: boolean} | null = null;
     const trackRightGesture = (event: PointerEvent) => {
@@ -388,6 +391,11 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       changeHover(target);
     }
     const down = (event: PointerEvent) => {
+      const touch = event.pointerType === 'touch';
+      if (touch) {
+        touches.add(event.pointerId);
+        if (touches.size > 1) endSegmentDrag();
+      }
       rightGesture = event.button === 2
         ? {pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false} : null;
       const selection = current.current.state.explode ? current.current.state.selected : [];
@@ -400,14 +408,16 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
             : undefined;
       if (
         !current.current.onImageMenu &&
-        event.button === 2 &&
+        (event.button === 2 || (touch && touches.size === 1 && current.current.touchRotateSelection)) &&
         selected &&
         pieces.get(selected)?.mesh.visible &&
-        event.buttons === 2
+        (event.buttons === 2 || touch)
       ) {
         event.preventDefault();
-        event.stopImmediatePropagation();
-        tap.cancel(event.pointerId);
+        // OrbitControls must see touch down/up so a second finger can still pinch.
+        if (!touch) event.stopImmediatePropagation();
+        if (touch) tap.down(event.pointerId,event.clientX,event.clientY,12);
+        else tap.cancel(event.pointerId);
         segmentDrag = {
           pointerId: event.pointerId,
           id: selected,
@@ -439,10 +449,11 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       if (segmentDrag?.pointerId === event.pointerId) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (!(event.buttons & 2)) {
+        if (event.pointerType !== 'touch' && !(event.buttons & 2)) {
           endSegmentDrag();
           return;
         }
+        tap.move(event.pointerId,event.clientX,event.clientY);
         pieces
           .get(segmentDrag.id)!
           .rotation.drag(
@@ -463,19 +474,21 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       canvas.style.cursor = target ? "pointer" : "grab";
     };
     const up = (event: PointerEvent) => {
+      touches.delete(event.pointerId);
       if (event.button === 2) trackRightGesture(event);
       if (segmentDrag?.pointerId === event.pointerId) {
-        event.stopImmediatePropagation();
+        if (event.pointerType !== 'touch') event.stopImmediatePropagation();
         endSegmentDrag();
-        return;
+        if (event.pointerType !== 'touch') return;
       }
       if (tap.up(event.pointerId, event.clientX, event.clientY)) {
         const target = hit(event);
         current.current.onSelect(target?.id ?? null);
-        if (event.pointerType !== "touch") updateHover(event, target);
+        updateHover(event, target);
       }
     };
     const cancel = (event: PointerEvent) => {
+      touches.delete(event.pointerId);
       if (event.type === "pointercancel" && rightGesture?.pointerId === event.pointerId)
         rightGesture.moved = true;
       tap.cancel(event.pointerId);
@@ -739,7 +752,9 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
             mesh.material.needsUpdate = true;
           }
           failure.code = 'GPU_RENDER';
-          await renderer.compileAsync(scene, camera);
+          compilation = renderer.compileAsync(scene, camera);
+          await compilation;
+          compilation = null;
           if (disposed) return;
         }
         applyState();
@@ -825,12 +840,18 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
       canvas.removeEventListener("keydown", keydown);
       canvas.removeEventListener("webglcontextlost", contextLost);
       window.removeEventListener("keydown", dismissHover);
-      for (const piece of pieces.values()) {
-        piece.mesh.geometry.dispose();
-        piece.mesh.material.dispose();
-      }
-      renderer.dispose();
       canvas.remove();
+      const release = () => {
+        for (const piece of pieces.values()) {
+          piece.mesh.geometry.dispose();
+          piece.mesh.material.dispose();
+        }
+        renderer.dispose();
+      };
+      // Three's asynchronous shader poll still reads materials until compilation settles.
+      // Remove the view immediately, but do not destroy those programs under the poll.
+      if (compilation) void compilation.then(release, release);
+      else release();
     };
   }, [props.model?.url]);
   useEffect(() => invalidate.current(), [props.state, props.caseOpacity, props.highlightedId]);

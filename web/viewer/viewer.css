@@ -11,6 +11,12 @@
 .viewer-signin p,.viewer-results header p {color:#919bb8;margin:12px 0 24px;}
 .viewer-signin button {min-width:140px;}
 .viewer-results {padding:28px;overflow:auto;}
+.viewer-browse {overflow:auto;min-height:0;flex:1;}
+.viewer-browse[hidden] {display:none;}
+.viewer-table tr[aria-selected="true"] {background:#a899db20;box-shadow:inset 3px 0 #b5a4df;}
+.viewer-table .viewer-study {cursor:default;background:#1c1c37;}
+.viewer-study button {margin-left:18px;}
+.viewer-table input[type=checkbox] {width:18px;height:18px;accent-color:#b5a4df;}
 .viewer-results header {display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:20px;}
 .viewer-results header>div {margin-right:auto;}
 .viewer-results header p {margin:6px 0;}
@@ -25,4 +31,15 @@
 .viewer-detail>.result-workspace {height:auto;min-height:0;flex:1;}
 .viewer-error {padding:14px 24px;background:#311f30;flex-shrink:0;}
 .viewer-loading {position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#27273f;padding:10px 24px;border-radius:8px;}
-@media(max-width:900px) {.viewer-nav {padding:12px;gap:10px;}.viewer-workspace {order:3;width:100%;margin:0;}.viewer-workspace select {flex:1;min-width:0;}.viewer-results {padding:16px;}.viewer-detail {overflow:auto;}.viewer-detail>.result-workspace {overflow:visible;min-height:800px;}.web-viewer .result-body {grid-template-columns:1fr!important;display:flex;flex-direction:column;overflow:visible;}.web-viewer .metrics-resizer {display:none;}.web-viewer .metrics-panel {max-height:320px;min-height:260px;flex-shrink:0;}.web-viewer .result-imaging {min-height:500px;}.web-viewer .clinical-button {min-height:40px;}}
+@media(max-width:1000px) {
+  .viewer-nav {padding:12px;gap:10px;}.viewer-workspace {order:3;width:100%;margin:0;}.viewer-workspace select {flex:1;min-width:0;}
+  .viewer-results {padding:16px;}.viewer-detail {overflow:auto;}.viewer-detail>.result-workspace {overflow:visible;flex:none;height:auto;}
+  .web-viewer .result-body {grid-template-columns:1fr!important;display:flex;flex-direction:column;overflow:visible;}
+  .web-viewer .metrics-resizer {display:none;}.web-viewer .metrics-panel {height:420px;min-height:350px;flex-shrink:0;}
+  .web-viewer .result-imaging {min-height:540px;}.web-viewer .case-canvases {grid-template-columns:1fr;flex:none;}
+  .web-viewer .case-canvas {height:560px;}.web-viewer .result-scene {min-height:320px;}
+  .web-viewer button,.web-viewer select {min-height:44px;}.web-viewer .metric-table tr[data-structure] {height:48px;}
+  .web-viewer .render-toolbar {position:sticky;top:0;z-index:2;background:#101026;padding:8px 0;}
+  .web-viewer .workspace-heading {flex-wrap:wrap;}.web-viewer .metric-table {min-width:560px;}
+  .web-viewer .render-hint {flex-wrap:wrap;}.viewer-table th,.viewer-table td {padding:14px;}
+}

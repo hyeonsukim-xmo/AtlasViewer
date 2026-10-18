@@ -65,6 +65,18 @@ test('home actions distinguish installation, entitlement and device failure with
   assert.equal(solutionAction('ct',{...license,state:'GRACE'},state),'open');
   assert.equal(solutionAction('ct',license,undefined),'checking');
 });
+test('X-ray study grouping preserves LT/AP/RT, missing and ambiguous views without crossing cases',async()=>{
+  const {remoteGroups,remoteStudy}=await import('../../desktop/ui/remote-selection.ts');
+  const row=(id,route,caseId='a',studyId='s')=>({resultId:id,analysis:'xray',route,context:{caseId,studyId}});
+  const rows=[row('r','LAT-RT'),row('ap','AP'),row('l','LAT_LT')];
+  assert.deepEqual(remoteGroups(rows)[0].items.map(r=>r.resultId),['l','ap','r']);
+  assert.deepEqual(remoteStudy(rows),{ids:['l','ap','r'],missing:[],ambiguous:false});
+  assert.deepEqual(remoteStudy([rows[1]]),{ids:['ap'],missing:['LAT_LT','LAT_RT'],ambiguous:false});
+  assert.deepEqual(remoteStudy(rows.slice(1)).missing,['LAT_RT']);
+  assert.equal(remoteStudy([...rows,row('ap2','AP')]).ambiguous,true);
+  assert.deepEqual(remoteStudy([...rows,row('unknown',null)]).ids,[]);
+  assert.equal(remoteGroups([...rows,row('other','AP','b'),row('study2','AP','a','s2'),{...row('unlinked','AP'),context:null}]).length,4);
+});
 test('stream validates hash and stops an in-flight part after account changes; no persistent mesh cache',async()=>{
   const source=F.source(),content=S.fromSnapshot(source.summary,source.identity,F.geometry,{sha256:'a'.repeat(64),bytes:64*64*130*2});delete content.mask;delete content.identity;
   const id=crypto.randomUUID(),bytes=Buffer.alloc(S.CHUNK+64,7),state={state:'signed-in',me:{subject:'a',memberships:[{orgId:'org',workspaceId:'workspace',roles:['reviewer']}]},workspace:{orgId:'org',workspaceId:'workspace'},deviceOrgId:'org',installationId:'pc'};

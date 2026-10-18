@@ -108,7 +108,7 @@
 
 ### P7 — Web·태블릿 결과 viewer
 
-2026-10-18: 첫 단계인 별도 Web 빌드, OIDC/BFF, workspace ACL, 결과 목록/검색과 단일 측정·QC·대표 Overlay·3D 열람을 구현했다. [P7 구현·배포 기록](EXMO_SOLUTION_P7_IMPLEMENTATION.md) 참조. 아래 전체 종료 조건 중 웹 다중 비교·X-ray 묶음·실물 태블릿·운영 배포는 아직 남아 있다.
+2026-10-18: 별도 Web 빌드, OIDC/BFF, workspace ACL, 결과 목록/검색, 최대 3건 측정·QC·대표 Overlay·3D, LT/AP/RT 묶음·누락/중복 방향 처리, 터치 구조 회전을 구현했다. [P7 구현·배포 기록](EXMO_SOLUTION_P7_IMPLEMENTATION.md) 참조. 실물 태블릿·실제 IdP/HTTPS 운영 배포와 목표 동시 사용자 부하 검증은 남아 있다.
 
 - OIDC/BFF 기반 결과 목록/검색·viewer·최대 3개 비교, X-ray view 그룹, touch controls.
 - metric/QC/3D/Overlay만 전달하고 manifest가 허용한 범위를 정확히 표시한다. stack 없는 결과에 slice 기능을 만들어 보이지 않는다.
@@ -116,6 +116,8 @@
 - 종료 조건: 허용된 다른 장치에서 동일 결과/단위/variant를 보고, 다른 기관·퇴사 사용자·조작된 artifact ID는 거부됨.
 
 ### P8 — 전환·고객 출시
+
+2026-10-18: 기존 authority 백업 도구에 더해 서명된 result DB/object 백업·검증·새 디렉터리 복원을 구현했다. Viewer/결과 API/별도 사용자 verifier의 배포 템플릿, 내부 health, 권한·장애·키 보관·rollback 절차는 [서버 운영 인계](EXMO_SERVER_DEPLOYMENT.md)를 따른다. Linux 서비스 권한/실서버/고객 설치본/실물 동글 acceptance는 환경이 제공된 후 검증한다.
 
 - 기관/기존 라이선스·결과의 dry-run 매핑, 백업, migration, rolling compatibility, rollback 시험.
 - 기존 7일 lease를 포함한 v2 종료 기간을 운영한다. 전환 중 v2 grant로 v3 상품 회수를 우회하지 못하게 한다.

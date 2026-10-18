@@ -1,9 +1,10 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {t,useLanguage} from './language';
 import {unwrap,type AnalysisResult,type RemoteDetail,type RemoteSummary} from './imaging';
 import {useAccountState} from './account-state';
 import {comparisonIssue,remoteResult} from './remote-contract';
 import ResultView from './result-view';
+import {remoteGroups,remoteStudy} from './remote-selection';
 
 function issueText(issue:string|null){
   switch(issue){
@@ -79,8 +80,8 @@ export default function RemoteResults({local,onAccount,onHome}:{local:AnalysisRe
   function close(){viewEpoch.current++;openedRef.current=[];setOpened([]);setBusy(false);void api.remoteClose();requestAnimationFrame(()=>returnFocus.current?.focus());}
   useEffect(()=>{if(opened.length)requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.remote-detail .back-button')?.focus());},[opened.length]);
   const filtered=rows.filter(r=>[title(r),r.context?.studyId,r.resultId,r.analysis,r.route,r.variant].join(' ').toLowerCase().includes(query.toLowerCase()));
-  const groups=[...new Map(filtered.map(r=>[r.analysis==='xray' && r.context?`xray:${r.context.studyId}`:r.resultId,[] as RemoteSummary[]])).keys()].map(key=>({key,items:filtered.filter(r=>(r.analysis==='xray' && r.context?`xray:${r.context.studyId}`:r.resultId)===key)}));
-  const rank=(r:RemoteSummary)=>['LAT_LT','AP','LAT_RT'].indexOf(r.route?.replaceAll('-','_')??'');
+  const groups=remoteGroups(rows).filter(group=>group.items.some(r=>filtered.includes(r)));
+  const view=useMemo(()=>({results:opened.map(row=>remoteResult(row,title(row))),remote:{overlays:Object.fromEntries(opened.filter(r=>r.overlay).map(r=>[r.resultId,r.overlay!])),meshUrls:Object.fromEntries(opened.filter(r=>r.meshUrl).map(r=>[r.resultId,r.meshUrl!]))}}),[opened,JSON.stringify(names)]);
   const compatible=details.length===selected.length && selected.every(id=>details.some(r=>r.resultId===id))?comparisonIssue(details):'count';
   return <section className="remote-workspace">
     <div className="remote-browse" hidden={opened.length>0}>
@@ -101,10 +102,10 @@ export default function RemoteResults({local,onAccount,onHome}:{local:AnalysisRe
       <p className="metric-note">{t('최신 게시 결과 200건 · 서버 식별자는 가명입니다. 원본 환자명과 촬영일은 전송하지 않습니다.')}</p>
       <div className="catalog-section remote-list"><table className="clinical-table"><thead><tr>{mode && <th>{t('선택')}</th>}<th>Case / Study</th><th>Modality / View</th><th>{t('결과')}</th><th>3D</th><th/></tr></thead><tbody>
         {groups.flatMap(group=>{
-          const items=group.items.toSorted((a,b)=>rank(a)-rank(b));
-          const missing=['LAT_LT','AP','LAT_RT'].filter(route=>!items.some(r=>r.route?.replaceAll('-','_')===route));
+          const items=group.items,{missing,ambiguous,ids}=remoteStudy(items);
           return [items[0].analysis==='xray' && items[0].context && <tr className="remote-study" key={group.key+':study'}><td colSpan={mode?6:5}><strong>Study {items[0].context?.studyId.slice(0,8)}</strong><span> · LT / AP / RT</span>
-            <button className="text-button" disabled={busy} onClick={()=>void show(['LAT_LT','AP','LAT_RT'].flatMap(route=>{const row=items.find(r=>r.route?.replaceAll('-','_')===route);return row?[row.resultId]:[];}))}>{t('촬영 묶음 열기')}</button>
+            <button className="text-button" disabled={busy||ambiguous} onClick={()=>void show(ids)}>{t('촬영 묶음 열기')}</button>
+            {ambiguous && <small>{t('같은 방향의 결과가 여러 개이거나 방향이 불명확합니다. 비교 선택에서 직접 고르세요.')}</small>}
             {missing.length>0 && <small>{missing.map(route=>route.replace('LAT_','')).join(' / ')} · {t('미게시')}</small>}</td></tr>,
             ...items.map(row=><tr key={row.resultId} data-remote-id={row.resultId} tabIndex={0} className="openable-row" aria-selected={mode?selected.includes(row.resultId):undefined}
               onClick={()=>mode?toggle(row.resultId):void show([row.resultId])} onKeyDown={e=>{if(e.target===e.currentTarget && ['Enter',' '].includes(e.key)){e.preventDefault();mode?toggle(row.resultId):void show([row.resultId]);}}}>
@@ -120,8 +121,8 @@ export default function RemoteResults({local,onAccount,onHome}:{local:AnalysisRe
     {ready && opened.length>0 && <div className="remote-detail" role="region" aria-label={t('서버 결과 열람')}>
       <p className="remote-disclosure" role="status">{reference?t('나란히 열람 · 촬영 범위와 측정 조건의 동일성을 보증하지 않습니다.'):t('게시된 고정 결과 · 읽기 전용')}
         {opened.some(r=>!r.content.provenance.recipeDigest) && <> · {t('과거 모델·처리 버전 미기록')}</>}</p>
-      <ResultView results={opened.map(row=>remoteResult(row,title(row)))} onClose={close} onUpdate={()=>{}} heading={opened.length>1?(reference?t('나란히 열람'):t('수치 비교')):title(opened[0])}
-        description={t('서버에 게시된 측정값과 QC · 원본 영상 없음')} remote={{overlays:Object.fromEntries(opened.filter(r=>r.overlay).map(r=>[r.resultId,r.overlay!])),meshUrls:Object.fromEntries(opened.filter(r=>r.meshUrl).map(r=>[r.resultId,r.meshUrl!]))}}/>
+      <ResultView results={view.results} onClose={close} onUpdate={()=>{}} heading={opened.length>1?(reference?t('나란히 열람'):t('수치 비교')):title(opened[0])}
+        description={t('서버에 게시된 측정값과 QC · 원본 영상 없음')} remote={view.remote}/>
     </div>}
   </section>;
 }

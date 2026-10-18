@@ -15,10 +15,12 @@ once. Existing file-count and byte limits apply to the whole selection.
 **Product boundary:** image import and analysis belong to Desktop. Web is a result
 viewer. The original atlas demo remains `npm run build`; the separate authenticated,
 read-only server Viewer is `npm run build:viewer`. It supports workspace-scoped result
-lists and single-result measurements, QC, approved representative Overlay and 3D.
+lists, up to three-result measurements/QC/3D review, LT–AP–RT X-ray study groups,
+approved representative Overlays, and touch navigation/independent structure rotation.
 Neither Web build contains Desktop analysis UI or Python runtime/model files.
 See the [P7 implementation and deployment record](docs/EXMO_SOLUTION_P7_IMPLEMENTATION.md)
-for the BFF, security boundary, tests and remaining comparison/tablet work.
+for the BFF, security boundary and tests. [Server operations](docs/EXMO_SERVER_DEPLOYMENT.md)
+covers deployment templates, readiness, signed result backup/restore and the real-server/tablet acceptance gates.
 
 ## Product direction
 

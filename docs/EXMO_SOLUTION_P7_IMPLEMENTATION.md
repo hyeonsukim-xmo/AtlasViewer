@@ -1,10 +1,10 @@
-# P7 첫 단계 — Web 읽기 전용 결과 Viewer
+# P7 — Web 읽기 전용 결과 Viewer
 
 2026-10-18 · `feat/solution-productization`
 
 ## 구현 범위
 
-이번 단계는 **웹 로그인 → 기관·작업공간 선택 → 서버 결과 목록/검색 → 단일 결과의 측정·QC·대표 Overlay·3D 열람**이다. `npm run build:viewer`로 `dist-viewer`에 별도 빌드한다. 기존 `npm run build` 웹 atlas 데모와 Desktop 빌드는 유지한다.
+현재 범위는 **웹 로그인 → 기관·작업공간 선택 → 서버 결과 목록/검색 → 최대 3건의 측정·QC·대표 Overlay·3D 열람**이다. `npm run build:viewer`로 `dist-viewer`에 별도 빌드한다. 기존 `npm run build` 웹 atlas 데모와 Desktop 빌드는 유지한다.
 
 - 임상 Viewer의 측정 표, QC, 구조 선택, 회전, Explode/Assemble, 대표 Overlay 표시를 재사용한다.
 - 결과 목록은 행 전체 클릭 및 Enter/Space로 연다. 목록 복귀, 작업공간 변경, 로그아웃이 가능하다.
@@ -14,7 +14,17 @@
 - Web에 영상 입력·분석·후처리 실행·결과 게시·Desktop IPC·모델·native Mask를 포함하지 않는다. 빌드 검사가 이 경계를 확인한다.
 - Desktop 전용 동작은 `local-result-view.tsx`로 옮겨 기존 로컬 호출부에 연결했다. 공용 `result-view.tsx`에는 Desktop IPC 호출이 없다.
 
-**P7 전체 완료는 아니다.** 웹 최대 3건 비교, LT/AP/RT 촬영 묶음, 물리 태블릿의 터치/브라우저 검증은 다음 단계다. 기존 Desktop의 비교·X-ray 묶음은 그대로 유지한다.
+## 비교·X-ray·터치 확장
+
+- 최대 3건을 행 전체 클릭/Enter/Space로 선택한다. 비교 모드에서는 행 클릭이 선택을 바꾸며 결과를 바로 열지 않는다. 선택 한도를 넘기면 기존 선택을 유지한다. 연속 입력도 앞선 선택을 잃지 않는다.
+- 수치 비교는 기존 Desktop의 단위·구조 ontology·workflow/view·동일 acquisition/geometry 검사를 재사용한다. 다른 촬영 범위·방법은 명시적인 **나란히 열람**으로만 연다. 같은 단위라는 이유로 동일 해부학적 coverage라고 주장하지 않는다.
+- 측정 표와 QC에 각 결과가 동시에 표시된다. 구조 선택, Explode/Assemble은 연결하며 선택 구조 회전은 각 viewport에 독립적이다. 세션 polling으로 불필요한 모델 재생성이 발생하지 않도록 props를 유지한다.
+- X-ray는 가명 **caseId + studyId**가 같은 결과만 묶고 `LT → AP → RT` 순서로 연다. AP 단독/한쪽 LAT 누락은 있는 영상만 연다. 미게시 방향은 표시하며 0값이나 빈 검사로 만들지 않는다.
+- 같은 방향의 결과가 여러 개이거나 알 수 없는 방향이 섞이면 자동 묶음 열기를 막고 직접 고르게 한다. 검색은 Study 전체에 적용해 AP 검색 때문에 함께 촬영한 LAT가 사라지지 않는다. 이 공용 묶음 규칙은 Desktop 서버 결과 목록에도 적용했다.
+- 태블릿 폭에서는 측정 표를 위에 두고 가로 스크롤, 영상은 세로로 배열한다. 주요 조작은 최소 44px이다. 한 손가락 탭/드래그, 두 손가락 확대·이동을 지원한다. Explode 후 하나의 구조를 선택하고 `터치: 선택 구조 회전`을 켜면 손가락 드래그로 해당 viewport의 구조만 회전한다. 탭으로 측정 tooltip도 확인한다.
+- 웹 대표 Overlay는 계속 고정 PNG다. 터치나 구조 선택으로 원본 slice/Mask를 내려받지 않는다.
+
+웹 기능의 소프트웨어 구현과 Chromium 입력 검증은 진행했다. **운영 HTTPS·실제 IdP·실물 iPad/Android 태블릿 검증을 완료했다고 표시하지 않는다.** 운영 인계·서명 백업 복원·각 서비스의 OS 권한은 [서버 배포 문서](EXMO_SERVER_DEPLOYMENT.md)에 정리했다.
 
 ## 인증과 권한
 
@@ -74,6 +84,7 @@ npm run test:language
 npm run build:viewer
 npm run test:viewer
 npm run test:remote
+node --test scripts/security/test-results-ops.cjs
 npm run build:desktop
 node node_modules/electron/cli.js scripts/security/validate-publication-desktop.cjs --archived-reader --overlay --viewer --remote
 ```
@@ -87,6 +98,12 @@ node node_modules/electron/cli.js scripts/security/validate-publication-desktop.
 - 실제 화면 통과 기록: `outputs/publication-desktop-check/5de1a7e7-d555-4d10-9d89-df6721e6eb8b/`. `web-verification.json`, `overlay-verification.json`, `remote-verification.json`, 최종 `verification.json`이 통과했고 프로세스가 정상 종료했다. CT/MRI 3D의 실제 마우스 드래그 전후 이미지 변화도 검사했다.
 - `web-list.png`, `web-mri-3d.png`, `web-tablet.png`를 직접 확인했다. 초기 UI 자동화에서 제어 완료 대기/DOM 반환값 처리를 바로잡았고, 숨김 창 대신 표시된 테스트 브라우저에서 실제 프레임을 검증했다.
 - 세션 polling 때문에 3D 모델을 다시 생성하지 않도록 결과 props를 안정화했다.
+
+확장 검증에는 X-ray LT/AP/RT 묶음, AP 단독, 3건 측정/QC/Explode/Assemble·독립 우클릭 회전, 실제 Chromium touch 이벤트, 비교 조건 불일치 차단과 나란히 열람을 추가했다. 3건 MRI 비교는 UI 동작 검사용으로 동일한 기존 MRI display를 격리된 DB에서 복제한다. 독립 환자 3건의 추론·정확도 검증으로 해석하지 않는다. 백업 검증은 암호화 artifact·가명 Study·감사 기록·삭제 tombstone 복원, 변조/추가 파일/덮어쓰기 거부를 확인한다.
+
+확장 실행 통과 기록: `outputs/publication-desktop-check/a655a73d-c98e-4e64-887f-fdb7a60dd66c/`. `web-verification.json`, `remote-verification.json`, `overlay-verification.json`, 최종 `verification.json` 모두 통과, 정상 종료했다. `web-three-structures.png`, `web-xray-study-qc.png`, `web-tablet.png`, 터치 회전 화면을 직접 확인했다. 비교 선택 연속 입력 누락과 3D shader compile 중 화면 이탈 시 dispose 오류를 수정하고 같은 경로를 재검증했다. 측정/각 viewport에는 가명 Study와 결과 ID도 표시해 같은 환자·variant의 서로 다른 게시물을 구분한다.
+
+추가 자동 검사: TypeScript, 741개 번역, Viewer/Desktop/기존 demo 빌드와 GLB/상호작용 검사, remote 7개·Viewer 2개·publication/Overlay/기존 복구/새 백업 통합 17개 시나리오 통과. 운영 배포 파일은 생성 및 경계 검사만 통과했으며 nginx/systemd 실제 가동 검증은 아직이다.
 
 새 추론, 모델 수치 비교, 실제 Safari/iPad/YubiKey/운영 HTTPS 서버 검증은 이 단계에 포함하지 않는다.
 
