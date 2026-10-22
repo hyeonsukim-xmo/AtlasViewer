@@ -32,7 +32,7 @@ export default function Publication({results=[]}:{results?:AnalysisResult[]}){
   const member=account?.me?.memberships.find(m=>m.orgId===account.workspace?.orgId && m.workspaceId===account.workspace?.workspaceId);
   return <>
     <button className={results.length?'clinical-button':'desktop-demo-link'} onClick={()=>setOpen(true)}>{results.length?t('서버에 게시'):t('전송 현황')}</button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="installation-dialog publication-dialog">
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent closeLabel={t('닫기')} className="installation-dialog publication-dialog">
       <DialogTitle>{t('결과 게시·전송')}</DialogTitle>
       <DialogDescription>{t('측정·QC와 암호화된 Mask를 게시하고, 준비된 3D를 추가합니다. 대표 Overlay는 각 영상에서 최종 사본 확인 후 별도로 게시합니다.')}</DialogDescription>
       {!status?.configured?<p>{t('계정 서버가 아직 설정되지 않았습니다. 서버 연결 후 로그인을 사용할 수 있습니다.')}</p>:<>

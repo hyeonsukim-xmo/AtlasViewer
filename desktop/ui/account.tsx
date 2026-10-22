@@ -21,14 +21,14 @@ export default function Account({openRequest=0}:{openRequest?:number}){
   const membership=state?.me?.memberships.find(m=>m.orgId===state.workspace?.orgId && m.workspaceId===state.workspace?.workspaceId);
   return <>
     <button className="desktop-demo-link" title={state?.me?.name??t('계정')} onClick={()=>setOpen(true)}>{state?.me?.name??t('계정')}</button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="installation-dialog account-dialog">
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent closeLabel={t('닫기')} className="installation-dialog account-dialog">
       <DialogTitle>{t('계정·장비 등록')}</DialogTitle>
       <DialogDescription>{t('계정은 기관 연결과 장비 등록에 사용합니다. 로컬 분석 권한은 장비 라이선스로 확인합니다.')}</DialogDescription>
       {state?.state==='unconfigured'?<p>{t('계정 서버가 아직 설정되지 않았습니다. 서버 연결 후 로그인을 사용할 수 있습니다.')}</p>:state?.state==='storage-unavailable'?<p role="alert">{t('계정 저장소를 열 수 없습니다. 폴더 권한과 디스크 상태를 확인하세요. 로컬 결과 열람은 유지됩니다.')}</p>:<>
         <div className="account-actions">
           <button className="clinical-button" disabled={busy} onClick={()=>void action(async()=>{setState(unwrap(await api.accountLogin()));setRows(unwrap(await api.accountEnrollments()));})}>{state?.me?t('다시 로그인'):t('브라우저에서 로그인')}</button>
           <button className="text-button" disabled={busy||!state||['signed-out','sign-in-required'].includes(state.state)} onClick={()=>void action(refresh)}>{t('갱신')}</button>
-          <button className="text-button" onClick={()=>{void api.accountLogout().then(unwrap).then(v=>{setState(v);setRows([]);}).catch(()=>{});}}>{busy?t('로그인 취소·로그아웃'):t('로그아웃')}</button>
+          {(busy || state?.me) && <button className="text-button" onClick={()=>{void api.accountLogout().then(unwrap).then(v=>{setState(v);setRows([]);}).catch(()=>{});}}>{busy?t('로그인 취소·로그아웃'):t('로그아웃')}</button>}
         </div>
         {state?.state==='unavailable' && <p role="status">{t('계정 서버에 연결할 수 없습니다. 로컬 분석과 저장된 결과는 계속 사용할 수 있습니다.')}</p>}
         {state?.me && <>

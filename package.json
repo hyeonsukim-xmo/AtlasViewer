@@ -30,6 +30,7 @@
     "desktop:pack:internal": "node scripts/security/package.cjs internal dir",
     "desktop:dist:internal": "node scripts/security/package.cjs internal nsis",
     "test:desktop": "npm run build:desktop && electron scripts/validate-desktop.cjs",
+    "test:clinical-ui": "npm run build:desktop && electron scripts/validate-clinical-ui.cjs",
     "test:classifier": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-classifier.py",
     "test:imaging": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-imaging.py",
     "test:transfer": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-transfer-integrity.py",

@@ -1,4 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -6,7 +7,13 @@ function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
-function DialogContent({ className, children, ...props }: DialogPrimitive.Popup.Props) {
+function DialogContent({
+  className,
+  children,
+  closeLabel = "Close",
+  ...props
+}: DialogPrimitive.Popup.Props & { closeLabel?: string }) {
+  const close = useRef<HTMLButtonElement>(null);
   return (
     <DialogPrimitive.Portal data-slot="dialog-portal">
       <DialogPrimitive.Backdrop
@@ -20,8 +27,16 @@ function DialogContent({ className, children, ...props }: DialogPrimitive.Popup.
           className,
         )}
         {...props}
+        initialFocus={props.initialFocus ?? close}
       >
         {children}
+        <DialogPrimitive.Close
+          ref={close}
+          aria-label={closeLabel}
+          className="dialog-close absolute right-3 top-3 grid size-8 place-items-center rounded-md border border-white/20 text-lg hover:bg-white/10"
+        >
+          <span aria-hidden="true">×</span>
+        </DialogPrimitive.Close>
       </DialogPrimitive.Popup>
     </DialogPrimitive.Portal>
   );
@@ -31,7 +46,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("font-heading text-base leading-none font-medium", className)}
+      className={cn("font-heading pr-10 text-base leading-none font-medium", className)}
       {...props}
     />
   );

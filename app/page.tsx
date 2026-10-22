@@ -512,9 +512,6 @@ export default function Home({
 
       <Dialog open={about} onOpenChange={setAbout}>
         <DialogContent className="about-dialog" initialFocus={aboutTitle}>
-          <Button variant="ghost" className="about-close" onClick={() => setAbout(false)}>
-            Close
-          </Button>
           <div className="eyebrow">EXMO Segmentation Atlas</div>
           <DialogTitle ref={aboutTitle} tabIndex={-1}>
             About this atlas

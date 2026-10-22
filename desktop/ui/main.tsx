@@ -129,32 +129,26 @@ function Desktop() {
             <div className="analysis-catalog-inner">
               <header className="catalog-heading">
                 <div>
-                  <p className="analysis-eyebrow">LOWER EXTREMITY</p>
                   <h1>{t("분석 작업")}</h1>
-                  <p>Thigh muscle estimation</p>
+                  <p>{t("허벅지 근육 분석")}</p>
                 </div>
-                <span>Desktop · Local processing</span>
-              </header>
-              <div className="catalog-status" role="status">
-                <span>{license?.profile==='development'?t('개발 환경'):license?.profile==='internal'?t('내부 개발용'):t('고객용')} · {license?.state||t('상태 확인 중')}</span>
-                <span>{account?.state==='signed-in'?`${account.me?.name} · ${account.workspace?.orgId||t('작업공간 선택')}`:t('로그인 없이 로컬 분석·결과 열람 가능')}</span>
-                <button className="text-button" onClick={()=>setAccountRequest(n=>n+1)}>{account?.state==='signed-in'?t('계정·작업공간'):t('계정 연결')}</button>
                 <button className="text-button" onClick={()=>setInstallationRevision(n=>n+1)}>{t('새로고침')}</button>
-              </div>
+              </header>
+              {account?.state==='signed-in' && <p className="catalog-account">{account.me?.name} · {account.workspace?.orgId||t('작업공간 선택')}
+                <button className="text-button" onClick={()=>setAccountRequest(n=>n+1)}>{t('계정·작업공간')}</button>
+              </p>}
               {license && license.profile!=='development' && !['VALID','GRACE'].includes(license.state) && <p className="metric-note">{t('신규 분석은 장비 승인이 필요합니다. 기존 결과는 아래 목록에서 열 수 있습니다.')} <button className="text-button" onClick={()=>setAccountRequest(n=>n+1)}>{t('초기 설정')}</button></p>}
               <div className="catalog-section">
                 <div className="panel-title">
-                  <strong>{t("분석 프로토콜")}</strong>
-                  <span>{t("프로토콜 선택 후 영상을 등록합니다")}</span>
+                  <strong>{t("분석 선택")}</strong>
                 </div>
                 <table className="clinical-table protocol-table">
                   <thead>
                     <tr>
                       <th>Modality</th>
-                      <th>{t("분석 / 입력 조건")}</th>
+                      <th>{t("입력 영상")}</th>
                       <th>{t("결과")}</th>
-                      <th>{t("엔진")}</th>
-                      <th>{t('사용권')}</th>
+                      <th>{t("상태")}</th>
                       <th />
                     </tr>
                   </thead>
@@ -171,27 +165,24 @@ function Desktop() {
                           <span className="modality-label">{analysis.name}</span>
                         </td>
                         <td>
-                          <strong>Thigh muscle estimation</strong>
-                          <span>{analysis.protocol}</span>
+                          <strong>{analysis.protocol}</strong>
                           <small>{t(analysis.input)} / ZIP</small>
                         </td>
-                        <td>{analysis.output}</td>
+                        <td>{analysis.analysis==='ct'?t('근육 체적 · HU 기반 지방 범위 · 3D'):analysis.analysis==='mri'?t('근육 체적 · QC · 3D'):t('근육 투영 면적 · Overlay')}</td>
                         <td>
                           <span
                             className={
-                              status[analysis.id]?.estimationAvailable
+                              solutionAction(analysis.id,license,status[analysis.id])==='open' && status[analysis.id]?.estimationAvailable
                                 ? "status-ready"
                                 : "status-review"
                             }
                           >
-                            {status[analysis.id]?.installation?installationLabel(status[analysis.id]?.installation):status[analysis.id]?.estimationAvailable
-                              ? t("연결됨")
-                              : t("준비 필요")}
+                            {solutionAction(analysis.id,license,status[analysis.id])==='open'?(status[analysis.id]?.estimationAvailable?t('분석 가능'):t('준비 필요')):
+                              solutionAction(analysis.id,license,status[analysis.id])==='license'?permission(analysis.id):
+                              status[analysis.id]?.installation?installationLabel(status[analysis.id]?.installation):t('상태 확인 중')}
                           </span>
-                          <small>{status[analysis.id]?.device || "—"}</small>
                           {solutionErrors[analysis.id] && <small className="inline-error" role="alert">{solutionErrors[analysis.id]}</small>}
                         </td>
-                        <td>{permission(analysis.id)}</td>
                         <td>
                           <button
                             className="clinical-button"

@@ -1,4 +1,5 @@
 import RemoteOverlayImage from './remote-overlay';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../../components/ui/dialog';
 import { failureText, sceneDiagnostic, type Diagnostic, type Failure } from "./diagnostics";
 import { t, useLanguage } from "./language";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -14,6 +15,7 @@ import {
 } from "./imaging";
 
 const sideName = { left: "Left", right: "Right", unassigned: "미분류" };
+const variantName = (variant: string) => variant === 'raw' ? t('원본') : variant === 'pp500' ? t('작은 성분 제거') : variant === 'strong' ? t('강화 후보') : variant;
 
 function SideValues({ row, primarySide }: { row: MetricRow; primarySide: AnatomicalSide }) {
   useLanguage();
@@ -97,6 +99,8 @@ export default function ResultView({
   const [sceneRetries, setSceneRetries] = useState<Record<string, number>>({});
   const [changing, setChanging] = useState(false);
   const [table, setTable] = useState<"metrics" | "qc">("metrics");
+  const [qcDetailId, setQcDetailId] = useState<string | null>(null);
+  const qcDetail = results.find(result => result.id === qcDetailId);
   const [touchRotateSelection,setTouchRotateSelection]=useState(false);
   const [ttaThreshold, setTtaThreshold] = useState(1.16);
   const needsPreparation = (result: AnalysisResult) =>
@@ -270,7 +274,7 @@ export default function ResultView({
           <p>
             {description || (results.length > 1
               ? t("{{value0}} · 구조 이름 기준 비교", { value0: primary.analysis.toUpperCase() })
-              : `${primary.metadata.studyDescription || primary.name} · ${primary.analysis.toUpperCase()} · ${primary.variant.toUpperCase()}`)}
+              : `${primary.metadata.studyDescription || primary.name} · ${primary.analysis.toUpperCase()} · ${variantName(primary.variant)}`)}
           </p>
         </div>
         <div className="result-view-actions">
@@ -278,7 +282,7 @@ export default function ResultView({
         {comparison && <ResultComparison results={results} actions={comparison} />}
         <div className="control-segment">
           <button aria-pressed={mode === "overlay"} onClick={() => setMode("overlay")}>
-            {remote?t('Overlay·측정·QC'):<>Overlay &amp; metrics</>}
+            {remote?t('Overlay·측정·QC'):t('영상·측정')}
           </button>
           <button
             disabled={!can3d}
@@ -288,7 +292,7 @@ export default function ResultView({
               setState((s) => (s.explode ? { ...s, selected: s.selected.slice(0, 1) } : s));
             }}
           >
-            {pendingMeshes ? t("3D 준비 중") : "3D anatomy"}
+            {pendingMeshes ? t("3D 준비 중") : t('3D 보기')}
           </button>
         </div>
         </div>
@@ -315,7 +319,7 @@ export default function ResultView({
         ref={body}
         className={`result-body ${results.length > 1 ? "comparing" : ""}`}
         style={
-          { "--metrics-width": panelWidth == null ? undefined : `${panelWidth}px` } as CSSProperties
+          { "--metrics-width": panelWidth == null ? undefined : `${panelWidth}px`, "--result-count": results.length } as CSSProperties
         }
       >
         <aside className="metrics-panel">
@@ -337,9 +341,9 @@ export default function ResultView({
             <span>
               {" "}
               ·{" "}
-              {allSelected
-                ? t("전체 구조 선택")
-                : t("{{value0}}개 구조 선택", { value0: selectedIds.length })}
+              {mode === '3d'
+                ? selectedIds.length ? t('{{value0}}개 구조 강조', {value0: selectedIds.length}) : state.group === 'All' ? t('전체 구조 표시') : t('{{value0}} 그룹 표시', {value0: state.group})
+                : allSelected ? t("전체 구조 선택") : t("{{value0}}개 구조 선택", { value0: selectedIds.length })}
             </span>
           </div>
           {results.some(r=>r.analysis === "mri") && table === "qc" && (
@@ -370,7 +374,7 @@ export default function ResultView({
               <thead>
                 <tr>
                   <th scope="col">
-                    {table === "metrics" ? (
+                    {table === "metrics" && mode === 'overlay' ? (
                       <label className="metric-name">
                         <input
                           type="checkbox"
@@ -381,9 +385,10 @@ export default function ResultView({
                           }}
                           onChange={toggleAll}
                         />
-                        Structure
+                        {t('구조')}
                       </label>
-                    ) : (
+                    ) : table === 'metrics' ? <div className="metric-focus-heading"><span>{t('구조')}</span>
+                      <button className="text-button" disabled={!selectedIds.length} onClick={()=>setState(s=>({...s,selected:[],rotate:false}))}>{t('강조 해제')}</button></div> : (
                       t("QC / 처리")
                     )}
                   </th>
@@ -403,12 +408,12 @@ export default function ResultView({
                           value={result.variant}
                           onChange={(e) => void changeVariant(result, e.target.value)}
                         >
-                          <option value="raw">Raw</option>
-                          <option value="pp500">PP500</option>
+                          <option value="raw">{t('원본')}</option>
+                          <option value="pp500">{t('작은 성분 제거')}</option>
                           <option value="strong">{t("강화 후보")}</option>
                         </select>
                       ) : (
-                        <small>{remote?`${result.variant.toUpperCase()} · `:''}{result.unit}</small>
+                        <small>{remote?`${variantName(result.variant)} · `:''}{result.analysis === 'xray' ? result.unit : ''}</small>
                       )}
                       {result.qc.ttaDisagreement != null &&
                         result.qc.ttaDisagreement * 100 > ttaThreshold && (
@@ -450,6 +455,7 @@ export default function ResultView({
                         return (
                           <td key={result.id}>
                             <strong>{result.analysis === "xray" && (!own || !xrayApplicable(result, own)) ? t("해당 없음") : number(own?.value)}</strong>
+                            <div className="metric-secondary">
                             {result.analysis === "ct" && (
                               <small title="Fat-range %">{number(own?.fat)}</small>
                             )}
@@ -466,10 +472,11 @@ export default function ResultView({
                                   value3: result.unit,
                                 })}
                               >
-                                {t("제거 ")}
+                                −
                                 {number(own.rawValue - own.value)}
                               </small>
                             )}
+                            </div>
                           </td>
                         );
                       })}
@@ -483,21 +490,14 @@ export default function ResultView({
                       <td>{t("좌우 분류")}</td>
                       {results.map((result) => (
                         <td key={result.id}>
-                          {result.analysis==='xray'?t('해당 없음'):t(result.laterality?.reason) || (result.laterality?t('자동 좌우 분류 · 검토 필요'):t("좌우 정보 준비 전"))}
+                          {result.analysis==='xray'?t('해당 없음'):!result.laterality?t('좌우 정보 준비 전'):result.laterality.status==='unavailable'?t('분류 불가'):result.laterality.status==='partial'?t('일부 미분류'):t('자동 분류')}
                           {result.laterality && (
                             <small>
                               {t("미분류 ")}
                               {number(result.laterality.unassignedCm3)} cm³
                             </small>
                           )}
-                          {result.rows
-                            .filter((row) => row.sides?.unassigned.count)
-                            .map((row) => (
-                              <p key={row.id}>
-                                {row.name} · {number(row.sides!.unassigned.value)}
-                                {t(" cm³ 판정 보류")}
-                              </p>
-                            ))}
+                          {result.analysis !== 'xray' && <button className="text-button qc-detail-button" onClick={()=>setQcDetailId(result.id)}>{t('상세 보기')}</button>}
                         </td>
                       ))}
                     </tr>
@@ -508,72 +508,6 @@ export default function ResultView({
                       <td key={r.id}>{r.qc.tta}</td>
                     ))}
                   </tr>
-                  {!remote && <tr>
-                    <td>{t("처리 시간")}</td>
-                    {results.map((r) => (
-                      <td key={r.id}>{number(r.seconds, 0)} s</td>
-                    ))}
-                  </tr>}
-                  {results.some(result => result.compute) && (
-                    <tr>
-                      <td>{t("CT 계산 장치")}</td>
-                      {results.map(result => (
-                        <td key={result.id}>
-                          {result.compute ? t("추론 {{value0}} · 합성 {{value1}}", {
-                            value0: result.compute.device.startsWith("cuda") ? "GPU" : "CPU",
-                            value1: result.compute.accumulation.startsWith("cuda") ? "GPU" : "CPU",
-                          }) : "—"}
-                          {result.compute?.accumulation_reason && <small>{t("GPU 메모리 제한으로 CPU 합성")}</small>}
-                        </td>
-                      ))}
-                    </tr>
-                  )}
-                  {results.some(result => result.timings) && (
-                    <>
-                      {[
-                        [t("측정·Overlay 열람까지"), (r: AnalysisResult) => r.timings?.ready],
-                        [t("입력 확인·변환 (대기 포함)"), (r: AnalysisResult) => r.timings?.input],
-                        [t("엔진 초기화·통신"), (r: AnalysisResult) => r.timings?.modelProcess == null ? undefined : Math.max(0, r.timings.modelProcess - r.seconds)],
-                        [t("모델 로딩"), (r: AnalysisResult) => r.timings?.model?.model_loading],
-                        [t("전처리"), (r: AnalysisResult) => r.timings?.model?.preprocessing],
-                        [t("입력 GPU 전송"), (r: AnalysisResult) => r.timings?.model?.input_upload],
-                        [t("추론"), (r: AnalysisResult) => r.timings?.model?.inference],
-                        [t("추론·리샘플링 (LAT)"), (r: AnalysisResult) => r.timings?.model?.inference_with_resampling],
-                        [t("원본 좌표 복원"), (r: AnalysisResult) => r.timings?.model?.native_restore],
-                        [t("후처리"), (r: AnalysisResult) => r.timings?.model?.postprocessing],
-                        [t("모델 측정"), (r: AnalysisResult) => r.timings?.model?.measurement],
-                        [t("QC·엔트로피 계산"), (r: AnalysisResult) => r.timings?.model?.qc],
-                        [t("Overlay 이미지 생성"), (r: AnalysisResult) => r.timings?.model?.overlay_generation],
-                        [t("Slicer 메타데이터 생성"), (r: AnalysisResult) => r.timings?.model?.export_metadata],
-                        [t("결과 파일 저장·복사"), (r: AnalysisResult) => r.timings?.model?.save],
-                        [t("해시·재읽기 검증"), (r: AnalysisResult) => r.timings?.model?.verification],
-                        [t("결과 저장·검증"), (r: AnalysisResult) => r.timings?.model?.export],
-                        [t("기타 모델 처리"), (r: AnalysisResult) => r.timings?.model?.other],
-                        [t("Logits 유한값 검사"), (r: AnalysisResult) => r.timings?.model?.logits_validation],
-                        [t("확률 변환"), (r: AnalysisResult) => r.timings?.model?.probability_conversion],
-                        [t("확률 검증"), (r: AnalysisResult) => r.timings?.model?.probability_validation],
-                        [t("라벨 동일성 검사"), (r: AnalysisResult) => r.timings?.model?.label_validation],
-                        [t("Ontology 해시"), (r: AnalysisResult) => r.timings?.model?.ontology_identity],
-                        [t("소스 코드 해시"), (r: AnalysisResult) => r.timings?.model?.code_identity],
-                        [t("실행환경 버전 조회"), (r: AnalysisResult) => r.timings?.model?.environment_identity],
-                        [t("JSON·CSV 기록"), (r: AnalysisResult) => r.timings?.model?.metadata_write],
-                        [t("라벨 데이터 해시"), (r: AnalysisResult) => r.timings?.model?.payload_hash],
-                        [t("메모리 정리"), (r: AnalysisResult) => r.timings?.model?.cleanup],
-                        [t("측정·Overlay 준비"), (r: AnalysisResult) => r.timings?.metricsOverlay],
-                        [t("설치 파일 검증"), (r: AnalysisResult) => r.timings?.runtimeVerification],
-                        [t("3D 생성"), (r: AnalysisResult) => r.timings?.mesh],
-                        [t("메모리·GPU·CPU·결과 준비 대기"), (r: AnalysisResult) => r.timings?.ready == null ? undefined :
-                          (r.timings.admissionWait || 0) + (r.timings.gpuWait || 0) + (r.timings.resultWait || 0) + (r.timings.model?.cpu_wait || 0)],
-                        [t("3D 대기"), (r: AnalysisResult) => r.timings?.meshWait],
-                      ].map(([label, value]) => {
-                        const read = value as (r: AnalysisResult) => number | undefined;
-                        if (!results.some(r => read(r) != null)) return null;
-                        return <tr key={label as string}><td>{label as string}</td>
-                          {results.map(r => <td key={r.id}>{number(read(r), 2)} s</td>)}
-                        </tr>;
-                      })}
-                    </>
-                  )}
                   {results.some(r=>r.analysis === "mri") && (
                     <>
                       <tr>
@@ -646,24 +580,7 @@ export default function ResultView({
                     <td>Component QC</td>
                     {results.map((r) => (
                       <td key={r.id}>
-                        {r.qc.flags.length
-                          ? r.qc.flags.map((flag) => {
-                              const match = /^class_(\d+)_more_than_two_large_components$/.exec(
-                                flag,
-                              );
-                              return (
-                                <p key={flag}>
-                                  {match
-                                    ? t("{{value0}} · 1 cm³ 초과 성분 > 2", {
-                                        value0:
-                                          r.rows.find((row) => row.label === Number(match[1]))
-                                            ?.name || match[1],
-                                      })
-                                    : t(flag)}
-                                </p>
-                              );
-                            })
-                          : t("해당 경고 없음")}
+                        {r.qc.flags.length ? <button className="text-button qc-detail-button" onClick={()=>setQcDetailId(r.id)}>{t('경고 {{value0}}건', {value0:r.qc.flags.length})}</button> : t("해당 경고 없음")}
                       </td>
                     ))}
                   </tr>
@@ -671,10 +588,8 @@ export default function ResultView({
                     <td>{t("미검출 구조")}</td>
                     {results.map((r) => (
                       <td key={r.id}>
-                        {r.rows
-                          .filter((row) => !row.present && (r.analysis !== "xray" || xrayApplicable(r, row)))
-                          .map((row) => row.name)
-                          .join(", ") || t("없음")}
+                        {r.rows.some(row=>!row.present && (r.analysis!=='xray'||xrayApplicable(r,row)))
+                          ? <button className="text-button qc-detail-button" onClick={()=>setQcDetailId(r.id)}>{t('{{value0}}개 구조', {value0:r.rows.filter(row=>!row.present && (r.analysis!=='xray'||xrayApplicable(r,row))).length})}</button> : t('없음')}
                       </td>
                     ))}
                   </tr>
@@ -684,6 +599,72 @@ export default function ResultView({
                       <td key={r.id}>{r.qc.unexpected.join(", ") || t("없음")}</td>
                     ))}
                   </tr>
+                  {!remote && <tr>
+                    <td>{t("처리 시간")}</td>
+                    {results.map((r) => (
+                      <td key={r.id}>{number(r.seconds, 0)} s</td>
+                    ))}
+                  </tr>}
+                  {results.some(result => result.compute) && (
+                    <tr>
+                      <td>{t("CT 계산 장치")}</td>
+                      {results.map(result => (
+                        <td key={result.id}>
+                          {result.compute ? t("추론 {{value0}} · 합성 {{value1}}", {
+                            value0: result.compute.device.startsWith("cuda") ? "GPU" : "CPU",
+                            value1: result.compute.accumulation.startsWith("cuda") ? "GPU" : "CPU",
+                          }) : "—"}
+                          {result.compute?.accumulation_reason && <small>{t("GPU 메모리 제한으로 CPU 합성")}</small>}
+                        </td>
+                      ))}
+                    </tr>
+                  )}
+                  {results.some(result => result.timings) && (
+                    <>
+                      {[
+                        [t("측정·Overlay 열람까지"), (r: AnalysisResult) => r.timings?.ready],
+                        [t("입력 확인·변환 (대기 포함)"), (r: AnalysisResult) => r.timings?.input],
+                        [t("엔진 초기화·통신"), (r: AnalysisResult) => r.timings?.modelProcess == null ? undefined : Math.max(0, r.timings.modelProcess - r.seconds)],
+                        [t("모델 로딩"), (r: AnalysisResult) => r.timings?.model?.model_loading],
+                        [t("전처리"), (r: AnalysisResult) => r.timings?.model?.preprocessing],
+                        [t("입력 GPU 전송"), (r: AnalysisResult) => r.timings?.model?.input_upload],
+                        [t("추론"), (r: AnalysisResult) => r.timings?.model?.inference],
+                        [t("추론·리샘플링 (LAT)"), (r: AnalysisResult) => r.timings?.model?.inference_with_resampling],
+                        [t("원본 좌표 복원"), (r: AnalysisResult) => r.timings?.model?.native_restore],
+                        [t("후처리"), (r: AnalysisResult) => r.timings?.model?.postprocessing],
+                        [t("모델 측정"), (r: AnalysisResult) => r.timings?.model?.measurement],
+                        [t("QC·엔트로피 계산"), (r: AnalysisResult) => r.timings?.model?.qc],
+                        [t("Overlay 이미지 생성"), (r: AnalysisResult) => r.timings?.model?.overlay_generation],
+                        [t("Slicer 메타데이터 생성"), (r: AnalysisResult) => r.timings?.model?.export_metadata],
+                        [t("결과 파일 저장·복사"), (r: AnalysisResult) => r.timings?.model?.save],
+                        [t("해시·재읽기 검증"), (r: AnalysisResult) => r.timings?.model?.verification],
+                        [t("결과 저장·검증"), (r: AnalysisResult) => r.timings?.model?.export],
+                        [t("기타 모델 처리"), (r: AnalysisResult) => r.timings?.model?.other],
+                        [t("Logits 유한값 검사"), (r: AnalysisResult) => r.timings?.model?.logits_validation],
+                        [t("확률 변환"), (r: AnalysisResult) => r.timings?.model?.probability_conversion],
+                        [t("확률 검증"), (r: AnalysisResult) => r.timings?.model?.probability_validation],
+                        [t("라벨 동일성 검사"), (r: AnalysisResult) => r.timings?.model?.label_validation],
+                        [t("Ontology 해시"), (r: AnalysisResult) => r.timings?.model?.ontology_identity],
+                        [t("소스 코드 해시"), (r: AnalysisResult) => r.timings?.model?.code_identity],
+                        [t("실행환경 버전 조회"), (r: AnalysisResult) => r.timings?.model?.environment_identity],
+                        [t("JSON·CSV 기록"), (r: AnalysisResult) => r.timings?.model?.metadata_write],
+                        [t("라벨 데이터 해시"), (r: AnalysisResult) => r.timings?.model?.payload_hash],
+                        [t("메모리 정리"), (r: AnalysisResult) => r.timings?.model?.cleanup],
+                        [t("측정·Overlay 준비"), (r: AnalysisResult) => r.timings?.metricsOverlay],
+                        [t("설치 파일 검증"), (r: AnalysisResult) => r.timings?.runtimeVerification],
+                        [t("3D 생성"), (r: AnalysisResult) => r.timings?.mesh],
+                        [t("메모리·GPU·CPU·결과 준비 대기"), (r: AnalysisResult) => r.timings?.ready == null ? undefined :
+                          (r.timings.admissionWait || 0) + (r.timings.gpuWait || 0) + (r.timings.resultWait || 0) + (r.timings.model?.cpu_wait || 0)],
+                        [t("3D 대기"), (r: AnalysisResult) => r.timings?.meshWait],
+                      ].map(([label, value]) => {
+                        const read = value as (r: AnalysisResult) => number | undefined;
+                        if (!results.some(r => read(r) != null)) return null;
+                        return <tr key={label as string}><td>{label as string}</td>
+                          {results.map(r => <td key={r.id}>{number(read(r), 2)} s</td>)}
+                        </tr>;
+                      })}
+                    </>
+                  )}
                 </tbody>
               )}
             </table>
@@ -777,7 +758,7 @@ export default function ResultView({
                     aria-pressed={state.view === view}
                     onClick={() => setState((s) => ({ ...s, view, rotate: false }))}
                   >
-                    {["Front", "Back", "Side", "3/4"][i]}
+                    {[t('앞'), t('뒤'), t('옆'), '3/4'][i]}
                   </button>
                 ))}
               </div>
@@ -794,7 +775,7 @@ export default function ResultView({
                   }));
                 }}
               >
-                {state.explode ? "Assemble" : "Explode anatomy"}
+                {state.explode ? t('모아 보기') : t('분해 보기')}
               </button>
               <select
                 aria-label={t("구조 그룹")}
@@ -808,7 +789,7 @@ export default function ResultView({
                 }
               >
                 {GROUPS.map((group) => (
-                  <option key={group}>{group}</option>
+                  <option key={group} value={group}>{group === 'All' ? t('전체') : group}</option>
                 ))}
               </select>
               <select
@@ -821,8 +802,8 @@ export default function ResultView({
                   }))
                 }
               >
-                <option value="class">Class colors</option>
-                <option value="anatomical">Muscle colors</option>
+                <option value="class">{t('구조별 색상')}</option>
+                <option value="anatomical">{t('근육·뼈 색상')}</option>
               </select>
               <button
                 className="text-button"
@@ -830,7 +811,7 @@ export default function ResultView({
                   setState((s) => ({ ...INITIAL_STATE, group: "All", reset: s.reset + 1 }));
                 }}
               >
-                Reset
+                {t('보기 초기화')}
               </button>
               {remote&&<button className="clinical-button touch-rotation" aria-pressed={touchRotateSelection}
                 disabled={!state.explode||state.selected.length!==1} onClick={()=>setTouchRotateSelection(value=>!value)}>{t('터치: 선택 구조 회전')}</button>}
@@ -859,7 +840,7 @@ export default function ResultView({
                     {remote&&<span title={result.id}>{result.metadata.studyDescription||t('Study 미연결')} · {result.id.slice(0,8)}</span>}
                     <span>
                       {result.route || result.analysis.toUpperCase()} ·{" "}
-                      {result.variant.toUpperCase()} ·{" "}
+                      {variantName(result.variant)} ·{" "}
                       {result.metadata.studyDate || result.metadata.seriesDescription}
                     </span>
                     {selectedIds.length > 0 && !allSelected && (
@@ -972,9 +953,9 @@ export default function ResultView({
                 {remote?t('탭·클릭 선택 · 드래그 조작 · 두 손가락 확대·이동 · 분해 후 우클릭 또는 터치 구조 회전'):t("좌클릭 선택 · 좌클릭 드래그 회전 · 휠 확대 · 휠 버튼 드래그 이동 · 우클릭 이미지 복사·저장")}
               </span>
               <label>
-                Surrounding opacity
+                {t('주변 구조 불투명도')}
                 <input
-                  aria-label="Surrounding opacity"
+                  aria-label={t('주변 구조 불투명도')}
                   type="range"
                   min={0}
                   max={1}
@@ -989,6 +970,23 @@ export default function ResultView({
           )}
         </div>
       </div>
+      <Dialog open={!!qcDetail} onOpenChange={open=>{if(!open)setQcDetailId(null);}}>
+        <DialogContent className="installation-dialog qc-structure-dialog" closeLabel={t('닫기')}>
+          <DialogTitle>{t('QC 상세')} · {qcDetail?.metadata.caseName}</DialogTitle>
+          <DialogDescription>{t(qcDetail?.laterality?.reason) || t('구조별 검토 항목')}</DialogDescription>
+          {qcDetail && <>
+            {qcDetail.laterality && <><p>{t('미분류 ')}{number(qcDetail.laterality.unassignedCm3)} cm³</p>
+            <div className="qc-structure-list"><table className="clinical-table"><thead><tr><th>{t('구조')}</th><th>{t('미분류 체적')} · cm³</th></tr></thead><tbody>
+              {qcDetail.rows.filter(row=>row.sides?.unassigned.count).map(row=><tr key={row.id}><td>{row.name}</td><td>{number(row.sides!.unassigned.value)}</td></tr>)}
+            </tbody></table></div></>}
+            <div><strong>Component QC</strong>{qcDetail.qc.flags.length ? qcDetail.qc.flags.map(flag=>{
+              const match=/^class_(\d+)_more_than_two_large_components$/.exec(flag);
+              return <p key={flag}>{match?t('{{value0}} · 1 cm³ 초과 성분 > 2',{value0:qcDetail.rows.find(row=>row.label===Number(match[1]))?.name||match[1]}):t(flag)}</p>;
+            }):<p>{t('해당 경고 없음')}</p>}</div>
+            <p><strong>{t('미검출 구조')}: </strong>{qcDetail.rows.filter(row=>!row.present && (qcDetail.analysis!=='xray'||xrayApplicable(qcDetail,row))).map(row=>row.name).join(', ')||t('없음')}</p>
+          </>}
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

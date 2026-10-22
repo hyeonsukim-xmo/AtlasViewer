@@ -912,13 +912,6 @@ kbd {
   padding: 28px;
   color: #e1e4ee;
 }
-.about-close {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  font-size: 12px;
-  color: #a1a6bd;
-}
 .about-dialog [data-slot="dialog-title"] {
   font-size: 25px;
   line-height: 1.3;

@@ -32,7 +32,7 @@ export default function OverlayPublication({reference,options,disabled}:{referen
   const point=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();return {x:Math.max(0,Math.min(draft!.width,Math.round((e.clientX-r.left)*draft!.width/r.width))),y:Math.max(0,Math.min(draft!.height,Math.round((e.clientY-r.top)*draft!.height/r.height)))};};
   return <>
     <button className="text-button" disabled={disabled||!member?.roles.includes('analyst')} title={t('로그인한 게시 권한 계정으로 현재 슬라이스의 표시 사본을 검토합니다.')} onClick={()=>void create()}>{t('대표 Overlay 게시')}</button>
-    <Dialog open={open} onOpenChange={value=>{if(!value)close();}}><DialogContent className="installation-dialog overlay-review-dialog">
+    <Dialog open={open} onOpenChange={value=>{if(!value)close();}}><DialogContent closeLabel={t('닫기')} className="installation-dialog overlay-review-dialog">
       <DialogTitle>{final?t('최종 게시 사본 확인'):t('대표 Overlay · 개인정보 검토')}</DialogTitle>
       <DialogDescription>{t('결과별 대표 이미지 한 장을 게시합니다. 이름·환자번호 등 식별 영역을 가린 뒤 최종 사본을 확인하세요. 원본과 분석 결과는 변경하지 않습니다.')}</DialogDescription>
       <p className="metric-note">{account?.workspace?.orgId} · {account?.workspace?.workspaceId}</p>

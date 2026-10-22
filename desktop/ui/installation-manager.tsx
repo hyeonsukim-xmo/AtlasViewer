@@ -32,7 +32,7 @@ export default function InstallationManager({openRequest=0}:{openRequest?:number
   async function action(run:()=>Promise<InstallationState>){setBusy(true);setError('');try{setState(await run());}catch(e){setError(failureText(e instanceof Error ? e : String(e)));}finally{setBusy(false);}}
   return <>
     <button className="desktop-demo-link" onClick={()=>setOpen(true)}>{t('솔루션 관리')}</button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="installation-dialog">
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent closeLabel={t('닫기')} className="installation-dialog">
       <DialogTitle>{t('솔루션 관리')}</DialogTitle>
       <DialogDescription>{t('필요한 분석을 설치하거나 업데이트합니다. 기존 영상과 결과는 유지됩니다.')}</DialogDescription>
       <table className="clinical-table"><thead><tr><th>Modality</th><th>{t('설치 상태')}</th><th>{t('관리')}</th></tr></thead><tbody>
