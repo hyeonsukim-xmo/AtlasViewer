@@ -33,7 +33,7 @@
 - [x] Flatten Desktop surface effects; support readable narrow comparisons; standardize modal closing and presentation language.
 - [x] Run type/language checks, Desktop and server-viewer builds, UI regression and existing interaction checks. Inspect screenshots with saved QA examples at 1440, 1280 and 1024 widths.
 - [x] Independent diff review; fix material findings and verify.
-- [ ] Commit/push the UI branch and provide exact user review locations and rollback commit.
+- [x] Commit/push the UI branch and provide exact user review locations and rollback commit. UI commit: `b1d6328`, pushed to `origin/ui/clinical-workspace-refinement`.
 
 ## Verification ledger
 
