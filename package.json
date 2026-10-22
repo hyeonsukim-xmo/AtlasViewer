@@ -1,6 +1,6 @@
 {
   "name": "exmo-segmentation-atlas",
-  "version": "0.1.27-runtime-slim.3",
+  "version": "0.1.27-runtime-slim.6",
   "private": true,
   "description": "EXMO segmentation atlas desktop and web viewer",
   "license": "MIT",
@@ -35,8 +35,8 @@
     "test:transfer": "work\\modality-integration\\envs\\ct\\Scripts\\python.exe -X utf8 scripts/validate-transfer-integrity.py",
     "test:imaging:desktop": "npm run build && npm run build:desktop && electron scripts/validate-imaging-desktop.cjs",
     "test:solutions": "node scripts/validate-solution-contracts.cjs",
-    "test:solution-security": "node --test scripts/security/test-solutions.cjs",
-    "test:installations": "node --test scripts/security/test-installations.cjs",
+    "test:solution-security": "node --test scripts/security/test-solutions.cjs scripts/security/test-license-terms.cjs",
+    "test:installations": "node --test scripts/security/test-installations.cjs scripts/security/test-model-expiry.cjs",
     "test:accounts": "node --test scripts/security/test-accounts.cjs",
     "test:publications": "node --test scripts/security/test-publications.cjs",
     "test:remote": "node --experimental-strip-types --test scripts/security/test-remote-results.cjs",

@@ -24,6 +24,7 @@ let remoteResults;
 let resultStorage;
 let protectedEngineRoot;
 let installations;
+let modelExpiry;
 let initializing = true;
 let startupRecorded = false;
 const preferences = { nodeIntegration: false, contextIsolation: true, sandbox: true };
@@ -204,6 +205,10 @@ app
           [path.join(selectedContext?.scriptsRoot??scriptsRoot,'runtime_bootstrap.py'),'--site',path.join(protectedEngineRoot,'envs/security/Lib/site-packages'),'--']):undefined,
         key: new WindowsKey(bundled ? path.resolve(__dirname, "../..", "security", "windows-key.ps1") : undefined) });
       startupTimings.licensingMs=performance.now()-phaseStarted;
+      if(installations){
+        modelExpiry=require('./security/model-expiry.cjs').openModelExpiry({licensing,installations});
+        await modelExpiry.sweep().catch(error=>console.error('Expired model cleanup failed:',error.message));
+      }
       powerMonitor.on("resume", () => licensing.refresh().catch(() => {}));
     }
     Menu.setApplicationMenu(null);
@@ -257,14 +262,16 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (!desktopImaging) { licensing?.close(); installations?.close(); return; }
+  if (!desktopImaging && !modelExpiry) { licensing?.close(); installations?.close(); return; }
   event.preventDefault();
   const imaging = desktopImaging;
   const sync=publicationSync;
+  const expiry=modelExpiry;modelExpiry=undefined;
   publicationSync=undefined;
   desktopImaging = undefined;
-  Promise.resolve(sync?.close())
-    .then(()=>imaging.dispose())
+  Promise.resolve(expiry?.close())
+    .then(()=>sync?.close())
+    .then(()=>imaging?.dispose())
     .catch(() => {})
     .finally(() => app.quit());
 });

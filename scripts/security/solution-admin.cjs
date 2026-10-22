@@ -19,7 +19,8 @@ function configure(authority,command,args){
     const row=authority.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get(args[0]);P.check(row,'No v3 assignment');
     const doc=JSON.parse(row.document),e=doc.entitlements.find(e=>e.solutionId===args[1]);P.check(e,'Unknown solution');
     if(command==='solution-status'){P.check(['active','suspended','revoked'].includes(args[2]));e.state=args[2];}
-    else {const expiry=args[2]==='perpetual'?null:require('./internal-admin.cjs').expiryTime(args[2]);
+    else {const expiry=require('./license-term.cjs').expiryTime(args[2],authority.clock());
+      P.check(expiry!==null || authority.profile==='internal','Perpetual model approval is internal-only');
       P.check(expiry===null || expiry>authority.clock(),'Expiry must be in the future');e.validUntil=expiry;}
     e.revision++;
     // Keep the existing writer transaction through validation, revision update and audit.

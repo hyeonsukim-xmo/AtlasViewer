@@ -14,8 +14,15 @@ const files = new Map(Array.from({length:118},(_,i)=>[String(i),{id:String(i),na
 const ids = [...files.keys()];
 const fixture = {started:[],active:0,peak:0,fail:'57'};
 const power = {active:new Set(),next:0};
+const {diagnose,workerError,userError}=require('../desktop/diagnostics.cjs');
+const output=path.join(root,'outputs/full-batch-check');
+fs.mkdirSync(output,{recursive:true});
 const sleep = ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const context = {
+  preparingResults:new Set(),performance, batchStarted:0, resultRevision:0, meshQueue:Promise.resolve(),
+  path,storageRoot:output,fsp:fs.promises,console,userError,
+  solutionFields:require('../desktop/solutions.cjs').solutionFields,
+  diagnostic:(error,stage,code,caseId)=>diagnose(error,{stage,code,caseId}),
   AbortController, runPipeline: require('../desktop/analysis-pipeline.cjs').runPipeline,
   resources: require('../desktop/analysis-pipeline.cjs').resources,
   pipelineController:null, pipelineResources:null, closeAnalysisWorkers:async()=>{},
@@ -29,7 +36,8 @@ const context = {
     fixture.started.push(file.id);fixture.active++;fixture.peak=Math.max(fixture.peak,fixture.active);
     await sleep(2);fixture.active--;
     if(context.cancelled)return;
-    if(file.id===fixture.fail)throw new Error('Simulated model failure');
+    if(file.id===fixture.fail)throw Object.assign(workerError({errorCode:'ENGINE_CRASH'}),{
+      processExit:{exitCode:3221225477,nativeCode:'0xc0000005',lastOperation:'logits_validation'}});
     context.batch.completed.push({id:file.id});
   },
 };
@@ -44,6 +52,8 @@ vm.runInNewContext(source.slice(start,end),context);
   assert.equal(power.active.size,0);
   assert.equal(context.batch.completed.length,117);
   assert.equal(context.batch.failed.length,1);
+  assert.equal(context.batch.failed[0].diagnostic.code,'ENGINE_CRASH');
+  assert.equal(context.batch.failed[0].diagnostic.stage,'모델 출력 검증');
   assert.deepEqual(fixture.started,ids);
   assert.equal(fixture.peak,1);
   fixture.started=[];fixture.fail=null;
@@ -55,8 +65,6 @@ vm.runInNewContext(source.slice(start,end),context);
   assert.ok(fixture.started.length<118);
   assert.ok(context.batch.completed.length>0);
   const report={passed:true,packaged:!!resources,selected:118,attempted:118,completed:117,failed:1,peakConcurrentModels:fixture.peak,cancelledAfter:fixture.started.length,simulatedModelWork:true};
-  const output=path.join(root,'outputs/full-batch-check');
-  fs.mkdirSync(output,{recursive:true});
   fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report));
 })().catch(error=>{console.error(error);process.exitCode=1});

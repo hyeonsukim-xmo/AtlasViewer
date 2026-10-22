@@ -17,6 +17,7 @@ app.setPath('appData',qa);app.setPath('userData',path.join(qa,'source'));
 dialog.showErrorBox=(title,detail)=>{console.error(title,detail);app.exit(1);};
 const timeout=setTimeout(()=>{console.error('Reader restart timed out');app.exit(1);},300000);
 require(path.join(appRoot,'desktop/main.cjs'));
+async function until(check){for(let i=0;i<600;i++){if(await check())return;await new Promise(r=>setTimeout(r,100));}throw Error('Saved 3D view timed out');}
 (async()=>{
   await app.whenReady();let window;
   for(let i=0;i<1200;i++){
@@ -27,16 +28,33 @@ require(path.join(appRoot,'desktop/main.cjs'));
   assert.ok(window);const run=code=>window.webContents.executeJavaScript(code);
   const call=async(method,...args)=>{const reply=await run(`window.exmoDesktop[${JSON.stringify(method)}](...${JSON.stringify(args)})`);assert.equal(reply.ok,true,JSON.stringify(reply));return reply.value;};
   const installations=await call('installations');assert.ok(installations.supported && installations.solutions.every(s=>!s.installed));
+  const rendered=[];
   for(const [name,item] of Object.entries(evidence.cases)){
     const rows=await call('results',name==='ct'?'ct':name==='mri'?'mri':'xray'),result=rows.find(r=>r.id===item.resultId);assert.ok(result);
     assert.deepEqual(result.rows.map(r=>[r.id,r.count,r.value]),item.rows.map(r=>[r.id,r.count,r.value]));
     const preview=await call('resultPreview',result.id,{view:'axial',opacity:.45});assert.ok(preview.image.startsWith('data:image/png;base64,'));
     const starts=previewStarts;await call('resultPreview',result.id,{view:'axial',index:Math.min(preview.count-1,preview.index+1),opacity:.3});
     assert.equal(previewStarts,starts,'Scrolling a repaired reader restarted its worker');
-    if(item.mesh)assert.equal(await run(`fetch('/result/${result.id}.glb').then(r=>r.status)`),200);
+    if(item.mesh){
+      assert.equal(await run(`fetch('/result/${result.id}.glb').then(r=>r.status)`),200);
+      await run('document.querySelector(".desktop-brand").click()');
+      const match=`row=>row.querySelector('strong')?.textContent===${JSON.stringify(result.metadata.caseName)}`;
+      await until(()=>run(`Array.from(document.querySelectorAll('.recent-section tbody tr')).some(${match})`));
+      await run(`Array.from(document.querySelectorAll('.recent-section tbody tr')).find(${match}).click()`);
+      const actions='.desktop-workspace:not([hidden]) .result-view-actions button';
+      await until(()=>run(`Array.from(document.querySelectorAll(${JSON.stringify(actions)})).some(b=>b.textContent==='3D anatomy' && !b.disabled)`));
+      await run(`Array.from(document.querySelectorAll(${JSON.stringify(actions)})).find(b=>b.textContent==='3D anatomy').click()`);
+      await until(()=>run(`Boolean(document.querySelector('.desktop-workspace:not([hidden]) canvas')) && !document.querySelector('.desktop-workspace:not([hidden]) .scene-loading')`));
+      assert.deepEqual(await run(`Array.from(document.querySelectorAll('.desktop-workspace:not([hidden]) [role=alert]')).map(e=>e.textContent).filter(Boolean)`),[]);
+      await new Promise(r=>setTimeout(r,250));
+      fs.writeFileSync(path.join(qa,name+'-winding-3d.png'),(await window.webContents.capturePage()).toPNG());
+      rendered.push(name);
+      console.log(name.toUpperCase()+': saved 3D rendered in packaged Desktop');
+    }
   }
+  assert.deepEqual(rendered.sort(),['ct','mri']);
   const startup=JSON.parse(fs.readFileSync(path.join(app.getPath('userData'),'startup-performance.json')));
-  fs.writeFileSync(path.join(qa,repair?'repair-verification.json':'reopen-verification.json'),JSON.stringify({passed:true,repair,inferenceRerun:false,modelsInstalled:false,routes:5,startup},null,2));
+  fs.writeFileSync(path.join(qa,repair?'repair-verification.json':'reopen-verification.json'),JSON.stringify({passed:true,repair,inferenceRerun:false,modelsInstalled:false,routes:5,ctMri3D:true,startup},null,2));
   fs.writeFileSync(path.join(qa,repair?'repair-ui.png':'reopen-ui.png'),(await window.webContents.capturePage()).toPNG());
   console.log('PASS: '+(repair?'repaired reader, ':'')+'restart without models/temporary license keys, five preserved results; startup '+Math.round(startup.totalMs)+' ms');
   clearTimeout(timeout);app.quit();

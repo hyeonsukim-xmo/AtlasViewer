@@ -1,6 +1,6 @@
 # Desktop 분석 오류 처리
 
-기준: `0.1.27-runtime-slim.3`, 2026-10-17. 이 문서는 알려진 실패 경로와 실제 검사 범위를 기록한다. 모든 하드웨어·입력의 정상 동작 또는 모든 원인의 자동 판별을 보장하지 않는다.
+기준: `0.1.27-runtime-slim.4`, 2026-10-18. 이 문서는 알려진 실패 경로와 실제 검사 범위를 기록한다. 모든 하드웨어·입력의 정상 동작 또는 모든 원인의 자동 판별을 보장하지 않는다.
 
 ## 표시와 저장
 
@@ -23,6 +23,7 @@
 | `ENGINE_MISSING` | 분석 엔진 파일을 찾을 수 없습니다. | 엔진 설치 위치를 확인하고 검증된 설치 패키지로 복구하세요. |
 | `ENGINE_START` | 분석 프로세스를 시작하지 못했습니다. | 앱을 다시 실행하세요. 반복되면 엔진 설치 상태와 진단 기록을 확인하세요. |
 | `ENGINE_STOPPED` | 분석 프로세스가 예기치 않게 종료되었습니다. | 다른 케이스의 완료 결과는 유지됩니다. 시스템 메모리와 진단 기록을 확인한 뒤 실패한 케이스만 재시도하세요. |
+| `ENGINE_CRASH` | 분석 엔진의 메모리 접근 오류로 프로세스가 종료되었습니다. | 완료된 다른 결과는 유지됩니다. 실패 단계와 진단 번호를 전달하세요. 이 오류만으로 메모리 부족이나 입력 손상을 판단할 수 없습니다. |
 | `TIMEOUT` | 해당 처리 단계의 대기 시간을 초과했습니다. | 입력 크기와 시스템 상태를 확인하고 이 케이스만 다시 시도하세요. |
 | `GPU_MEMORY` | GPU 메모리가 부족해 처리를 완료하지 못했습니다. | 다른 GPU 프로그램을 종료한 뒤 재시도하세요. 지원되는 경우 CPU 분석을 선택할 수 있습니다. |
 | `GPU_UNAVAILABLE` | 요청한 GPU 실행 환경을 사용할 수 없습니다. | GPU 드라이버와 엔진 설치 상태를 확인하세요. 자동으로 CPU 분석으로 전환하지 않습니다. |
@@ -52,13 +53,20 @@
 ## 전달 경로
 
 1. `diagnostics.py`는 예외 타입과 확인된 OS/CUDA 오류를 분류한다. 그 밖의 원인은 수행 단계에 맞는 일반 코드로 처리하며 추정 원인을 사실로 표시하지 않는다.
-2. `AnalysisWorker`는 프로세스 시작 실패·중단·시간 초과를 구분하고 Python의 코드/진단 번호를 보존한다. 로그 파일 쓰기 실패도 처리해 미처리 스트림 오류로 앱이 종료되지 않도록 한다.
+2. `AnalysisWorker`는 프로세스 시작 실패·중단·시간 초과를 구분하고 Python의 코드/진단 번호를 보존한다. Windows `0xc0000005`, POSIX `SIGSEGV`/`SIGBUS`는 `ENGINE_CRASH`로 분류한다. 종료 코드·signal·PID·마지막 단계/operation은 비공개 로그와 진단 번호에 연결한다. 모델 출력 검증 중 종료되면 화면에도 해당 단계를 표시한다. 로그 파일 쓰기 실패도 처리해 미처리 스트림 오류로 앱이 종료되지 않도록 한다.
 3. `imaging.cjs`는 입력, 인증, 모델 준비, 추론, 원본 복원, 저장/검증, 결과 준비, 후처리, 3D 생성 단계와 케이스 ID를 붙인다. ZIP 한 개가 실패하면 해당 ZIP을 실패 행으로 보존하고 다른 입력은 계속 처리한다. 입력 전체의 용량·개수 제한은 그대로 적용한다.
 4. 등록된 GLB만 `result-model-response.cjs`로 읽는다. 긴 Windows 경로는 Node 스트림을 사용한다. 파일 접근 실패와 응답 도중 읽기 실패를 기록한다. 기존 origin/method/경로 검사는 유지한다.
 5. renderer의 3D 진단 보고 IPC는 등록된 결과 ID, 허용된 코드와 UUID만 받는다. 임의 로그 문자열·파일 경로·명령은 받지 않는다.
 
 ## 검증
 
+- 2026-10-19 CT 종료 조사: 실제 입력의 1,872개 패치 추론 완료 직후 `logits_validation`에서 Windows `c10.dll` 접근 위반(`0xc0000005`)을 확인했다. 기존 코드 재시도는 완료됐지만 시스템 commit 여유가 약 0.6 GB까지 내려가고 페이지 파일이 확장됐다. 최초 종료를 메모리 부족으로 확정하거나 지속적으로 재현된 크래시로 보고하지 않는다.
+- CT CPU FP32 logits의 `isfinite`만 NumPy의 같은 elementwise 판정으로 변경했다. 입력 배열을 공유하고 boolean 결과만 할당하여 전체 크기의 float 임시 배열을 피한다. checkpoint·전처리·overlap·softmax·정밀도·원본 복원은 변경하지 않았다. 다른 dtype/device는 기존 Torch 함수를 유지한다.
+- 실제 실패 입력을 별도 경로에서 재실행해 32개 구조 측정, 세 방향 Overlay, 3D GLB 생성을 확인했다. 기존 코드 재시도와 native 32,505,856 voxel 중 차이 0개. 기록: `outputs/ct-crash-recheck/933be691-9b7b-4479-aa25-0c2826050473/report.json`, `verification.json`. 같은 샘플에 대한 비교이며 GT 정확도 검증이나 모든 입력의 크래시 해소 보장은 아니다. 두 실행 사이 OS 페이지 파일 크기가 달라져 이 기록은 성능 비교표로 사용하지 않는다.
+- `python scripts/validate-ct-logits.py --large`: NaN/±Inf, 최대 유한값, 빈/비연속 입력, 입력 값 보존 및 실제 실패 입력과 같은 3.51 GB 출력 크기에서 마지막 voxel의 NaN 검출을 확인한다. `validate-analysis-worker.cjs`와 `test-diagnostics.cjs`는 종료 코드·마지막 검증 단계·비공개 증거 연결과 재시작을 검사한다. `validate-full-batch.cjs`의 118개 합성 케이스 중 1개 native crash 주입 후 나머지 117개 완료와 취소 검사가 통과했다.
+- `.4`는 반전된 영상 direction의 CT 표면 winding을 생성 단계에서 보정한다. 기존 저장·게시된 닫힌 표면도 공통 3D renderer에서 바깥 방향으로 보정한다. 정점 위치·분할 Mask·측정값·팔레트는 유지한다. 현재 CT 샘플의 60개 메시가 안쪽 방향이었고 MRI 샘플의 60개는 정상 방향이었다.
+- `.4` 선택 설치 패키지의 main/preload/IPC로 기존 CT/MRI 3D를 실제 렌더링하고 5종 저장 결과의 측정값·Overlay를 재검사했다. `scripts/security/validate-selected-reopen.cjs`가 CT/MRI 화면 확인까지 검사한다. 기록: `outputs/selected-runtime-check/785af919-05cd-48d4-b000-7f73c20354ed/reopen-verification.json`, `ct-winding-3d.png`, `mri-winding-3d.png`. 신규 추론과 새 PC 설치 시험은 수행하지 않았다.
+- 정상·반전, indexed·non-indexed 표면의 방향·정점 보존·반복 보정 검사와 실제 Python 메시 생성의 정상·반전 geometry 검사가 통과했다. 수정된 worker는 새로 서명한 `p3-20261018-4` 공용 component에도 포함했다.
 - 실제 샘플 5종의 GPU 추론과 출력 확인은 [성능 문서](DESKTOP_PERFORMANCE.md)의 이전 `.2` 기록을 참조한다. 이번 변경에서 모델 추론을 반복하지 않았다.
 - 최종 `.3` 패키지의 main/preload/IPC와 보호 엔진으로 CT·MRI·AP·LAT-LT·LAT-RT의 저장된 실제 결과를 다시 열었다. 5종 모두 측정·Overlay, CT/MRI의 3D, MRI PP500·강화 후보와 Raw 보존 검사를 통과했다. 기록: `outputs/security-check/a180a8b3-971d-47d6-9d75-8076e38fa9c5/analysis-samples.json`, `verification.json`. `fullCaseInference: false`이며 신규 추론 시험으로 집계하지 않는다.
 - 사용 ASAR: `work/security-runtime-slim-20261017/qa-slim-v3/resources/app.asar`, SHA256 `c1bef05c03f92f2dd0230f3a760ce09f57dd119ef62d3af0e709c7a479ee56eb`. 내부용 실행 폴더는 `release/internal/win-unpacked`에 빌드했다. 기존 `0.1.26` 설치 파일은 보존했으며 신규 설치 파일은 만들지 않았다.

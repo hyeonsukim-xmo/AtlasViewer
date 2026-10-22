@@ -84,6 +84,7 @@ async function openLicensing({build,directory,key,safeStorage,resultStorage,dong
   return {
     status(){return {profile:build.profile,state:error || client?.state() || 'UNACTIVATED',expiresAt:client?.receipt?.exp ?? null,orgId:client?.receipt?.orgId??null,installationId:identity?.installationId??null,
       ...(version===3?{solutions:client?.receipt?.entitlements?.map(e=>({solutionId:e.solutionId,state:e.state==='active'?(client.time()<e.validFrom?'pending':e.validUntil!==null && client.time()>=e.validUntil?'expired':'active'):e.state,expiresAt:e.validUntil}))??[]}: {})};},
+    expiredSolutions(){return error?[]:require('./model-expiry.cjs').expiredSolutions(client);},
     enrollment(){
       P.check(identity && error!=='KEY_UNAVAILABLE','Windows 설치 키를 사용할 수 없습니다.');
       if(build.profile==='customer')return (async()=>{

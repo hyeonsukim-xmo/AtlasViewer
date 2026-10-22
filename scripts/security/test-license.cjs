@@ -298,11 +298,31 @@ test('internal rights cannot be accepted by a customer build or customer authori
   assert.throws(()=>customer.authority.approve(internal.approval));
   assert.throws(()=>customer.authority.challenge(request(internal)));
   assert.throws(()=>P.verifyToken(internal.client.token,internal.authority.publicKey,'lease',customer.config.binding));
-  assert.throws(()=>internal.authority.approve({...internal.approval,contractEnd:null}),/expiry/);
   assert.throws(()=>P.binding({...customer.config.binding,profile:'internal'}));
   assert.throws(()=>internal.authority.approve({...internal.approval,admin:true}));
   const forged=P.signToken({...internal.client.receipt,binding:{...internal.config.binding,profile:'customer'}},internal.authority.key);
   assert.throws(()=>P.verifyToken(forged,internal.authority.publicKey,'lease',customer.config.binding));
+});
+
+test('customer approval requires an expiry and rejects perpetual issuance before changing the ledger',async t=>{
+  const f=fixture(t);
+  f.authority.db.prepare('DELETE FROM licenses WHERE id=?').run(f.approval.binding.licenseId);
+  assert.throws(()=>f.authority.approve({...f.approval,contractEnd:null}),/internal-only/);
+  assert.equal(f.authority.db.prepare('SELECT count(*) n FROM licenses').get().n,0);
+  f.authority.approve(f.approval);assert.equal(await f.client.refresh(),'VALID');
+});
+
+test('perpetual internal approval renews bounded leases without a contract expiry and remains revocable',async t=>{
+  const f=fixture(t,'internal');
+  f.authority.db.prepare('DELETE FROM licenses WHERE id=?').run(f.approval.binding.licenseId);
+  f.authority.approve({...f.approval,contractEnd:null});
+  assert.equal(await f.client.refresh(),'VALID');
+  f.advance(10*365*86400);
+  assert.equal(await f.client.refresh(),'VALID');
+  assert.equal(f.client.receipt.exp,f.now()+7*86400);
+  await f.admit('ct');
+  f.authority.status(f.approval.binding.licenseId,'revoked');
+  assert.equal(await f.client.refresh(),'REVOKED');
 });
 
 test('X-ray classification requires an AP or LAT grant and never gives permission to another segmentation engine',async t=>{

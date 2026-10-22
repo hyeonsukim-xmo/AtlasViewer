@@ -47,6 +47,21 @@ def main():
     report = {"geometry": [], "replays": {}}
     with tempfile.TemporaryDirectory(prefix="exmo-geometry-") as temp:
         root = Path(temp)
+        import trimesh
+        shape = np.zeros((9, 11, 13), dtype=np.uint8)
+        shape[2:7, 3:8, 4:9] = 1
+        volumes = []
+        for reflected in (False, True):
+            surface = sitk.GetImageFromArray(shape)
+            surface.SetSpacing((1.5, 2., 3.))
+            surface.SetOrigin((-13., 21., -45.))
+            surface.SetDirection((1., 0., 0., 0., -1. if reflected else 1., 0., 0., 0., 1.))
+            target = root / f"surface-{reflected}.glb"
+            worker.make_mesh(surface, [{"id": "muscle", "label": 1}], target)
+            mesh = next(iter(trimesh.load(target, force="scene").geometry.values()))
+            assert mesh.is_watertight and mesh.volume > 0, "Reflected image directions must keep outward normals"
+            volumes.append(mesh.volume)
+        assert np.isclose(*volumes), "Winding correction must preserve surface volume"
         # Asymmetric phantom: physical values reveal a left/right or superior flip.
         z, y, x = np.indices((9, 11, 13))
         phantom = sitk.GetImageFromArray((x + y * 100 + z * 10000).astype(np.float32))

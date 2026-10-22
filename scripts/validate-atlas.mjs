@@ -1,9 +1,38 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { Box3, Matrix4, Quaternion, Vector3 } from "three";
+import { Box3, BoxGeometry, Matrix4, Quaternion, Vector3 } from "three";
 import { STRUCTURES } from "../app/anatomy.ts";
 import { sideFromTriangle } from "../app/model-side.ts";
+import { orientClosedSurface } from "../app/surface-winding.ts";
+
+for (const indexed of [true, false]) {
+  for (const reflected of [false, true]) {
+    let geometry = new BoxGeometry(2, 3, 4);
+    if (!indexed) geometry = geometry.toNonIndexed();
+    if (reflected) geometry.scale(1, -1, 1);
+    const positions = Array.from(geometry.getAttribute("position").array);
+    const originalIndex = geometry.getIndex();
+    orientClosedSurface(geometry);
+    const index = geometry.getIndex();
+    const p = geometry.getAttribute("position");
+    const a = new Vector3(), b = new Vector3(), c = new Vector3();
+    let volume = 0;
+    for (let i = 0; i < (index?.count ?? p.count); i += 3) {
+      a.fromBufferAttribute(p, index ? index.getX(i) : i);
+      b.fromBufferAttribute(p, index ? index.getX(i + 1) : i + 1);
+      c.fromBufferAttribute(p, index ? index.getX(i + 2) : i + 2);
+      volume += a.dot(b.cross(c)) / 6;
+    }
+    assert.ok(Math.abs(volume - 24) < 1e-6, "Reflected and normal surfaces must face outward");
+    assert.deepEqual(Array.from(p.array), positions, "Winding correction must preserve positions");
+    if (!reflected) assert.equal(index, originalIndex, "Correct surfaces must stay unchanged");
+    const correctedIndex = index;
+    orientClosedSurface(geometry);
+    assert.equal(geometry.getIndex(), correctedIndex, "Winding correction must be idempotent");
+    geometry.dispose();
+  }
+}
 
 const bytes = await readFile(new URL("../public/models/exmo-1001921.glb", import.meta.url));
 assert.equal(

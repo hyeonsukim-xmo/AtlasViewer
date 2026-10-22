@@ -54,7 +54,7 @@ const timeout = setTimeout(() => { console.error("Desktop validation timed out")
   await waitFor(() => document.querySelector(".analysis-catalog"));
   await delay(600);
   fs.writeFileSync(path.join(output, "analysis-catalog.png"), (await contents.capturePage()).toPNG());
-  await run(() => document.querySelector(".desktop-demo-link").click());
+  await run(() => document.querySelector('.desktop-nav [data-view="demo"]').click());
   await waitFor(() => document.querySelector('.canvas-stage[aria-busy="false"] canvas') && !document.querySelector('.studio [role="alert"]'));
   await run(() => {
     window.__frames = { raf: 0, renders: 0, times: [] };

@@ -22,6 +22,32 @@ See the [P7 implementation and deployment record](docs/EXMO_SOLUTION_P7_IMPLEMEN
 for the BFF, security boundary and tests. [Server operations](docs/EXMO_SERVER_DEPLOYMENT.md)
 covers deployment templates, readiness, signed result backup/restore and the real-server/tablet acceptance gates.
 
+## 캡스톤 / OpenSim 전달 데이터
+
+**“캡스톤 전달 데이터 만들어줘”, “예전에 준 것처럼 다른 케이스도 만들어줘” 요청은
+[고정 작업 절차](docs/CAPSTONE_HANDOFF.md)에 따라 처리합니다.**
+대화에서 지정한 케이스와 로컬 분석 기록을 먼저 대조하며, 이미 확인 가능한
+케이스명·파일 경로·전달 구성을 사용자에게 다시 설명하도록 요구하지 않습니다.
+
+기본 전달 구성은 실제 측정값 JSON/CSV, 별도로 표시한 합성 입력 JSON/CSV,
+해당 케이스의 설명용 GLB, 한·영 설명서, 검증 코드와 결과입니다.
+다운로드 폴더에 새 폴더와 ZIP을 만들고, 같은 유효한 전달본이 이미 있으면 검증 후
+그 파일을 바로 제공합니다. 원본 영상·voxel mask·MRB·모델 가중치·환자 식별정보는
+전달물에 포함하지 않습니다.
+
+CT 전달본은 두 개를 구분합니다. 이전 분석 결과는 `CT_REFERENCE_002`,
+사용자가 새로 지정한 수동 수정본은 `CT_REFERENCE_003_RETOUCHED`입니다.
+최신 수정본 전달 폴더는
+`%USERPROFILE%\Downloads\EXMO_OpenSim_CT003_Retouched_Handoff_20261021`이며
+같은 이름의 `.zip`도 있습니다. 이전 CT002 전달본은 그대로 보존합니다.
+수정본의 55개 segment와 저장된 이름·번호를 기준으로 측정 및 GLB를 다시 만들며,
+원래 모델의 숫자 라벨표를 수정본에 적용하지 않습니다.
+
+실제 환자/분석 run 연결, 원본 검증 기록, 최신 전달 경로는 Git에서 제외된
+`work/capstone-handoff-registry.json`에 보관합니다. 다른 PC에 이 로컬 기록이 없다면
+완료된 전달 폴더의 manifest와 로컬 분석 기록부터 확인합니다.
+이는 데이터 전달 절차이며 `.osim` 생성이나 보행 시뮬레이션 완료를 의미하지 않습니다.
+
 ## Product direction
 
 [Solution productization and result-sharing design](docs/EXMO_SOLUTION_PRODUCTIZATION_DESIGN.md)

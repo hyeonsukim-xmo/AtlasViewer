@@ -64,7 +64,8 @@ test('real Windows CNG enrollment, server approval, no-dongle activation, restar
     assert.equal(runtime.status().state,'UNACTIVATED');const request=runtime.enrollment();id=request.installationId;
     await assert.rejects(runtime.authorize({runId:crypto.randomUUID(),engine:'ct'}),/UNACTIVATED/);
     const requestFile=path.join(root,'request.json'),activationFile=path.join(root,'activation.json');fs.writeFileSync(requestFile,JSON.stringify(request));
-    admin(['approve',serverDir,requestFile,'dev-workstation',new Date(Date.now()+86400*30*1000).toISOString().replace(/\.\d{3}Z$/,'Z'),'ct,mri,ap,lat']);
+    admin(['approve',serverDir,requestFile,'dev-workstation','perpetual','ct,mri,ap,lat']);
+    assert.equal(JSON.parse(authority.db.prepare('SELECT config FROM licenses WHERE id=?').get('dev-workstation').config).contractEnd,null);
     admin(['activation',serverDir,'dev-workstation',activationFile]);
     const activation=JSON.parse(fs.readFileSync(activationFile));
     await assert.rejects(runtime.activate({...activation,admin:true}));

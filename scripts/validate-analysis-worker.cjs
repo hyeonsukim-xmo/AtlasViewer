@@ -6,7 +6,8 @@ const directory=path.join(__dirname,'../outputs/worker-validation');fs.mkdirSync
 const server=`const readline=require('node:readline');
 readline.createInterface({input:process.stdin}).on('line',line=>{
 const m=JSON.parse(line);
-if(m.operation==='crash')process.exit(7);
+if(m.operation==='crash'){console.log(JSON.stringify({exmo:true,job_id:m.id,stage:'operation_start',operation:'logits_validation'}));process.exit(7);}
+if(m.operation==='native-crash')process.exit(0xc0000005);
 if(m.operation==='hang')return;
 if(m.operation==='fail'){console.log(JSON.stringify({exmo:true,job_id:m.id,stage:'failed',errorCode:'GPU_MEMORY',error:'private stack must not reach UI'}));return;}
 if(m.operation==='handoff'){console.log(JSON.stringify({exmo:true,job_id:m.id,stage:'cpu_ready'}));return;}
@@ -21,8 +22,12 @@ const worker=()=>new AnalysisWorker({python:process.execPath,args:['-e',server],
   await assert.rejects(w.request({operation:'fail'}),error=>error.diagnosticCode==='GPU_MEMORY' && !error.publicMessage);
   await assert.rejects(w.request({operation:'hang'},{timeout:50}),error=>error.diagnosticCode==='TIMEOUT');
   await w.stop();w=worker();
-  await assert.rejects(w.request({operation:'crash'}));
+  await assert.rejects(w.request({operation:'crash'}),error=>error.diagnosticCode==='ENGINE_STOPPED' && error.processExit.exitCode===7 && error.processExit.lastOperation==='logits_validation');
   assert.equal(await w.request({value:4}),4,'Unexpected process exit may restart');
+  if(process.platform==='win32') {
+    await assert.rejects(w.request({operation:'native-crash'}),error=>error.diagnosticCode==='ENGINE_CRASH' && error.processExit.nativeCode==='0xc0000005');
+    assert.equal(await w.request({value:5}),5,'Native crash must not block the next case');
+  }
   await w.close();assert.equal(w.child,null);
   w=worker();
   const hanging=w.request({operation:'hang'});

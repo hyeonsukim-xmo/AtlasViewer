@@ -80,6 +80,14 @@ test('authority migration drains v2, partial revocation is atomic, offline v3 an
     const bad=structuredClone(doc);bad.entitlements[1].revision=1;assert.throws(()=>a.solutions(binding.licenseId,bad),/Stale entitlement/);
     offline=false;require('./solution-admin.cjs').configure(a,'solution-status',[binding.licenseId,'exmo.thigh.mri','active']);await c.refresh();
     now=wall=1800;await auth(execution());await assert.rejects(auth(execution('mri')),/not authorized/);
+    const prior=JSON.parse(a.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get(binding.licenseId).document);
+    require('./solution-admin.cjs').configure(a,'solution-expiry',[binding.licenseId,'exmo.thigh.mri','7d']);
+    const updated=JSON.parse(a.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get(binding.licenseId).document);
+    assert.deepEqual(updated.entitlements[0],prior.entitlements[0]);
+    assert.equal(updated.entitlements[1].validUntil,now+7*86400);assert.equal(updated.entitlements[1].revision,prior.entitlements[1].revision+1);
+    await c.refresh();await auth(execution('mri'));
+    require('./solution-admin.cjs').configure(a,'solution-expiry',[binding.licenseId,'exmo.thigh.mri','perpetual']);
+    assert.equal(JSON.parse(a.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get(binding.licenseId).document).entitlements[1].validUntil,null);
     a.modelStatus(hash(2),'revoked');await c.refresh();await assert.rejects(auth(execution()),/not authorized/);
     assert.equal(a.db.prepare('SELECT count(*) n FROM challenges').get().n,0);
   }finally{c.close();a.close();fs.rmSync(root,{recursive:true,force:true});}
@@ -110,6 +118,7 @@ test('v3 protected runtime and real Python loader reject shared-model substituti
     const binding=E.binding(job,ctx,'analyze',md),mutation=E.binding({...job,variant:'raw'},ctx,'result-mutation');
     authority.solutions(b.licenseId,{orgId:'org-test',entitlements:[entitlement(binding,{capabilities:['analyze','result-mutation'],executions:[binding,mutation]})]});
     await runtime.activate(activation);
+    assert.deepEqual(runtime.expiredSolutions(),[]);
     const policy=path.join(root,'policy.json');fs.writeFileSync(policy,JSON.stringify({profile:'internal',issuerPublicKey:build.issuerPublicKey,licenseVersion:3}));
     worker=new AnalysisWorker({python,args:['-B',path.join(__dirname,'check-model-loader.py'),'--engine',engine,'--policy',policy],env:process.env,logPath:path.join(root,'private.log')});
     const admit=async(transform)=>{
@@ -150,6 +159,10 @@ test('v3 protected runtime and real Python loader reject shared-model substituti
     const changed=structuredClone(publication);changed.summary.rows[0].value=123;
     await assert.rejects(resultWorker.request({operation:'mesh',publication:changed}),/rejected/);
     const mesh=await resultWorker.request({operation:'mesh',publication});assert.ok(mesh.summary.meshBytes>0);assert.deepEqual(mesh.summary.rows,publication.summary.rows);
+    const expired=JSON.parse(authority.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get(b.licenseId).document);
+    expired.entitlements[0].validUntil=authority.clock();expired.entitlements[0].revision++;
+    authority.solutions(b.licenseId,expired);await runtime.refresh();assert.deepEqual(runtime.expiredSolutions(),[job.solutionId]);
+    await assert.rejects(admit(),/not authorized/);
     await resultWorker.close();
     resultWorker=new AnalysisWorker({...resultOptions,args:resultOptions.args.map(v=>v===engine?path.join(root,'no-models-installed'):v)});
     assert.deepEqual((await resultWorker.request({operation:'read',result:publication.result})).summary.rows,publication.summary.rows);

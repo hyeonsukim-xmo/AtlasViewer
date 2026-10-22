@@ -7,46 +7,101 @@
   font-size: 15px;
 }
 .desktop-nav {
-  height: 62px;
+  min-height: 64px;
   flex-shrink: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  grid-template-areas: "brand primary tools user";
   align-items: center;
-  gap: 26px;
-  padding: 0 30px;
+  gap: 20px;
+  padding: 10px 24px;
   border-bottom: 1px solid #ffffff0e;
   background: #101026c9;
 }
+.desktop-nav-brand, .desktop-nav-primary, .desktop-nav-tools, .desktop-nav-user {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+}
+.desktop-nav-brand { grid-area: brand; gap: 16px; }
+.desktop-nav-primary { grid-area: primary; }
+.desktop-nav-tools { grid-area: tools; padding-right: 16px; border-right: 1px solid #ffffff14; }
+.desktop-nav-user { grid-area: user; gap: 8px; }
 .desktop-brand {
   padding: 8px 0;
   border: 0;
   background: none;
+  flex-shrink: 0;
 }
 .desktop-brand img {
   width: 92px;
   display: block;
 }
 .desktop-nav-label {
-  color: #9193ad;
-  font-size: 14px;
+  color: #c2c4d4;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 .desktop-demo-link {
-  margin-left: auto;
-  color: #b0b2c8;
-  font-size: 14px;
-  border: 1px solid #ffffff18;
-  padding: 7px 14px;
-  border-radius: 9px;
-  background: #ffffff05;
+  color: #a5a8be;
+  font-size: 13px;
+  border: 1px solid transparent;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: transparent;
+  white-space: nowrap;
+}
+.desktop-nav-primary > button {
+  color: #a5a8be;
+  font-size: 13px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  white-space: nowrap;
+}
+.desktop-nav-primary > button[aria-current="page"] {
+  color: #eef0ff;
+  border-color: #ffffff12;
+  background: #ffffff09;
+}
+.desktop-nav-primary > button:hover, .desktop-demo-link:hover {
+  color: #eef0ff;
+  background: #ffffff09;
+}
+.desktop-nav button:focus-visible {
+  outline: 2px solid #9bafff;
+  outline-offset: 2px;
+}
+.desktop-nav-user > .desktop-demo-link {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .license-status {
-  color: #b0b2c8;
-  font-size: 13px;
-  padding: 7px 12px;
-  border: 1px solid #ffffff25;
-  border-radius: 9px;
-  background: #ffffff05;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #b4b9cb;
+  font-size: 12px;
+  padding: 7px 9px;
+  border: 1px solid #ffffff12;
+  border-radius: 7px;
+  background: #ffffff03;
+  white-space: nowrap;
+}
+.license-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #82bba3;
 }
 .license-status[data-permitted="false"] { color: #e1bd87; }
+.license-status[data-permitted="false"]::before { background: #e1bd87; }
 .license-status:focus-visible { outline: 2px solid #9bafff; outline-offset: 2px; }
 .desktop-content {
   flex: 1;
@@ -74,14 +129,24 @@
   outline: 2px solid #9bafff;
   outline-offset: 2px;
 }
-@media (max-width: 900px) {
+.desktop-nav .language-select { font-size: 12px; }
+.desktop-nav .language-select > span { display: none; }
+.desktop-nav .language-select select { min-width: 88px; border-radius: 7px; }
+@media (max-width: 1240px) {
+  .desktop-nav { gap: 12px; padding-inline: 16px; }
+  .desktop-nav-label { display: none; }
+  .desktop-nav-user > .desktop-demo-link { max-width: 96px; }
+}
+@media (max-width: 1080px) {
   .desktop-nav {
-    gap: 14px;
-    padding-inline: 20px;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "brand tools user" "primary primary primary";
+    row-gap: 8px;
   }
-  .desktop-nav-label,
-  .language-select > span {
-    display: none;
+  .desktop-nav-tools { justify-self: end; padding-right: 12px; }
+  .desktop-nav-primary {
+    padding-top: 8px;
+    border-top: 1px solid #ffffff0e;
   }
 }
 .desktop-content .studio {
@@ -1446,7 +1511,8 @@
     margin-top: 5px;
   }
   .desktop-nav {
-    height: 54px;
+    min-height: 54px;
+    padding-block: 8px;
   }
   .review-case .medical-preview {
     height: 260px;
@@ -1532,7 +1598,7 @@
 .remote-detail .result-workspace { flex:1; min-height:0; height:auto; }
 .remote-disclosure { margin:0; padding:10px 28px; border-bottom:1px solid #ffffff18; color:#afa8c5; font-size:12px; }
 .remote-preview-note { height:100%; padding:24px; gap:16px; text-align:center; flex-direction:column; }
-@media(max-width:1100px) { .desktop-nav { flex-wrap:wrap; height:auto; min-height:60px; padding-block:10px; } .desktop-nav-label { display:none; } .protocol-table { min-width:720px; } .catalog-section { overflow:auto; } .remote-workspace { padding:16px; } }
+@media(max-width:1100px) { .protocol-table { min-width:720px; } .catalog-section { overflow:auto; } .remote-workspace { padding:16px; } }
 .overlay-review-dialog { width:min(1000px,94vw); max-height:94vh; overflow:auto; }
 .overlay-review-viewport { max-height:48vh; overflow:auto; background:#030308; }
 .overlay-review-image { position:relative; width:fit-content; margin:0 auto; touch-action:none; }

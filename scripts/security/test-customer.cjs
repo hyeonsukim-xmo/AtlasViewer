@@ -37,6 +37,9 @@ for(const version of [2,3])test(`customer v${version}: HTTPS, both JWE recipient
     const ctx={engineRoot:engine,scriptsRoot:path.join(root,'desktop'),issuer:authority.publicKey};
     authority.solutions('test',{orgId:'customer-org',entitlements:[{entitlementId:'ct-only',solutionId:job.solutionId,validFrom:0,validUntil:null,state:'active',revision:1,
       capabilities:['analyze','result-mutation'],executions:[policyScope.binding(job,ctx,'analyze',digest),policyScope.binding({...job,variant:'raw'},ctx,'result-mutation')]}]});
+    const prior=authority.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get('test').document;
+    assert.throws(()=>require('./solution-admin.cjs').configure(authority,'solution-expiry',['test',job.solutionId,'perpetual']),/internal-only/);
+    assert.equal(authority.db.prepare('SELECT document FROM solution_assignments WHERE license=?').get('test').document,prior);
   }
   await runtime.activate({binding,installationPublicKey:request.installationPublicKey,hardware:f.hardware,models:{ct:access}});
   if(installation){

@@ -85,9 +85,14 @@ node scripts/security/solution-admin.cjs solutions-dry-run AUTHORITY_DIR LICENSE
 node scripts/security/solution-admin.cjs solutions AUTHORITY_DIR LICENSE_ID assignment.json
 node scripts/security/solution-admin.cjs solution-status AUTHORITY_DIR LICENSE_ID exmo.thigh.mri revoked
 node scripts/security/solution-admin.cjs solution-expiry AUTHORITY_DIR LICENSE_ID exmo.thigh.mri 2027-10-18T00:00:00Z
+node scripts/security/solution-admin.cjs solution-expiry AUTHORITY_DIR LICENSE_ID exmo.thigh.ct 7d
 ```
 
 `solutions`는 원장 사본을 먼저 남긴다. 이는 전체 서버/개인키 백업을 대체하지 않는다. `customer-admin.cjs` / `internal-admin.cjs`에서도 동일한 solutions·solution-status·solution-expiry 명령을 사용할 수 있다. 전체 document를 수정하면 변경한 entitlement의 revision도 올려야 한다. 상태/기간 CLI는 이를 transaction 안에서 처리한다. 계약의 장비 전체 만료 시각은 상품 만료와 별도로 상한이 된다.
+
+상품별 기간은 `7d`(7일), `14d`(14일), `1m`(1개월), `3m`(3개월), `6m`(6개월), `1y`(1년), `3y`(3년)으로 발급한다. 발급 서버의 현재 UTC 시각부터 계산하며 월·년은 달력 기준이다. 말일이 없는 달은 그 달의 마지막 날로 맞춘다. 명시적인 UTC 만료 시각도 지원한다. `perpetual` 영구 발급은 내부용에만 허용하며 고객용 장비 승인은 만료 시각이 필수다. 고객용 JSON 할당의 `validUntil: null`은 장비 계약의 만료 상한을 그대로 따르므로 영구 사용권이 아니다. 기간 재설정은 명령 실행 시점부터 계산하고, 정지·회수 상태를 자동 해제하지 않는다.
+
+선택 설치 Desktop은 상품별 서명된 `validUntil`에 도달하는 즉시 신규 실행을 거부한다. 앱 실행 중에는 1초마다, 종료 중 만료되었다면 다음 시작 시 설치 모델과 해당 상품의 rollback 버전을 자동 제거한다. 이미 승인받아 실행 중인 분석은 완료하고 worker가 해제한 뒤 파일을 삭제한다. 다른 상품의 모델·공유 런타임·공용 및 보관된 reader·입력 영상·측정값·3D 결과는 유지한다. Windows가 파일을 잠그면 다음 검사에서 삭제를 재시도한다. 단순 네트워크 실패나 유한한 오프라인 lease 만료는 모델 삭제 사유가 아니다. 장비 전체 계약 만료는 서버가 서명한 `expired` 응답으로 확인한 뒤 모든 설치 모델에 적용한다. 모델별 오프라인 자동 삭제는 `solution-expiry`로 발급한 상품 만료 시각을 기준으로 한다. 설치 원본 묶음이나 외부 백업은 삭제하지 않는다.
 
 6. v3 build 정책을 발급하고 해당 설치 후보에 고정한다.
 

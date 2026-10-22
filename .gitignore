@@ -32,6 +32,8 @@ yarn-error.log*
 /release/
 /outputs/
 /work/
+# Local per-case research notes contain source paths and private audit records.
+/docs/research/
 /%SystemDrive%/
 *.tsbuildinfo
 __pycache__/

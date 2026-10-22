@@ -23,6 +23,7 @@ import { SegmentRotation } from "./segment-rotation";
 import { MeasurementTable } from "./measurements";
 import { tooltipPosition } from "./tooltip-position";
 import { sideFromTriangle, type Side } from "./model-side";
+import { orientClosedSurface } from "./surface-winding";
 
 type HoverTarget<Id extends string> = { id: Id; side: Side | null };
 export type SceneFailure = { code: string; reference?: string };
@@ -646,6 +647,7 @@ export default function AnatomyScene<Id extends string = StructureId>(props: Pro
               geometry.applyMatrix4(source.matrixWorld);
               geometry.translate(-center.x, -center.y, -center.z);
               geometry.scale(scale, scale, scale);
+              if (props.model) orientClosedSurface(geometry);
               if (parts) {
                 const side = part!.side === "left" ? 1 : part!.side === "right" ? 2 : 0;
                 geometry.setAttribute(

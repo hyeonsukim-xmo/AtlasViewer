@@ -96,23 +96,30 @@ function Desktop() {
     <div className="desktop-shell dark">
       {view !== "demo" && (
         <nav className="desktop-nav" aria-label="Desktop navigation">
-          <button
-            className="desktop-brand"
-            aria-label={t("분석 선택으로")}
-            onClick={() => setView("home")}
-          >
-            <img src="/brand/exmo-logo-white.svg" alt="EXMO" />
-          </button>
-          <span className="desktop-nav-label">Clinical imaging workspace</span>
-          <LicenseStatusButton />
-          <InstallationManager openRequest={installRequest}/>
-          <Account openRequest={accountRequest}/>
-          <Publication />
-          <button className="desktop-demo-link" aria-pressed={view==='server'} onClick={()=>setView('server')}>{t('서버 결과')}</button>
-          <button className="desktop-demo-link" onClick={() => setView("demo")}>
-            {t("3D 데모")}
-          </button>
-          <LanguageSelect />
+          <div className="desktop-nav-brand">
+            <button
+              className="desktop-brand"
+              aria-label={t("분석 선택으로")}
+              onClick={() => setView("home")}
+            >
+              <img src="/brand/exmo-logo-white.svg" alt="EXMO" />
+            </button>
+            <span className="desktop-nav-label">Atlas Viewer</span>
+          </div>
+          <div className="desktop-nav-primary">
+            <button data-view="home" aria-current={view!=='server'?'page':undefined} onClick={()=>setView('home')}>{t('분석 작업')}</button>
+            <button data-view="server" aria-current={view==='server'?'page':undefined} onClick={()=>setView('server')}>{t('서버 결과')}</button>
+            <button data-view="demo" onClick={()=>setView('demo')}>{t('3D 데모')}</button>
+          </div>
+          <div className="desktop-nav-tools">
+            <InstallationManager openRequest={installRequest}/>
+            <Publication />
+          </div>
+          <div className="desktop-nav-user">
+            <LicenseStatusButton />
+            <Account openRequest={accountRequest}/>
+            <LanguageSelect />
+          </div>
         </nav>
       )}
       <main className="desktop-content">

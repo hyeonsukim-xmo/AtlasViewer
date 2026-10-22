@@ -5,6 +5,7 @@ const P=require('../../desktop/security/license-protocol.cjs');
 const M=require('../../desktop/security/model-package.cjs');
 const {read}=require('../../desktop/security/storage.cjs');
 const {Authority}=require('./license-server.cjs');
+const {expiryTime}=require('./license-term.cjs');
 function issuerCrypto(message) {
   const python=process.env.EXMO_ISSUER_PYTHON || path.resolve(__dirname,'../../work/security-poc/env/Scripts/python.exe');
   const output=spawnSync(python,['-B',path.join(__dirname,'issuer-crypto.py')],{input:JSON.stringify(message)+'\n',encoding:'utf8',timeout:15000,maxBuffer:32768,windowsHide:true});
@@ -22,8 +23,7 @@ function main([command,directory,...args]) {
       P.check(args.length===4);const [file,licenseId,expiry,engines]=args,request=JSON.parse(read(file));
       M.validateEnrollment(request);P.check(request.profile==='customer');
       const verified=issuerCrypto({operation:'verify',hardware:request.hardware}),keys=M.hardwareKeys(request.hardware);
-      const contractEnd=expiry==='perpetual'?null:Date.parse(expiry)/1000;
-      if(contractEnd!==null)P.check(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(expiry) && new Date(contractEnd*1000).toISOString()===expiry.replace('Z','.000Z'));
+      const contractEnd=expiryTime(expiry,authority.clock());
       P.check(verified['9e']===P.fingerprint(keys['9e']) && verified['9d']===P.fingerprint(keys['9d']));
       authority.approve({binding:{profile:'customer',licenseId,installationId:request.installationId,installationKey:request.installationKey,
         dongleKey:verified['9e'],agreementKey:verified['9d']},installationPublicKey:request.installationPublicKey,
@@ -34,8 +34,7 @@ function main([command,directory,...args]) {
       const row=authority.db.prepare('SELECT config FROM licenses WHERE id=?').get(args[0]);P.check(row);const config=JSON.parse(row.config);
       write(args[1],{binding:config.binding,installationPublicKey:config.installationPublicKey,hardware:JSON.parse(read(path.join(directory,args[0]+'.hardware.json')))});
     } else if(command==='extend') {
-      P.check(args.length===2 && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(args[1]));
-      authority.extend(args[0],Date.parse(args[1])/1000);
+      P.check(args.length===2);authority.extend(args[0],expiryTime(args[1],authority.clock()));
     } else if(command==='status') {
       P.check(args.length===2);authority.status(...args);
     } else if(command==='model-status') {

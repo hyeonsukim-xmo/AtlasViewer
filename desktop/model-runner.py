@@ -383,6 +383,16 @@ def ct_sliding_window(infer, inputs, roi_size, *args, execution=None, retry=None
     return attempt("cpu")
 
 
+def ct_isfinite(values):
+    """Check CPU FP32 logits without PyTorch's full-size floating-point temporaries."""
+    import numpy as np
+    import torch
+    if values.device.type == "cpu" and values.dtype == torch.float32:
+        # Share logits without copying or modifying them; allocate only a boolean result.
+        return torch.from_numpy(np.isfinite(values.detach().numpy()))
+    return torch.isfinite(values)
+
+
 def run_ct(root, job):
     device = job.get("device", "cuda:0")
     emit("model_loading", device=device)
@@ -503,7 +513,7 @@ def run_ct(root, job):
     details["environment_identity"] = observed("environment_identity", environment)
     details["torch"] = SimpleNamespace(**{**vars(torch),
         "softmax": observed("probability_conversion", torch.softmax),
-        "isfinite": observed("logits_validation", torch.isfinite)})
+        "isfinite": observed("logits_validation", ct_isfinite)})
     details["gc"] = SimpleNamespace(collect=observed("cleanup", runtime.gc.collect))
     details["np"] = SimpleNamespace(**{**vars(np), "array_equal": observed("label_validation", np.array_equal)})
     with_globals(runtime.run_case, **details)(case, cfg, model, model_hash, device, output, 4)

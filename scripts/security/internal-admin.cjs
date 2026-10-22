@@ -5,14 +5,11 @@ const M=require('../../desktop/security/model-package.cjs');
 const {read}=require('../../desktop/security/storage.cjs');
 const {validateBuild}=require('../../desktop/security/runtime.cjs');
 const {Authority}=require('./license-server.cjs');
+const {expiryTime}=require('./license-term.cjs');
 function write(file,value){fs.writeFileSync(file,JSON.stringify(value,null,2),{flag:'wx',mode:0o600});}
-function expiryTime(value) {
-  P.check(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value) && new Date(value).toISOString()===value.replace('Z','.000Z'),'Expiry must be an explicit UTC date/time');
-  return Date.parse(value)/1000;
-}
 function main([command,directory,...args]) {
   P.check(['approve','extend','activation','build-config','build-config-v3','solutions','solutions-dry-run','solution-status','solution-expiry'].includes(command),
-    'Usage: internal-admin.cjs approve DIR REQUEST LICENSE_ID EXPIRY_UTC ct,mri,ap,lat | extend DIR LICENSE_ID EXPIRY_UTC | activation DIR LICENSE_ID OUTPUT | build-config DIR HTTPS_URL OUTPUT [--loopback-test]');
+    'Usage: internal-admin.cjs approve DIR REQUEST LICENSE_ID 7d|14d|1m|3m|6m|1y|3y|perpetual|EXPIRY_UTC ct,mri,ap,lat | extend DIR LICENSE_ID TERM_OR_EXPIRY_UTC | solution-expiry DIR LICENSE_ID SOLUTION_ID TERM_OR_EXPIRY_UTC | activation DIR LICENSE_ID OUTPUT | build-config DIR HTTPS_URL OUTPUT [--loopback-test]');
   const authority=new Authority(directory);
   try {
     P.check(authority.profile==='internal','Internal authority required');
@@ -24,11 +21,11 @@ function main([command,directory,...args]) {
       else P.fields(request,['profile','installationId','installationKey','installationPublicKey']);
       P.check(request.profile==='internal');
       authority.approve({binding:{profile:'internal',licenseId,installationId:request.installationId,installationKey:request.installationKey},
-        installationPublicKey:request.installationPublicKey,engines:engines.split(','),contractEnd:expiryTime(expiry),
+        installationPublicKey:request.installationPublicKey,engines:engines.split(','),contractEnd:expiryTime(expiry,authority.clock()),
         graceSeconds:7*86400,renewSeconds:300});
-      console.log('Approved installation with an explicit expiry. Export its public activation file next.');
+      console.log('Approved installation. Export its public activation file next.');
     } else if(command==='extend') {
-      P.check(args.length===2);authority.extend(args[0],expiryTime(args[1]));
+      P.check(args.length===2);authority.extend(args[0],expiryTime(args[1],authority.clock()));
       console.log('Extended internal approval. Revoked or suspended status is unchanged.');
     } else if(command==='activation') {
       P.check(args.length===2);P.id(args[0]);

@@ -2,7 +2,7 @@
 
 작성일: 2026-10-15 · Windows x64 · Node 22.14.0 · Electron 44.4.5
 
-**내부용 Desktop은 EXMO 서버가 승인한 Windows 설치 키로 인증하며 YubiKey가 필요 없다.** Windows 관리자 권한으로 설치한다고 분석 권한이 생기지 않는다. 서버 관리자가 장비·엔진·만료일을 승인하고, 앱은 온라인 활성화 후 서명된 권한의 유효기간 안에서 동작한다.
+**내부용 Desktop은 EXMO 서버가 승인한 Windows 설치 키로 인증하며 YubiKey가 필요 없다.** Windows 관리자 권한으로 설치한다고 분석 권한이 생기지 않는다. 서버 관리자가 장비·엔진·기간제 또는 영구 사용권을 승인하고, 앱은 온라인 활성화 후 서명된 권한의 유효기간 안에서 동작한다.
 
 2026-10-16 갱신: 전체 CT/MRI/X-ray/분류 모델 암호화, 결과 파일 보호·복구, 고객 PC+동글 이중 키, 오프라인 payload와 서버 운영 CLI를 연결했다. 최신 절차와 검증 범위는 [제품 보안 runbook](EXMO_PRODUCT_SECURITY_RUNBOOK.md)을 따른다. 아래 MRI 1차 실행 기록은 당시 검증 이력이다. 내부 설치본을 고객 출시본으로 취급하지 않는다.
 
@@ -24,7 +24,7 @@
 
 1. 내부용 앱이 현재 Windows 사용자 아래에 P-256 설치 키를 생성한다. Microsoft Software Key Storage Provider의 내보내기 금지 정책을 사용한다. 개인키 PEM을 생성하거나 설치 파일에 넣지 않는다.
 2. 상단 **내부 개발용 · 승인 필요**에서 **등록 요청 저장**을 선택한다. 설치 ID·공개키·지문 JSON을 EXMO 운영자에게 전달한다. 환자 정보는 포함하지 않는다.
-3. 운영자가 발급 서버의 로컬 CLI로 장비 소유자, 허용 엔진, 명시적인 만료일을 승인하고 공개 승인 파일을 반환한다.
+3. 운영자가 발급 서버의 로컬 CLI로 장비 소유자, 허용 엔진, 만료일 또는 `perpetual` 영구 사용권을 승인하고 공개 승인 파일을 반환한다.
 4. 앱에서 **승인 파일 적용**을 선택한다. 현재 PC 키와 파일을 대조한 뒤 서버에 새 challenge 서명을 제출한다. 서버가 승인해야 활성화되며 파일 복사만으로 권한이 생기지 않는다.
 5. 앱 시작·절전 복귀와 주기적 갱신에서 재확인한다. **지금 갱신**으로 수동 재확인할 수도 있다.
 
@@ -56,7 +56,7 @@ npm run desktop:dist:internal -- work/security-internal/build-public.json
 
 ## EXMO 운영자 명령
 
-만료 시각은 UTC로 명시한다. 아래 ID·날짜·파일 경로는 예시다. 장비 소유자를 운영자가 확인한 뒤 승인한다.
+기간은 `7d`, `14d`, `1m`, `3m`, `6m`, `1y`, `3y` 또는 명시적인 UTC 시각으로 지정한다. 월·년은 발급 서버의 현재 UTC 시각부터 달력 기준으로 계산하고 없는 말일은 마지막 날로 맞춘다. 내부용 영구 사용권은 `perpetual`을 지정한다. 고객용 영구 발급은 거부한다. 영구 사용권도 장비 증명·주기적 온라인 갱신·유한한 오프라인 lease·관리자 회수 정책을 유지한다. 아래 ID·날짜·파일 경로는 예시다. 장비 소유자를 운영자가 확인한 뒤 승인한다.
 
 ```powershell
 node scripts/security/internal-admin.cjs approve work/security-internal/authority C:/Requests/EXMO-internal-enrollment.json dev-workstation-01 2026-11-15T00:00:00Z ct,mri,ap,lat
@@ -66,7 +66,10 @@ node scripts/security/license-server.cjs status work/security-internal/authority
 node scripts/security/license-server.cjs status work/security-internal/authority dev-workstation-01 revoked
 node scripts/security/license-server.cjs status work/security-internal/authority dev-workstation-01 active
 node scripts/security/internal-admin.cjs extend work/security-internal/authority dev-workstation-01 2026-12-15T00:00:00Z
+node scripts/security/internal-admin.cjs solution-expiry work/security-internal/authority dev-workstation-01 exmo.thigh.ct 1m
 ```
+
+모델마다 다른 기간을 주려면 v3 상품 할당 후 `solution-expiry`를 사용한다. 만료 즉시 신규 실행을 차단하고 이미 승인된 분석은 완료한 뒤 설치 모델을 자동 제거한다. 기존 영상·측정값·3D 결과와 공용 reader는 보존한다. 앱이 꺼져 있으면 다음 시작 시 삭제한다. 상세 범위는 [상품별 기간과 자동 제거](EXMO_SOLUTION_P2_IMPLEMENTATION.md)를 따른다. 기존 영구 승인은 이 기간 목록 추가만으로 변경되지 않는다.
 
 `active`는 정지/회수를 해제하지만 만료일을 늘리지 않는다. `extend`는 만료일과 revision을 갱신하지만 정지/회수를 해제하지 않는다. 등록 키를 다른 키로 덮어쓰는 기능은 없다. 장비 교체는 이전 권한을 회수하고 새 설치를 새 라이선스 ID로 승인한다.
 

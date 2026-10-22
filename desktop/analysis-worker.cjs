@@ -20,14 +20,22 @@ class AnalysisWorker {
       void this.stop();
     });
     child.stderr.pipe(log, { end: false });
-    const fail = (cause) => {
+    const fail = (cause, exitCode = null, signal = null) => {
       if (this.child !== child) return;
-      for (const task of this.pending.values()) task.reject(workerError({error:'Analysis process stopped', errorCode:cause?.code === 'ENOENT' ? 'ENGINE_MISSING' : cause instanceof Error ? 'ENGINE_START' : 'ENGINE_STOPPED'}));
+      const nativeCode = process.platform === 'win32' && Number.isInteger(exitCode)
+        ? '0x' + (exitCode >>> 0).toString(16).padStart(8, '0') : undefined;
+      const crashed = nativeCode === '0xc0000005' || ['SIGSEGV', 'SIGBUS'].includes(signal);
+      for (const [id, task] of this.pending) {
+        const error = workerError({error:'Analysis process stopped', errorCode:cause?.code === 'ENOENT' ? 'ENGINE_MISSING' : cause instanceof Error ? 'ENGINE_START' : crashed ? 'ENGINE_CRASH' : 'ENGINE_STOPPED'});
+        error.processExit = {pid:child.pid, exitCode, signal, nativeCode, lastStage:task.lastStage, lastOperation:task.lastOperation};
+        log.write(JSON.stringify({event:'process_exit', id, ...error.processExit}) + '\n');
+        task.reject(error);
+      }
       this.pending.clear();
     };
     child.stdin.on("error", () => { fail(); void this.stop(); });
     child.once("error", fail);
-    child.once("close", () => { fail(); if (this.child === child) this.child = null; log.end(); });
+    child.once("close", (code, signal) => { fail(undefined, code, signal); if (this.child === child) this.child = null; log.end(); });
     if (this.artifactStorage) child.stdin.write(JSON.stringify({operation:'storage_init',...this.artifactStorage})+'\n');
     readline.createInterface({ input: child.stdout }).on("line", line => {
       if(this.logResponses)log.write(line + "\n");
@@ -37,6 +45,9 @@ class AnalysisWorker {
       const task = this.pending.get(id);
       if (!task) return;
       if (event.exmo) {
+        if (event.stage === 'operation_start') task.lastOperation = event.operation;
+        else if (event.stage === 'operation_end') task.lastOperation = undefined;
+        else { task.lastStage = event.stage; task.lastOperation = undefined; }
         task.log?.write(line + "\n");
         // Resume may wait for the CPU slot. Handle rejection without an unhandled promise.
         Promise.resolve().then(() => task.onEvent?.(event)).catch(error => {

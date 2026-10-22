@@ -21,7 +21,7 @@ function createFixture(directory,profile='customer') {
     installationPublicKey:publicKeys.installation.export({format:'pem',type:'spki'}),
     ...(profile==='customer'?{donglePublicKey:publicKeys.dongle.export({format:'pem',type:'spki'})}:{})};
   const approval={binding,installationPublicKey:config.installationPublicKey,...(profile==='customer'?{donglePublicKey:config.donglePublicKey}:{}),
-    engines:[...P.ENGINES],contractEnd:profile==='internal'?Math.floor(Date.now()/1000)+30*86400:null,graceSeconds:7*86400,renewSeconds:300};
+    engines:[...P.ENGINES],contractEnd:Math.floor(Date.now()/1000)+30*86400,graceSeconds:7*86400,renewSeconds:300};
   fs.writeFileSync(path.join(directory,'client-public.json'),JSON.stringify(config,null,2),{flag:'wx'});
   fs.writeFileSync(path.join(directory,'approval-public.json'),JSON.stringify(approval,null,2),{flag:'wx'});
   fs.writeFileSync(path.join(directory,'SIMULATED-device-private.json'),JSON.stringify(privateKeys),{flag:'wx',mode:0o600});

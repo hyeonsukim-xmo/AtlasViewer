@@ -633,6 +633,9 @@ def make_mesh(mask, rows, target):
         # Front camera is +Z, superior is +Y, patient's left appears screen-right.
         # LPS -> (L,S,-P) is a proper rotation, preserving triangle winding.
         points = lps[:, [0, 2, 1]] * [1, 1, -1]
+        # Reflected image directions reverse the surface orientation in patient space.
+        if np.linalg.det(affine) < 0:
+            faces = faces[:, [0, 2, 1]]
         mesh = trimesh.Trimesh(points, faces, process=False)
         budget = row.get("faceBudget", 35000)
         if len(faces) > budget:

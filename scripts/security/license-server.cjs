@@ -52,8 +52,8 @@ class Authority {
       config.engines.every(x=>P.ENGINES.includes(x)) && new Set(config.engines).size === config.engines.length);
     P.integer(config.graceSeconds); P.integer(config.renewSeconds);
     P.check(config.graceSeconds > 0 && config.graceSeconds <= 7*86400 && config.renewSeconds > 0 && config.renewSeconds <= config.graceSeconds);
+    P.check(this.profile==='internal' || config.contractEnd!==null,'Perpetual approval is internal-only');
     if (config.contractEnd !== null) {P.integer(config.contractEnd); P.check(config.contractEnd > this.clock());}
-    P.check(this.profile!=='internal' || config.contractEnd!==null,'Internal approvals require an explicit expiry');
     this.transaction(()=>{
       this.db.prepare('INSERT INTO licenses VALUES (?,?,?,?,?,1,0)').run(config.binding.licenseId,
         config.binding.installationId,config.binding.dongleKey ?? config.binding.installationKey,JSON.stringify(config),'active');

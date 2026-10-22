@@ -20,7 +20,7 @@ export default function Account({openRequest=0}:{openRequest?:number}){
   async function refresh(){setState(unwrap(await api.accountRefresh()));setRows(unwrap(await api.accountEnrollments()));}
   const membership=state?.me?.memberships.find(m=>m.orgId===state.workspace?.orgId && m.workspaceId===state.workspace?.workspaceId);
   return <>
-    <button className="desktop-demo-link" onClick={()=>setOpen(true)}>{state?.me?.name??t('계정')}</button>
+    <button className="desktop-demo-link" title={state?.me?.name??t('계정')} onClick={()=>setOpen(true)}>{state?.me?.name??t('계정')}</button>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="installation-dialog account-dialog">
       <DialogTitle>{t('계정·장비 등록')}</DialogTitle>
       <DialogDescription>{t('계정은 기관 연결과 장비 등록에 사용합니다. 로컬 분석 권한은 장비 라이선스로 확인합니다.')}</DialogDescription>
